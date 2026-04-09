@@ -257,7 +257,7 @@ function usePrices(oandaKey){
   const [prices,setPrices]=useState(()=>{const p={};ALL_PAIRS.forEach(pair=>{const mid=BASE_PRICES[pair]||1.0;const isH=pair.includes("JPY");const sp=isH?0.00015:0.000012;p[pair]={bid:+(mid*(1-sp/2)).toFixed(5),ask:+(mid*(1+sp/2)).toFixed(5),mid,change:0,pct:0,dir:"flat",live:false,history:Array(60).fill(0).map((_,i)=>mid*(1+(Math.sin(i*0.3)+Math.random()-0.5)*0.0004))};});return p;});
   const [apiStatus,setApiStatus]=useState("connecting");
   const OINSTR={"AUD/CAD":"AUD_CAD","AUD/CHF":"AUD_CHF","AUD/JPY":"AUD_JPY","AUD/NZD":"AUD_NZD","AUD/USD":"AUD_USD","CAD/CHF":"CAD_CHF","CAD/JPY":"CAD_JPY","CHF/JPY":"CHF_JPY","EUR/AUD":"EUR_AUD","EUR/CAD":"EUR_CAD","EUR/CHF":"EUR_CHF","EUR/GBP":"EUR_GBP","EUR/JPY":"EUR_JPY","EUR/NZD":"EUR_NZD","EUR/USD":"EUR_USD","GBP/AUD":"GBP_AUD","GBP/CAD":"GBP_CAD","GBP/CHF":"GBP_CHF","GBP/JPY":"GBP_JPY","GBP/NZD":"GBP_NZD","GBP/USD":"GBP_USD","NZD/CAD":"NZD_CAD","NZD/CHF":"NZD_CHF","NZD/JPY":"NZD_JPY","NZD/USD":"NZD_USD","USD/CAD":"USD_CAD","USD/CHF":"USD_CHF","USD/JPY":"USD_JPY"};
-  useEffect(()=>{if(!oandaKey?.trim())return;let mounted=true;const key=oandaKey.trim();const instStr=Object.values(OINSTR).join("%2C");const fetch_=async()=>{try{const r=await fetch(`/.netlify/functions/prices?instruments=${instStr}`,{signal:AbortSignal.timeout(6000)});if(!r.ok)throw new Error("OANDA "+r.status);const d=await r.json();if(!mounted||!d.prices?.length)return;setPrices(prev=>{const next={...prev};d.prices.forEach(p=>{const pair=Object.keys(OINSTR).find(k=>OINSTR[k]===p.instrument);if(!pair)return;const bid=parseFloat(p.bids?.[0]?.price||0),ask=parseFloat(p.asks?.[0]?.price||0);if(!bid||!ask)return;const mid=(bid+ask)/2,old=prev[pair];next[pair]={bid,ask,mid,change:mid-BASE_PRICES[pair],pct:(mid-BASE_PRICES[pair])/BASE_PRICES[pair]*100,dir:mid>old.mid?"up":mid<old.mid?"down":"flat",live:true,history:[...old.history.slice(1),mid]};});return next;});setApiStatus("live_oanda");}catch{if(mounted)setApiStatus(s=>s==="live_oanda"?"live_oanda":"fallback");}};fetch_();const iv=setInterval(fetch_,3000);return()=>{mounted=false;clearInterval(iv);};},[oandaKey]);
+  useEffect(()=>{let mounted=true;const instStr=Object.values(OINSTR).join("%2C");const fetch_=async()=>{try{const r=await fetch(`/.netlify/functions/prices?instruments=${instStr}`,{signal:AbortSignal.timeout(6000)});if(!r.ok)throw new Error("OANDA "+r.status);const d=await r.json();if(!mounted||!d.prices?.length)return;setPrices(prev=>{const next={...prev};d.prices.forEach(p=>{const pair=Object.keys(OINSTR).find(k=>OINSTR[k]===p.instrument);if(!pair)return;const bid=parseFloat(p.bids?.[0]?.price||0),ask=parseFloat(p.asks?.[0]?.price||0);if(!bid||!ask)return;const mid=(bid+ask)/2,old=prev[pair];next[pair]={bid,ask,mid,change:mid-BASE_PRICES[pair],pct:(mid-BASE_PRICES[pair])/BASE_PRICES[pair]*100,dir:mid>old.mid?"up":mid<old.mid?"down":"flat",live:true,history:[...old.history.slice(1),mid]};});return next;});setApiStatus("live_oanda");}catch{if(mounted)setApiStatus(s=>s==="live_oanda"?"live_oanda":"fallback");}};fetch_();const iv=setInterval(fetch_,3000);return()=>{mounted=false;clearInterval(iv);};},[oandaKey]);
   useEffect(()=>{if(oandaKey?.trim())return;let mounted=true;const fetch_=async()=>{try{const r=await fetch("https://api.frankfurter.app/latest?from=EUR&to=USD,GBP,JPY,CHF,AUD,CAD,NZD",{signal:AbortSignal.timeout(4000)});if(!r.ok)throw new Error();const d=await r.json();if(!mounted)return;const{USD:eu,GBP:eg,JPY:ej,CHF:ec,AUD:ea,CAD:eca,NZD:en}=d.rates||{};if(!eu)return;const cm={"EUR/USD":eu,"EUR/GBP":eg,"EUR/JPY":ej,"EUR/CHF":ec,"EUR/AUD":ea,"EUR/CAD":eca,"EUR/NZD":en,"GBP/USD":eu/eg,"GBP/JPY":ej/eg,"GBP/CHF":ec/eg,"GBP/AUD":ea/eg,"GBP/CAD":eca/eg,"GBP/NZD":en/eg,"USD/JPY":ej/eu,"USD/CHF":ec/eu,"USD/CAD":eca/eu,"AUD/USD":eu/ea,"AUD/JPY":ej/ea,"AUD/CHF":ec/ea,"AUD/CAD":eca/ea,"AUD/NZD":en/ea,"NZD/USD":eu/en,"NZD/JPY":ej/en,"NZD/CHF":ec/en,"NZD/CAD":eca/en,"CAD/JPY":ej/eca,"CAD/CHF":ec/eca,"CHF/JPY":ej/ec};setPrices(prev=>{const next={...prev};ALL_PAIRS.forEach(pair=>{const rm=cm[pair];if(!rm)return;const isH=pair.includes("JPY"),dec=isH?3:5;const mid=parseFloat(rm.toFixed(dec)),old=prev[pair],sp=isH?0.00015:0.000012;next[pair]={bid:+(mid*(1-sp/2)).toFixed(dec),ask:+(mid*(1+sp/2)).toFixed(dec),mid,change:mid-BASE_PRICES[pair],pct:(mid-BASE_PRICES[pair])/BASE_PRICES[pair]*100,dir:mid>old.mid?"up":mid<old.mid?"down":"flat",live:true,history:[...old.history.slice(1),mid]};});return next;});setApiStatus("live_ecb");}catch{if(mounted)setApiStatus("simulated");}};fetch_();const iv=setInterval(fetch_,30000);return()=>{mounted=false;clearInterval(iv);};},[oandaKey]);
   useEffect(()=>{const iv=setInterval(()=>{setPrices(prev=>{const next={};ALL_PAIRS.forEach(pair=>{const old=prev[pair];const isH=pair.includes("JPY");const vol=isH?0.000015:0.0000012;const move=(Math.random()-0.499)*vol*2;const nm=Math.max(old.mid*0.999,Math.min(old.mid*1.001,old.mid*(1+move)));const sp=isH?0.00015:0.000012;next[pair]={...old,bid:+(nm*(1-sp/2)).toFixed(5),ask:+(nm*(1+sp/2)).toFixed(5),mid:nm,change:nm-BASE_PRICES[pair],pct:(nm-BASE_PRICES[pair])/BASE_PRICES[pair]*100,dir:nm>old.mid?"up":nm<old.mid?"down":"flat",history:[...old.history.slice(1),nm]};});return next;});},1000);return()=>clearInterval(iv);},[]);
   return{prices,apiStatus};
@@ -360,7 +360,7 @@ function AxiomFX(){
   const timeCtxs=["today April 2026","week of April 7-11 2026","week of March 31-April 6 2026","late March 2026","mid March 2026","early March 2026","February 2026","January 2026"];
   const loadNews=useCallback(async(reset)=>{
       if(newsLoading)return;
-      if(!settings.apiKey?.trim()){setNewsLoaded(true);return;}
+      // API key handled server-side — proceed to call proxy
       setNewsLoading(true);
       const nb=reset?0:newsBatch;
       const existing=reset?[]:liveArts;
@@ -402,13 +402,13 @@ function AxiomFX(){
       }
       setNewsLoading(false);setNewsLoaded(true);
   // eslint-disable-next-line
-  },[settings.apiKey,nCcy,nImp]);
+  },[nCcy,nImp]);
   // Fire loadNews from root — not inside useMemo component
   useEffect(()=>{
-    if(tab==="news"&&settings.apiKey&&!newsLoaded)loadNews(true);
-  },[tab,settings.apiKey]);
+    if(tab==="news"&&!newsLoaded)loadNews(true);
+  },[tab]);
   useEffect(()=>{
-    if(tab==="news"&&newsLoaded&&settings.apiKey)loadNews(true);
+    if(tab==="news"&&newsLoaded)loadNews(true);
   },[nCcy,nImp]);
 
   // ForexFactory XML Calendar Feed — live on Netlify, blocked in sandbox
@@ -525,7 +525,7 @@ function AxiomFX(){
 
   async function sendAI(msg){
     if(!msg.trim()||aiLoading)return;
-    if(!settings.apiKey?.trim()){setAiMsgs(p=>[...p,{role:"user",content:msg},{role:"assistant",content:"⚠️ No API key. Go to ⚙ Settings → AXIOM AI CONFIG → paste your key (sk-ant-api03-...) from console.anthropic.com, then Save Settings."}]);return;}
+    // API key handled server-side by Netlify function — no client key needed
     const msgs=[...aiMsgs,{role:"user",content:msg}];
     setAiMsgs(msgs);setAiLoading(true);
     const openPnl=trades.reduce((a,t)=>a+t.pnl,0);
@@ -1412,7 +1412,7 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
     const hasLoaded=newsLoaded,setHasLoaded=setNewsLoaded;
 
     // loadNews called from root useEffect below
-    const src=liveArts; // liveArts always populated (API or static fallback)
+    const src=liveArts;
     const displayed=src.filter(n=>{
       if(nCcy!=="ALL"&&n.ccy!==nCcy)return false;
       if(nImp!=="ALL"&&n.imp!==nImp)return false;
@@ -1973,7 +1973,7 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
             <div>
               <div style={{fontWeight:"700",color:C.gold,fontSize:"13px",letterSpacing:"3px"}}>AXIOM AI</div>
               <div style={{fontSize:"8px",color:settings.apiKey?C.green:C.amber,letterSpacing:"1px"}}>{settings.apiKey?"✓ ACTIVE — CLAUDE SONNET":"⚠ API KEY REQUIRED — GO TO SETTINGS"}</div>
-              <div style={{fontSize:"7.5px",color:C.amber,marginTop:"3px",lineHeight:"1.5"}}>⚠ AI chat requires Netlify/PWA deploy — Claude sandbox blocks API calls. See 🚀 Deploy tab.</div>
+
             </div>
             <div style={{marginLeft:"auto",display:"flex",gap:"4px",flexWrap:"wrap",justifyContent:"flex-end",maxWidth:"50%"}}>
               {quickQ.slice(0,4).map(q=><Sm key={q} label={q} color="#7a4fc0" onClick={()=>sendAI(q)}/>)}
@@ -2277,7 +2277,7 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
                   onChange={e=>setLocal(p=>({...p,oandaKey:e.target.value}))}
                   placeholder="Your OANDA live API key..."
                   style={{width:"100%",background:"#030608",border:`1px solid ${local.oandaKey?C.green:C.bdr}`,borderRadius:"3px",color:local.oandaKey?C.green:C.text,padding:"10px 11px",fontSize:"10px",fontFamily:"monospace",outline:"none",marginBottom:"5px",WebkitAppearance:"none"}}/>
-                <div style={{fontSize:"8px",color:local.oandaKey?C.green:C.muted,lineHeight:"1.5"}}>{local.oandaKey?"✓ OANDA key set — live prices activate when deployed to Netlify":"OANDA demo key pre-wired in app. Live prices (OANDA LIVE) activate on Netlify deploy. Shows SIM in Claude sandbox (API blocked by browser security)."}</div>
+                <div style={{fontSize:"8px",color:local.oandaKey?C.green:C.muted,lineHeight:"1.5"}}>{"✓ OANDA live prices active via server proxy"}</div>
               </div>
             </div>
 
