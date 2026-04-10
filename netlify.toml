@@ -20,3 +20,13 @@
   for = "/*"
   [headers.values]
     Access-Control-Allow-Origin = "*"
+
+[[redirects]]
+  from = "/api/analyze"
+  to = "/.netlify/functions/analyze"
+  status = 200
+
+[[redirects]]
+  from = "/api/candles"
+  to = "/.netlify/functions/candles"
+  status = 200
