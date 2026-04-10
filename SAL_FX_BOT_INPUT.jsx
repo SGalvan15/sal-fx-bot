@@ -404,6 +404,9 @@ function AxiomFX(){
   const [settingsSaved,setSettingsSaved]=useState(()=>load("axiom_settings",{saved:false}).saved||false);
   const sigTimerRef=useRef(null);
   const aiRef=useRef(null);
+  const [sigScanning,setSigScanning]=useState(false);
+  const [scanStatus,setScanStatus]=useState("Waiting for first scan...");
+  const [lastScanTime,setLastScanTime]=useState(0);
   const {prices,apiStatus}=usePrices(settings.oandaKey||localSettings.oandaKey);
   const toast_=useCallback((msg,color=C.green)=>{setToast({msg,color});setTimeout(()=>setToast(null),4500);},[]);
 
