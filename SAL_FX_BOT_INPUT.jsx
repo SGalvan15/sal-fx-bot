@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
+// React hooks available globally via CDN
+const { useState, useEffect, useRef, useCallback, useMemo, memo } = React;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // AXIOM FX TERMINAL v5.0
