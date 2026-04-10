@@ -2491,3 +2491,4 @@ root.render(React.createElement(AxiomFX));
     </div>
   );
 }
+window.AxiomFX = AxiomFX;
