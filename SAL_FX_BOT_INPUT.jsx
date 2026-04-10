@@ -1,5 +1,4 @@
-// Destructure from global React (Netlify/CDN deployment)
-const { useState, useEffect, useRef, useCallback, useMemo, memo } = React;
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // AXIOM FX TERMINAL v5.0
@@ -58,89 +57,107 @@ const CB = {
 };
 
 // ── FULL APRIL 2026 CALENDAR (ForexFactory-style) ────────────────────────
-// ── CB MEETING DATES — Official sources, G10 CBs, 2026 ─────────────────
-// Fed: federalreserve.gov | ECB: ecb.europa.eu | BOJ: boj.or.jp
-// BOE: bankofengland.co.uk | RBA: rba.gov.au | BOC: bankofcanada.ca
-// RBNZ: rbnz.govt.nz | SNB: snb.ch
-const CB_MEETINGS=[
-  // Federal Reserve (FOMC) — federalreserve.gov/monetarypolicy/fomccalendars.htm
-  {dt:"2026-01-28 14:00",ccy:"USD",ev:"FOMC Rate Decision",imp:"HIGH",type:"CB Decision",fc:"3.875%",pr:"3.875%",actual:"3.875%",note:"Hold — 2nd consecutive"},
-  {dt:"2026-01-29 14:30",ccy:"USD",ev:"FOMC Press Conference",imp:"HIGH",type:"CB Speech",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-03-18 14:00",ccy:"USD",ev:"FOMC Rate Decision",imp:"HIGH",type:"CB Decision",fc:"3.875%",pr:"3.875%",actual:"3.875%",note:"Hold confirmed"},
-  {dt:"2026-03-19 14:30",ccy:"USD",ev:"FOMC Press Conference",imp:"HIGH",type:"CB Speech",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-04-07 18:00",ccy:"USD",ev:"FOMC Meeting Minutes (Mar)",imp:"HIGH",type:"CB Speech",fc:"–",pr:"–",actual:"Released"},
-  {dt:"2026-04-30 14:00",ccy:"USD",ev:"FOMC Rate Decision",imp:"HIGH",type:"CB Decision",fc:"3.75%",pr:"3.875%",actual:"–",note:"Next decision"},
-  {dt:"2026-04-30 14:30",ccy:"USD",ev:"FOMC Press Conference",imp:"HIGH",type:"CB Speech",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-06-10 14:00",ccy:"USD",ev:"FOMC Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-07-28 14:00",ccy:"USD",ev:"FOMC Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-09-15 14:00",ccy:"USD",ev:"FOMC Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-11-03 14:00",ccy:"USD",ev:"FOMC Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-12-15 14:00",ccy:"USD",ev:"FOMC Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  // European Central Bank — ecb.europa.eu/press/govcdec/mopo/
-  {dt:"2026-01-30 09:15",ccy:"EUR",ev:"ECB Rate Decision",imp:"HIGH",type:"CB Decision",fc:"2.00%",pr:"2.25%",actual:"2.00%"},
-  {dt:"2026-01-30 09:45",ccy:"EUR",ev:"ECB Press Conference",imp:"HIGH",type:"CB Speech",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-03-06 09:15",ccy:"EUR",ev:"ECB Rate Decision",imp:"HIGH",type:"CB Decision",fc:"2.00%",pr:"2.00%",actual:"2.00%"},
-  {dt:"2026-03-06 09:45",ccy:"EUR",ev:"ECB Press Conference",imp:"HIGH",type:"CB Speech",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-04-30 09:15",ccy:"EUR",ev:"ECB Rate Decision",imp:"HIGH",type:"CB Decision",fc:"2.00%",pr:"2.00%",actual:"–"},
-  {dt:"2026-04-30 09:45",ccy:"EUR",ev:"ECB Press Conference",imp:"HIGH",type:"CB Speech",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-06-04 09:15",ccy:"EUR",ev:"ECB Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-07-23 09:15",ccy:"EUR",ev:"ECB Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-09-10 09:15",ccy:"EUR",ev:"ECB Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-10-29 09:15",ccy:"EUR",ev:"ECB Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-12-17 09:15",ccy:"EUR",ev:"ECB Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  // Bank of Japan — boj.or.jp/en/mopo/mpmdeci/
-  {dt:"2026-01-23 00:00",ccy:"JPY",ev:"BOJ Rate Decision",imp:"HIGH",type:"CB Decision",fc:"0.50%",pr:"0.25%",actual:"0.50%"},
-  {dt:"2026-03-18 00:00",ccy:"JPY",ev:"BOJ Rate Decision",imp:"HIGH",type:"CB Decision",fc:"0.75%",pr:"0.50%",actual:"0.75%"},
-  {dt:"2026-03-18 06:00",ccy:"JPY",ev:"BOJ Outlook Report",imp:"HIGH",type:"CB Speech",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-04-30 00:00",ccy:"JPY",ev:"BOJ Rate Decision",imp:"HIGH",type:"CB Decision",fc:"0.75%",pr:"0.75%",actual:"–"},
-  {dt:"2026-04-30 06:00",ccy:"JPY",ev:"BOJ Outlook Report",imp:"HIGH",type:"CB Speech",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-06-16 00:00",ccy:"JPY",ev:"BOJ Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-07-30 00:00",ccy:"JPY",ev:"BOJ Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-09-18 00:00",ccy:"JPY",ev:"BOJ Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-10-29 00:00",ccy:"JPY",ev:"BOJ Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-12-18 00:00",ccy:"JPY",ev:"BOJ Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  // Bank of England — bankofengland.co.uk/monetary-policy/monetary-policy-committee
-  {dt:"2026-02-05 07:00",ccy:"GBP",ev:"BOE Rate Decision",imp:"HIGH",type:"CB Decision",fc:"4.50%",pr:"4.75%",actual:"4.50%"},
-  {dt:"2026-03-19 07:00",ccy:"GBP",ev:"BOE Rate Decision",imp:"HIGH",type:"CB Decision",fc:"4.25%",pr:"4.50%",actual:"4.25%"},
-  {dt:"2026-05-07 07:00",ccy:"GBP",ev:"BOE Rate Decision",imp:"HIGH",type:"CB Decision",fc:"3.75%",pr:"4.00%",actual:"–"},
-  {dt:"2026-06-18 07:00",ccy:"GBP",ev:"BOE Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-08-06 07:00",ccy:"GBP",ev:"BOE Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-09-17 07:00",ccy:"GBP",ev:"BOE Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-11-05 07:00",ccy:"GBP",ev:"BOE Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-12-17 07:00",ccy:"GBP",ev:"BOE Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  // Reserve Bank of Australia — rba.gov.au/monetary-policy/
-  {dt:"2026-02-17 23:30",ccy:"AUD",ev:"RBA Rate Decision",imp:"HIGH",type:"CB Decision",fc:"4.10%",pr:"4.35%",actual:"4.10%"},
-  {dt:"2026-04-01 23:30",ccy:"AUD",ev:"RBA Rate Decision",imp:"HIGH",type:"CB Decision",fc:"3.85%",pr:"4.10%",actual:"3.85%"},
-  {dt:"2026-05-19 23:30",ccy:"AUD",ev:"RBA Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"3.85%",actual:"–"},
-  {dt:"2026-07-07 23:30",ccy:"AUD",ev:"RBA Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-08-04 23:30",ccy:"AUD",ev:"RBA Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-09-01 23:30",ccy:"AUD",ev:"RBA Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-11-03 23:30",ccy:"AUD",ev:"RBA Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-12-01 23:30",ccy:"AUD",ev:"RBA Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  // Bank of Canada — bankofcanada.ca/core-functions/monetary-policy/
-  {dt:"2026-01-28 10:00",ccy:"CAD",ev:"BOC Rate Decision",imp:"HIGH",type:"CB Decision",fc:"3.00%",pr:"3.25%",actual:"3.00%"},
-  {dt:"2026-03-04 10:00",ccy:"CAD",ev:"BOC Rate Decision",imp:"HIGH",type:"CB Decision",fc:"2.75%",pr:"3.00%",actual:"2.75%"},
-  {dt:"2026-04-15 10:00",ccy:"CAD",ev:"BOC Rate Decision",imp:"HIGH",type:"CB Decision",fc:"2.25%",pr:"2.50%",actual:"–"},
-  {dt:"2026-04-15 11:15",ccy:"CAD",ev:"BOC Press Conference",imp:"HIGH",type:"CB Speech",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-06-03 10:00",ccy:"CAD",ev:"BOC Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-07-15 10:00",ccy:"CAD",ev:"BOC Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-09-09 10:00",ccy:"CAD",ev:"BOC Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-10-28 10:00",ccy:"CAD",ev:"BOC Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-12-09 10:00",ccy:"CAD",ev:"BOC Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  // RBNZ — rbnz.govt.nz/monetary-policy/
-  {dt:"2026-02-18 21:00",ccy:"NZD",ev:"RBNZ Rate Decision",imp:"HIGH",type:"CB Decision",fc:"3.75%",pr:"4.25%",actual:"3.75%"},
-  {dt:"2026-04-09 21:00",ccy:"NZD",ev:"RBNZ Rate Decision",imp:"HIGH",type:"CB Decision",fc:"3.00%",pr:"3.25%",actual:"–"},
-  {dt:"2026-04-09 22:00",ccy:"NZD",ev:"RBNZ Press Conference",imp:"HIGH",type:"CB Speech",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-05-27 21:00",ccy:"NZD",ev:"RBNZ Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-07-08 21:00",ccy:"NZD",ev:"RBNZ Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-08-26 21:00",ccy:"NZD",ev:"RBNZ Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-10-14 21:00",ccy:"NZD",ev:"RBNZ Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-11-25 21:00",ccy:"NZD",ev:"RBNZ Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  // SNB — snb.ch (Quarterly)
-  {dt:"2026-03-19 03:30",ccy:"CHF",ev:"SNB Rate Decision",imp:"HIGH",type:"CB Decision",fc:"0.00%",pr:"0.25%",actual:"0.00%"},
-  {dt:"2026-06-18 03:30",ccy:"CHF",ev:"SNB Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"0.00%",actual:"–"},
-  {dt:"2026-09-17 03:30",ccy:"CHF",ev:"SNB Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
-  {dt:"2026-12-10 03:30",ccy:"CHF",ev:"SNB Rate Decision",imp:"HIGH",type:"CB Decision",fc:"–",pr:"–",actual:"–"},
+const FULL_CALENDAR = [
+  // April 7
+  {dt:"2026-04-07 01:00",ccy:"JPY",ev:"Leading Indicators",         imp:"LOW",  fc:"–",      pr:"112.3%", actual:"112.4%", type:"Indicator"},
+  {dt:"2026-04-07 03:00",ccy:"CHF",ev:"Foreign Currency Reserves",  imp:"LOW",  fc:"–",      pr:"725B",   actual:"721B",   type:"Monetary"},
+  {dt:"2026-04-07 03:15",ccy:"EUR",ev:"Spanish Services PMI",       imp:"MED",  fc:"55.0",   pr:"54.7",   actual:"53.3",   type:"PMI"},
+  {dt:"2026-04-07 03:45",ccy:"EUR",ev:"Italian Services PMI",       imp:"MED",  fc:"52.0",   pr:"50.7",   actual:"48.8",   type:"PMI"},
+  {dt:"2026-04-07 03:50",ccy:"EUR",ev:"French Final Services PMI",  imp:"MED",  fc:"46.6",   pr:"46.6",   actual:"48.8",   type:"PMI"},
+  {dt:"2026-04-07 03:55",ccy:"EUR",ev:"German Final Services PMI",  imp:"MED",  fc:"50.2",   pr:"50.2",   actual:"50.9",   type:"PMI"},
+  {dt:"2026-04-07 04:00",ccy:"EUR",ev:"Final Services PMI",         imp:"MED",  fc:"50.4",   pr:"50.4",   actual:"50.2",   type:"PMI"},
+  {dt:"2026-04-07 04:30",ccy:"EUR",ev:"Sentix Investor Confidence", imp:"MED",  fc:"-18.0",  pr:"-8.4",   actual:"-19.2",  type:"Sentiment"},
+  {dt:"2026-04-07 04:30",ccy:"GBP",ev:"Final Services PMI",         imp:"MED",  fc:"52.0",   pr:"52.0",   actual:"50.5",   type:"PMI"},
+  {dt:"2026-04-07 08:15",ccy:"USD",ev:"ADP Employment Change",      imp:"MED",  fc:"120K",   pr:"77K",    actual:"26K",    type:"Employment"},
+  {dt:"2026-04-07 08:30",ccy:"USD",ev:"Core Durable Goods m/m",     imp:"MED",  fc:"0.2%",   pr:"0.7%",   actual:"0.8%",   type:"Manufacturing"},
+  {dt:"2026-04-07 10:00",ccy:"CAD",ev:"Ivey PMI",                   imp:"MED",  fc:"52.0",   pr:"55.3",   actual:"49.7",   type:"PMI"},
+  {dt:"2026-04-07 10:01",ccy:"USD",ev:"JOLTS Job Openings",         imp:"HIGH", fc:"7.5M",   pr:"7.7M",   actual:"–",      type:"Employment"},
+  {dt:"2026-04-07 18:00",ccy:"USD",ev:"FOMC Meeting Minutes",       imp:"HIGH", fc:"–",      pr:"Hold",   actual:"–",      type:"CB Speech"},
+  // April 8
+  {dt:"2026-04-08 08:30",ccy:"CAD",ev:"Trade Balance",              imp:"MED",  fc:"-1.5B",  pr:"-0.9B",  actual:"–",      type:"Trade"},
+  {dt:"2026-04-08 08:30",ccy:"USD",ev:"Trade Balance",              imp:"MED",  fc:"-116B",  pr:"-122B",  actual:"–",      type:"Trade"},
+  {dt:"2026-04-08 10:00",ccy:"USD",ev:"Wholesale Inventories m/m",  imp:"LOW",  fc:"0.3%",   pr:"0.4%",   actual:"–",      type:"Inventory"},
+  // April 9
+  {dt:"2026-04-09 02:00",ccy:"NZD",ev:"RBNZ Rate Decision",         imp:"HIGH", fc:"3.00%",  pr:"3.25%",  actual:"–",      type:"CB Decision"},
+  {dt:"2026-04-09 02:05",ccy:"NZD",ev:"RBNZ Press Conference",      imp:"HIGH", fc:"–",      pr:"–",      actual:"–",      type:"CB Speech"},
+  {dt:"2026-04-09 08:30",ccy:"USD",ev:"Initial Jobless Claims",     imp:"MED",  fc:"220K",   pr:"219K",   actual:"–",      type:"Employment"},
+  {dt:"2026-04-09 08:30",ccy:"USD",ev:"Continuing Claims",          imp:"LOW",  fc:"1870K",  pr:"1903K",  actual:"–",      type:"Employment"},
+  // April 10
+  {dt:"2026-04-10 02:00",ccy:"JPY",ev:"PPI y/y",                    imp:"MED",  fc:"3.7%",   pr:"4.0%",   actual:"–",      type:"Inflation"},
+  {dt:"2026-04-10 08:30",ccy:"USD",ev:"CPI m/m",                    imp:"HIGH", fc:"0.3%",   pr:"0.2%",   actual:"–",      type:"Inflation"},
+  {dt:"2026-04-10 08:30",ccy:"USD",ev:"Core CPI m/m",               imp:"HIGH", fc:"0.3%",   pr:"0.3%",   actual:"–",      type:"Inflation"},
+  {dt:"2026-04-10 08:30",ccy:"USD",ev:"CPI y/y",                    imp:"HIGH", fc:"2.5%",   pr:"2.8%",   actual:"–",      type:"Inflation"},
+  {dt:"2026-04-10 10:00",ccy:"USD",ev:"Prelim UoM Sentiment",       imp:"MED",  fc:"54.0",   pr:"53.9",   actual:"–",      type:"Sentiment"},
+  // April 11
+  {dt:"2026-04-11 02:00",ccy:"JPY",ev:"Current Account",            imp:"MED",  fc:"2.1T",   pr:"2.4T",   actual:"–",      type:"Trade"},
+  {dt:"2026-04-11 06:00",ccy:"GBP",ev:"GDP m/m",                    imp:"MED",  fc:"0.1%",   pr:"0.0%",   actual:"–",      type:"GDP"},
+  {dt:"2026-04-11 06:00",ccy:"GBP",ev:"Manufacturing Production",   imp:"MED",  fc:"0.2%",   pr:"-0.9%",  actual:"–",      type:"Manufacturing"},
+  // April 14
+  {dt:"2026-04-14 06:00",ccy:"EUR",ev:"German CPI m/m Final",       imp:"MED",  fc:"0.3%",   pr:"0.4%",   actual:"–",      type:"Inflation"},
+  {dt:"2026-04-14 08:30",ccy:"CAD",ev:"Core CPI m/m",               imp:"MED",  fc:"0.3%",   pr:"0.4%",   actual:"–",      type:"Inflation"},
+  // April 15
+  {dt:"2026-04-15 02:00",ccy:"CAD",ev:"BOC Rate Decision",          imp:"HIGH", fc:"2.25%",  pr:"2.25%",  actual:"–",      type:"CB Decision"},
+  {dt:"2026-04-15 02:15",ccy:"CAD",ev:"BOC Press Conference",       imp:"HIGH", fc:"–",      pr:"–",      actual:"–",      type:"CB Speech"},
+  {dt:"2026-04-15 08:30",ccy:"USD",ev:"Retail Sales m/m",           imp:"MED",  fc:"0.4%",   pr:"-0.9%",  actual:"–",      type:"Retail"},
+  {dt:"2026-04-15 08:30",ccy:"USD",ev:"Core Retail Sales m/m",      imp:"MED",  fc:"0.3%",   pr:"-0.3%",  actual:"–",      type:"Retail"},
+  {dt:"2026-04-15 08:30",ccy:"USD",ev:"Empire State Manufacturing", imp:"MED",  fc:"-11.5",  pr:"-20.0",  actual:"–",      type:"Manufacturing"},
+  {dt:"2026-04-15 09:15",ccy:"USD",ev:"Industrial Production m/m",  imp:"MED",  fc:"0.3%",   pr:"-0.1%",  actual:"–",      type:"Manufacturing"},
+  // April 16
+  {dt:"2026-04-16 02:00",ccy:"AUD",ev:"Westpac Consumer Sentiment", imp:"LOW",  fc:"–",      pr:"95.9",   actual:"–",      type:"Sentiment"},
+  {dt:"2026-04-16 02:30",ccy:"AUD",ev:"Employment Change",          imp:"HIGH", fc:"20.0K",  pr:"52.8K",  actual:"–",      type:"Employment"},
+  {dt:"2026-04-16 02:30",ccy:"AUD",ev:"Unemployment Rate",          imp:"HIGH", fc:"4.2%",   pr:"4.1%",   actual:"–",      type:"Employment"},
+  {dt:"2026-04-16 08:30",ccy:"USD",ev:"Philadelphia Fed Index",     imp:"MED",  fc:"-5.0",   pr:"-26.4",  actual:"–",      type:"Manufacturing"},
+  {dt:"2026-04-16 08:30",ccy:"USD",ev:"Initial Jobless Claims",     imp:"MED",  fc:"215K",   pr:"220K",   actual:"–",      type:"Employment"},
+  {dt:"2026-04-16 10:00",ccy:"USD",ev:"Existing Home Sales",        imp:"LOW",  fc:"4.1M",   pr:"4.3M",   actual:"–",      type:"Housing"},
+  // April 17
+  {dt:"2026-04-17 03:00",ccy:"EUR",ev:"German Flash PMI Manufacturing",imp:"MED",fc:"47.0",  pr:"47.7",   actual:"–",      type:"PMI"},
+  {dt:"2026-04-17 03:00",ccy:"EUR",ev:"German Flash PMI Services",  imp:"MED",  fc:"51.4",   pr:"51.8",   actual:"–",      type:"PMI"},
+  {dt:"2026-04-17 03:30",ccy:"EUR",ev:"Flash PMI Manufacturing",    imp:"MED",  fc:"47.8",   pr:"48.6",   actual:"–",      type:"PMI"},
+  {dt:"2026-04-17 03:30",ccy:"EUR",ev:"Flash PMI Services",         imp:"MED",  fc:"51.0",   pr:"50.9",   actual:"–",      type:"PMI"},
+  {dt:"2026-04-17 04:00",ccy:"GBP",ev:"Flash PMI Manufacturing",    imp:"MED",  fc:"44.5",   pr:"44.9",   actual:"–",      type:"PMI"},
+  {dt:"2026-04-17 04:00",ccy:"GBP",ev:"Flash PMI Services",         imp:"MED",  fc:"52.0",   pr:"53.0",   actual:"–",      type:"PMI"},
+  // April 22
+  {dt:"2026-04-22 04:00",ccy:"EUR",ev:"German Ifo Business Climate",imp:"MED",  fc:"87.0",   pr:"86.7",   actual:"–",      type:"Sentiment"},
+  {dt:"2026-04-22 08:30",ccy:"CAD",ev:"Core Retail Sales m/m",      imp:"MED",  fc:"0.3%",   pr:"1.3%",   actual:"–",      type:"Retail"},
+  {dt:"2026-04-22 10:00",ccy:"USD",ev:"CB Consumer Confidence",     imp:"MED",  fc:"92.0",   pr:"98.3",   actual:"–",      type:"Sentiment"},
+  {dt:"2026-04-22 10:00",ccy:"USD",ev:"New Home Sales",             imp:"LOW",  fc:"680K",   pr:"676K",   actual:"–",      type:"Housing"},
+  // April 23
+  {dt:"2026-04-23 08:30",ccy:"USD",ev:"Initial Jobless Claims",     imp:"MED",  fc:"215K",   pr:"–",      actual:"–",      type:"Employment"},
+  {dt:"2026-04-23 08:30",ccy:"USD",ev:"Durable Goods Orders m/m",   imp:"MED",  fc:"0.5%",   pr:"-1.4%",  actual:"–",      type:"Manufacturing"},
+  // April 24
+  {dt:"2026-04-24 08:30",ccy:"USD",ev:"Core PCE Price Index m/m",   imp:"HIGH", fc:"0.3%",   pr:"0.4%",   actual:"–",      type:"Inflation"},
+  {dt:"2026-04-24 08:30",ccy:"USD",ev:"Goods Trade Balance Prelim", imp:"LOW",  fc:"-148B",  pr:"-148B",  actual:"–",      type:"Trade"},
+  {dt:"2026-04-24 10:00",ccy:"USD",ev:"Revised UoM Sentiment",      imp:"MED",  fc:"50.0",   pr:"–",      actual:"–",      type:"Sentiment"},
+  // April 25
+  {dt:"2026-04-25 02:00",ccy:"JPY",ev:"Tokyo CPI y/y",              imp:"HIGH", fc:"2.2%",   pr:"2.4%",   actual:"–",      type:"Inflation"},
+  {dt:"2026-04-25 08:30",ccy:"CAD",ev:"GDP m/m",                    imp:"MED",  fc:"0.2%",   pr:"0.4%",   actual:"–",      type:"GDP"},
+  {dt:"2026-04-25 08:30",ccy:"USD",ev:"Advance GDP q/q",            imp:"HIGH", fc:"1.5%",   pr:"2.4%",   actual:"–",      type:"GDP"},
+  {dt:"2026-04-25 08:30",ccy:"USD",ev:"Advance GDP Price Index",    imp:"HIGH", fc:"3.4%",   pr:"2.3%",   actual:"–",      type:"GDP"},
+  // April 28
+  {dt:"2026-04-28 02:30",ccy:"AUD",ev:"CPI y/y",                    imp:"HIGH", fc:"2.4%",   pr:"2.5%",   actual:"–",      type:"Inflation"},
+  {dt:"2026-04-28 08:30",ccy:"USD",ev:"Personal Income m/m",        imp:"MED",  fc:"0.4%",   pr:"0.8%",   actual:"–",      type:"Income"},
+  {dt:"2026-04-28 08:30",ccy:"USD",ev:"Personal Spending m/m",      imp:"MED",  fc:"0.4%",   pr:"0.4%",   actual:"–",      type:"Income"},
+  {dt:"2026-04-28 08:30",ccy:"USD",ev:"Pending Home Sales m/m",     imp:"LOW",  fc:"1.0%",   pr:"-4.6%",  actual:"–",      type:"Housing"},
+  // April 29
+  {dt:"2026-04-29 04:00",ccy:"EUR",ev:"German Prelim CPI m/m",      imp:"MED",  fc:"0.4%",   pr:"0.4%",   actual:"–",      type:"Inflation"},
+  {dt:"2026-04-29 04:00",ccy:"EUR",ev:"German GfK Consumer Climate",imp:"LOW",  fc:"-24.0",  pr:"-24.3",  actual:"–",      type:"Sentiment"},
+  {dt:"2026-04-29 09:00",ccy:"EUR",ev:"CPI Flash Estimate y/y",     imp:"HIGH", fc:"2.2%",   pr:"2.3%",   actual:"–",      type:"Inflation"},
+  // April 30
+  {dt:"2026-04-30 02:00",ccy:"JPY",ev:"BOJ Rate Decision",          imp:"HIGH", fc:"0.75%",  pr:"0.75%",  actual:"–",      type:"CB Decision"},
+  {dt:"2026-04-30 02:30",ccy:"JPY",ev:"BOJ Outlook Report",         imp:"HIGH", fc:"–",      pr:"–",      actual:"–",      type:"CB Speech"},
+  {dt:"2026-04-30 05:00",ccy:"EUR",ev:"GDP Flash Estimate q/q",     imp:"HIGH", fc:"0.3%",   pr:"0.2%",   actual:"–",      type:"GDP"},
+  {dt:"2026-04-30 09:00",ccy:"EUR",ev:"ECB Rate Decision",          imp:"HIGH", fc:"2.00%",  pr:"2.00%",  actual:"–",      type:"CB Decision"},
+  {dt:"2026-04-30 09:45",ccy:"EUR",ev:"ECB Press Conference",       imp:"HIGH", fc:"–",      pr:"–",      actual:"–",      type:"CB Speech"},
+  {dt:"2026-04-30 14:00",ccy:"USD",ev:"FOMC Rate Decision",         imp:"HIGH", fc:"3.75%",  pr:"3.75%",  actual:"–",      type:"CB Decision"},
+  {dt:"2026-04-30 14:30",ccy:"USD",ev:"FOMC Press Conference",      imp:"HIGH", fc:"–",      pr:"–",      actual:"–",      type:"CB Speech"},
+  {dt:"2026-04-30 15:00",ccy:"SEK",ev:"Riksbank Rate Decision",     imp:"HIGH", fc:"1.75%",  pr:"1.75%",  actual:"–",      type:"CB Decision"},
+  // May events
+  {dt:"2026-05-01 08:30",ccy:"USD",ev:"Non-Farm Payrolls",          imp:"HIGH", fc:"145K",   pr:"128K",   actual:"–",      type:"Employment"},
+  {dt:"2026-05-01 08:30",ccy:"USD",ev:"Unemployment Rate",          imp:"HIGH", fc:"4.4%",   pr:"4.4%",   actual:"–",      type:"Employment"},
+  {dt:"2026-05-01 08:30",ccy:"CAD",ev:"Employment Change",          imp:"HIGH", fc:"15.0K",  pr:"22.0K",  actual:"–",      type:"Employment"},
+  {dt:"2026-05-07 07:00",ccy:"GBP",ev:"BOE Rate Decision",          imp:"HIGH", fc:"3.75%",  pr:"3.75%",  actual:"–",      type:"CB Decision"},
+  {dt:"2026-05-13 08:30",ccy:"USD",ev:"CPI m/m",                    imp:"HIGH", fc:"0.3%",   pr:"0.3%",   actual:"–",      type:"Inflation"},
+  {dt:"2026-05-19 03:30",ccy:"AUD",ev:"RBA Rate Decision",          imp:"HIGH", fc:"3.85%",  pr:"3.85%",  actual:"–",      type:"CB Decision"},
 ];
 
 // ── NEWS DATA with links ─────────────────────────────────────────────────
@@ -257,8 +274,9 @@ function usePrices(oandaKey){
   const [prices,setPrices]=useState(()=>{const p={};ALL_PAIRS.forEach(pair=>{const mid=BASE_PRICES[pair]||1.0;const isH=pair.includes("JPY");const sp=isH?0.00015:0.000012;p[pair]={bid:+(mid*(1-sp/2)).toFixed(5),ask:+(mid*(1+sp/2)).toFixed(5),mid,change:0,pct:0,dir:"flat",live:false,history:Array(60).fill(0).map((_,i)=>mid*(1+(Math.sin(i*0.3)+Math.random()-0.5)*0.0004))};});return p;});
   const [apiStatus,setApiStatus]=useState("connecting");
   const OINSTR={"AUD/CAD":"AUD_CAD","AUD/CHF":"AUD_CHF","AUD/JPY":"AUD_JPY","AUD/NZD":"AUD_NZD","AUD/USD":"AUD_USD","CAD/CHF":"CAD_CHF","CAD/JPY":"CAD_JPY","CHF/JPY":"CHF_JPY","EUR/AUD":"EUR_AUD","EUR/CAD":"EUR_CAD","EUR/CHF":"EUR_CHF","EUR/GBP":"EUR_GBP","EUR/JPY":"EUR_JPY","EUR/NZD":"EUR_NZD","EUR/USD":"EUR_USD","GBP/AUD":"GBP_AUD","GBP/CAD":"GBP_CAD","GBP/CHF":"GBP_CHF","GBP/JPY":"GBP_JPY","GBP/NZD":"GBP_NZD","GBP/USD":"GBP_USD","NZD/CAD":"NZD_CAD","NZD/CHF":"NZD_CHF","NZD/JPY":"NZD_JPY","NZD/USD":"NZD_USD","USD/CAD":"USD_CAD","USD/CHF":"USD_CHF","USD/JPY":"USD_JPY"};
-  useEffect(()=>{let mounted=true;const instStr=Object.values(OINSTR).join("%2C");const fetch_=async()=>{try{const r=await fetch(`/.netlify/functions/prices?instruments=${instStr}`,{signal:AbortSignal.timeout(6000)});if(!r.ok)throw new Error("OANDA "+r.status);const d=await r.json();if(!mounted||!d.prices?.length)return;setPrices(prev=>{const next={...prev};d.prices.forEach(p=>{const pair=Object.keys(OINSTR).find(k=>OINSTR[k]===p.instrument);if(!pair)return;const bid=parseFloat(p.bids?.[0]?.price||0),ask=parseFloat(p.asks?.[0]?.price||0);if(!bid||!ask)return;const mid=(bid+ask)/2,old=prev[pair];next[pair]={bid,ask,mid,change:mid-BASE_PRICES[pair],pct:(mid-BASE_PRICES[pair])/BASE_PRICES[pair]*100,dir:mid>old.mid?"up":mid<old.mid?"down":"flat",live:true,history:[...old.history.slice(1),mid]};});return next;});setApiStatus("live_oanda");}catch{if(mounted)setApiStatus(s=>s==="live_oanda"?"live_oanda":"fallback");}};fetch_();const iv=setInterval(fetch_,3000);return()=>{mounted=false;clearInterval(iv);};},[oandaKey]);
-  useEffect(()=>{if(oandaKey?.trim())return;let mounted=true;const fetch_=async()=>{try{const r=await fetch("https://api.frankfurter.app/latest?from=EUR&to=USD,GBP,JPY,CHF,AUD,CAD,NZD",{signal:AbortSignal.timeout(4000)});if(!r.ok)throw new Error();const d=await r.json();if(!mounted)return;const{USD:eu,GBP:eg,JPY:ej,CHF:ec,AUD:ea,CAD:eca,NZD:en}=d.rates||{};if(!eu)return;const cm={"EUR/USD":eu,"EUR/GBP":eg,"EUR/JPY":ej,"EUR/CHF":ec,"EUR/AUD":ea,"EUR/CAD":eca,"EUR/NZD":en,"GBP/USD":eu/eg,"GBP/JPY":ej/eg,"GBP/CHF":ec/eg,"GBP/AUD":ea/eg,"GBP/CAD":eca/eg,"GBP/NZD":en/eg,"USD/JPY":ej/eu,"USD/CHF":ec/eu,"USD/CAD":eca/eu,"AUD/USD":eu/ea,"AUD/JPY":ej/ea,"AUD/CHF":ec/ea,"AUD/CAD":eca/ea,"AUD/NZD":en/ea,"NZD/USD":eu/en,"NZD/JPY":ej/en,"NZD/CHF":ec/en,"NZD/CAD":eca/en,"CAD/JPY":ej/eca,"CAD/CHF":ec/eca,"CHF/JPY":ej/ec};setPrices(prev=>{const next={...prev};ALL_PAIRS.forEach(pair=>{const rm=cm[pair];if(!rm)return;const isH=pair.includes("JPY"),dec=isH?3:5;const mid=parseFloat(rm.toFixed(dec)),old=prev[pair],sp=isH?0.00015:0.000012;next[pair]={bid:+(mid*(1-sp/2)).toFixed(dec),ask:+(mid*(1+sp/2)).toFixed(dec),mid,change:mid-BASE_PRICES[pair],pct:(mid-BASE_PRICES[pair])/BASE_PRICES[pair]*100,dir:mid>old.mid?"up":mid<old.mid?"down":"flat",live:true,history:[...old.history.slice(1),mid]};});return next;});setApiStatus("live_ecb");}catch{if(mounted)setApiStatus("simulated");}};fetch_();const iv=setInterval(fetch_,30000);return()=>{mounted=false;clearInterval(iv);};},[oandaKey]);
+  useEffect(()=>{let mounted=true;const key=oandaKey.trim();const instStr=Object.values(OINSTR).join("%2C");const fetch_=async()=>{try{const r=await fetch(`/.netlify/functions/prices?instruments=${instStr}`,{signal:AbortSignal.timeout(6000)});if(!r.ok)throw new Error("OANDA "+r.status);const d=await r.json();if(!mounted||!d.prices?.length)return;setPrices(prev=>{const next={...prev};d.prices.forEach(p=>{const pair=Object.keys(OINSTR).find(k=>OINSTR[k]===p.instrument);if(!pair)return;const bid=parseFloat(p.bids?.[0]?.price||0),ask=parseFloat(p.asks?.[0]?.price||0);if(!bid||!ask)return;const mid=(bid+ask)/2,old=prev[pair];next[pair]={bid,ask,mid,change:mid-BASE_PRICES[pair],pct:(mid-BASE_PRICES[pair])/BASE_PRICES[pair]*100,dir:mid>old.mid?"up":mid<old.mid?"down":"flat",live:true,history:[...old.history.slice(1),mid]};});return next;});setApiStatus("live_oanda");}catch{if(mounted)setApiStatus(s=>s==="live_oanda"?"live_oanda":"fallback");}};fetch_();const iv=setInterval(fetch_,3000);return()=>{mounted=false;clearInterval(iv);};},[oandaKey]);
+  // ECB fallback removed - OANDA proxy active
+
   useEffect(()=>{const iv=setInterval(()=>{setPrices(prev=>{const next={};ALL_PAIRS.forEach(pair=>{const old=prev[pair];const isH=pair.includes("JPY");const vol=isH?0.000015:0.0000012;const move=(Math.random()-0.499)*vol*2;const nm=Math.max(old.mid*0.999,Math.min(old.mid*1.001,old.mid*(1+move)));const sp=isH?0.00015:0.000012;next[pair]={...old,bid:+(nm*(1-sp/2)).toFixed(5),ask:+(nm*(1+sp/2)).toFixed(5),mid:nm,change:nm-BASE_PRICES[pair],pct:(nm-BASE_PRICES[pair])/BASE_PRICES[pair]*100,dir:nm>old.mid?"up":nm<old.mid?"down":"flat",history:[...old.history.slice(1),nm]};});return next;});},1000);return()=>clearInterval(iv);},[]);
   return{prices,apiStatus};
 }
@@ -271,32 +289,8 @@ function Spark({data,color,w=60,h=20}){
 }
 
 // ── SIGNAL ENGINE ────────────────────────────────────────────────────────
-function calcLots(acct,risk,slPips,pair){const isH=pair.includes("JPY");return Math.max(0.01,Math.min(2.00,Math.round((acct*risk/100)/(slPips*(isH?10:0.10))*100)/100));}
+function calcLots(acct,risk,slPips,pair){return Math.max(0.01,Math.min(2.00,Math.round((acct*risk/100)/(slPips*10.0)*100)/100));}
 
-function genSignal(pair,style,acct,enabledIds,livePrices){
-  const base=(livePrices&&livePrices[pair]?.mid)||BASE_PRICES[pair]||1.0;const isH=pair.includes("JPY"),dec=isH?3:5,pMult=isH?100:10000;
-  const pool=enabledIds?.length?STRATEGIES.filter(s=>enabledIds.includes(s.id)):STRATEGIES.filter(s=>s.tier==="S"||s.tier==="A");
-  const eligible=pool.length?pool:STRATEGIES.filter(s=>s.tier==="S"||s.tier==="A");
-  const weights=eligible.map(s=>Math.pow(Math.max(0.1,(s.wr-50)/20),3));
-  const totalW=weights.reduce((a,b)=>a+b,0);let r=Math.random()*totalW,strat=eligible[0];
-  for(let i=0;i<eligible.length;i++){r-=weights[i];if(r<=0){strat=eligible[i];break;}}
-  const diff=eligible.filter(s=>s.id!==strat.id&&s.cat!==strat.cat);
-  const sup=diff.length?diff[Math.floor(Math.random()*diff.length)]:eligible[0];
-  const isBuy=Math.random()>0.5,d=isBuy?1:-1;
-  const R={scalp:{sl:[8,15],tp1:[12,20],tp2:[22,35],tp3:[36,58]},day:{sl:[15,28],tp1:[23,42],tp2:[50,85],tp3:[90,148]},swing:{sl:[30,60],tp1:[50,100],tp2:[115,185],tp3:[200,340]}}[style]||{sl:[15,28],tp1:[23,42],tp2:[50,85],tp3:[90,148]};
-  const rnd=(a,b)=>Math.round((a+Math.random()*(b-a))*10)/10;
-  const slP=rnd(R.sl[0],R.sl[1]);const tp1P=Math.max(slP*1.5,rnd(R.tp1[0],R.tp1[1]));const tp2P=Math.max(tp1P*1.6,rnd(R.tp2[0],R.tp2[1]));const tp3P=Math.max(tp2P*1.5,rnd(R.tp3[0],R.tp3[1]));
-  const pip=1/pMult;const entry=parseFloat((base*(1+(Math.random()-0.5)*0.0003)).toFixed(dec));
-  const sl=parseFloat((entry-d*slP*pip).toFixed(dec));const tp1=parseFloat((entry+d*tp1P*pip).toFixed(dec));const tp2=parseFloat((entry+d*tp2P*pip).toFixed(dec));const tp3=parseFloat((entry+d*tp3P*pip).toFixed(dec));
-  const lots=calcLots(acct,2,slP,pair);
-  const BULL=["Real yield differential widening in base CCY favor — structural support","CB divergence: base hiking, quote on hold/cutting — policy gap widening","Post-peak USD 2026: broad USD structural weakness (J.P. Morgan, MUFG, ING confirmed)","EMA-20 above EMA-60 confirmed bullish structure — trend intact","Price reclaimed 200-period MA — institutional buy signal","RSI recovering from oversold — positive momentum shift","ADX rising above 25 with DI+ > DI- — fresh uptrend established","VWAP dynamic support holding — institutional accumulation zone","Fibonacci 61.8% pullback holding — textbook continuation","ICT order block from weekly swing low — premium institutional entry","London breakout above Asian range — session momentum confirmed","Liquidity sweep below equal lows complete — reversal trap","COT commercials net long, speculators net short — reversal crowding","WMR Fix demand — buy flow expected into 4PM London","Option expiry large strike above — price magnetism","CTAs positioned long — systematic buy momentum building","Risk-on environment — high-beta CCY bid","Japan CA surplus ¥2.4T / EUR fiscal stimulus — structural bid"];
-  const BEAR=["Real yield differential narrowing against base — outflow risk","CB dovish pivot risk: base CCY under structural pressure","Dollar debasement trade: institutional consensus short USD into mid-2026","EMA-20 below EMA-60 confirmed bearish structure — trend intact","200-period MA overhead resistance capping rallies","RSI rolling over from overbought — momentum fade","ADX above 25 with DI- > DI+ — downtrend acceleration","Below VWAP — institutional selling dominant intraday","Fibonacci 61.8% rejection from resistance — reversal confirmed","ICT bearish order block at prior week high — distribution zone","Failed London breakout reversal — trapped bulls liquidating","Liquidity sweep above equal highs — institutional trap","COT commercials net short, speculators extreme long — crowded trade","WMR Fix supply — sell flow into 4PM London","Option expiry large strike below — downside magnetism","CTAs rotating short — systematic sell momentum","Risk-off environment: safe haven bid — JPY/CHF outperform","RBNZ 325bp cutting cycle extends — NZD structural weakness 2026"];
-  const cflPool=isBuy?BULL:BEAR;const n=Math.max(strat.minC||4,4+Math.floor(Math.random()*2));
-  const used=new Set();const cfls=[];while(cfls.length<n){const i=Math.floor(Math.random()*cflPool.length);if(!used.has(i)){used.add(i);cfls.push(cflPool[i]);}}
-  const tierBonus={S:5,A:2,B:0}[strat.tier]||0;const probFloor={S:62,A:59,B:55}[strat.tier]||55;
-  const prob=Math.min(84,Math.max(probFloor,Math.round(strat.wr+tierBonus+(Math.random()*8-4))));
-  return{id:Date.now()+Math.random(),pair,direction:isBuy?"BUY":"SELL",style,entry,sl,tp1,tp2,tp3,slPips:slP,tp1Pips:tp1P,tp2Pips:tp2P,tp3Pips:tp3P,rr1:+(tp1P/slP).toFixed(1),rr2:+(tp2P/slP).toFixed(1),rr3:+(tp3P/slP).toFixed(1),lotSize:lots,riskAmount:+(acct*0.02).toFixed(2),probability:prob,primaryStrategy:strat,supportingStrategy:sup,confluences:cfls,tier:strat.tier,timeframe:{scalp:"M5/M15",day:"H1/H4",swing:"H4/D1"}[style],holdTime:{scalp:"5–30 min",day:"2–8 hrs",swing:"2–14 days"}[style],winExits:[`TP1 at ${tp1} — move SL to breakeven, trail to TP2/TP3`,`TP3 (${tp3}) achieved — scale out and trail`,`RSI extreme on entry TF — reduce exposure`,`ADX peaks above 42 — close remaining`],lossExits:[`SL at ${sl} — hard close, no exceptions`,`Closes through broken S/R — thesis invalidated`,`CB communication contradicts thesis`,`Correlated pairs reversing — regime change`],ts:new Date(),status:"PENDING",pnl:0,pips:0,currentPrice:entry};
-}
 
 const Bdg=memo(({label,color,sz="8.5px"})=>(<span style={{display:"inline-block",padding:"2px 7px",background:color+"22",color,border:`1px solid ${color}44`,borderRadius:"2px",fontSize:sz,fontWeight:"700",letterSpacing:"0.8px",lineHeight:"1.4"}}>{label}</span>));
 const Btn=memo(({label,color=C.gold,ghost=false,onClick,style:cs,disabled})=>(<button onClick={onClick} disabled={disabled} style={{padding:"7px 13px",background:ghost?"transparent":color,color:ghost?color:"#05090f",border:`1px solid ${color}`,borderRadius:"3px",cursor:disabled?"not-allowed":"pointer",fontSize:"10.5px",fontWeight:"700",letterSpacing:"0.8px",fontFamily:"inherit",opacity:disabled?0.5:1,...cs}}>{label}</button>));
@@ -314,10 +308,10 @@ function AxiomFX(){
 
   const [tab,setTab]=useState("dashboard");
   const [style,setStyle]=useState(()=>load("axiom_style","day"));
-  const API_KEY_DEFAULT=""; // Set via Netlify env var ANTHROPIC_API_KEY or in Settings
-  const OANDA_KEY_DEFAULT=""; // Set via Netlify env var OANDA_API_KEY or in Settings
+  const API_KEY_DEFAULT="";
+  const OANDA_KEY_DEFAULT="";
   const SETTINGS_DEFAULT={acct:10000,risk:2,lev:50,broker:"TastyFX",pairs:ALL_PAIRS,notif:false,apiKey:API_KEY_DEFAULT,oandaKey:OANDA_KEY_DEFAULT,saved:false};
-  const [settings,setSettings]=useState(()=>{const s=load("axiom_settings",SETTINGS_DEFAULT);if(!s.apiKey)s.apiKey=window.__ANTHROPIC_KEY__||API_KEY_DEFAULT;if(!s.oandaKey)s.oandaKey=window.__OANDA_KEY__||OANDA_KEY_DEFAULT;return s;});
+  const [settings,setSettings]=useState(()=>{const s=load("axiom_settings",SETTINGS_DEFAULT);if(!s.apiKey)s.apiKey=API_KEY_DEFAULT;if(!s.oandaKey)s.oandaKey=OANDA_KEY_DEFAULT;return s;});
   const [signals,setSignals]=useState(()=>{const all=load("axiom_signals",[]);const cut=Date.now()-14*24*3600*1000;return all.filter(s=>new Date(s.ts).getTime()>cut);});
   const [trades,setTrades]=useState(()=>load("axiom_trades",[]));
   const [history,setHistory]=useState(()=>load("axiom_history",[]));
@@ -329,11 +323,7 @@ function AxiomFX(){
   const [calCcy,setCalCcy]=useState("ALL");
   const [calImp,setCalImp]=useState("HIGH");
   const [calType,setCalType]=useState("ALL");
-  const [calView,setCalView]=useState("THIS WEEK"); // TODAY, THIS WEEK, NEXT WEEK, CB DATES
-  const [calEvents,setCalEvents]=useState([]); // live FF events
-  const [calLive,setCalLive]=useState(false);  // true when FF feed loaded
-  const [calLoading,setCalLoading]=useState(false);
-  const [calLastFetch,setCalLastFetch]=useState(0);
+  const [calView,setCalView]=useState("TODAY"); // TODAY, WEEK, MONTH
   // Signal filter
   const [sFilter,setSFilter]=useState("ALL");
   // Lifted states — no reset bugs
@@ -360,7 +350,7 @@ function AxiomFX(){
   const timeCtxs=["today April 2026","week of April 7-11 2026","week of March 31-April 6 2026","late March 2026","mid March 2026","early March 2026","February 2026","January 2026"];
   const loadNews=useCallback(async(reset)=>{
       if(newsLoading)return;
-      // API key handled server-side — proceed to call proxy
+      // API key handled server-side
       setNewsLoading(true);
       const nb=reset?0:newsBatch;
       const existing=reset?[]:liveArts;
@@ -385,90 +375,27 @@ function AxiomFX(){
         // API blocked (sandbox) or failed — use static articles with infinite scroll simulation
         const PAGE_SIZE=8;
         const page=reset?0:newsStaticPage;
-        // Seeded shuffle based on page number so each batch looks genuinely different
-        const seed=page*7+13;
-        const shuffled=[...ALL_NEWS].sort((a,b)=>((a.id*seed)%31)-((b.id*seed)%31));
-        const start=(page*PAGE_SIZE)%shuffled.length;
+        // Rotate through ALL_NEWS repeating with slight variations for "endless" feel
+        const baseArts=ALL_NEWS;
+        const start=(page*PAGE_SIZE)%baseArts.length;
         const batch=[];
         for(let i=0;i<PAGE_SIZE;i++){
-          const art=shuffled[(start+i)%shuffled.length];
-          // Vary the timestamp slightly so dates look progressive
-          const hoursBack=(page*8+i)*2;
-          const dt=new Date(Date.now()-hoursBack*3600000).toISOString().slice(0,16).replace('T',' ');
-          batch.push({...art,dt,id:`static_${page}_${i}_${Date.now()+i}`});
+          const art=baseArts[(start+i)%baseArts.length];
+          batch.push({...art,id:`static_${page}_${i}_${Date.now()}`});
         }
         setLiveArts(reset?batch:[...existing,...batch]);
         setNewsStaticPage(page+1);
       }
       setNewsLoading(false);setNewsLoaded(true);
   // eslint-disable-next-line
-  },[nCcy,nImp]);
+  },[settings.apiKey,nCcy,nImp]);
   // Fire loadNews from root — not inside useMemo component
   useEffect(()=>{
     if(tab==="news"&&!newsLoaded)loadNews(true);
-  },[tab]);
+  },[tab,settings.apiKey]);
   useEffect(()=>{
     if(tab==="news"&&newsLoaded)loadNews(true);
   },[nCcy,nImp]);
-
-  // ForexFactory XML Calendar Feed — live on Netlify, blocked in sandbox
-  const loadCalendar=useCallback(async()=>{
-    if(calLoading)return;
-    const now=Date.now();
-    if(calLive&&(now-calLastFetch)<30*60*1000)return; // 30min cache
-    setCalLoading(true);
-    const parseFF=async(url)=>{
-      // Use Netlify serverless proxy to bypass CORS
-      const week=url.includes('next')?'next':'this';
-      const proxyUrl='/.netlify/functions/calendar?week='+week;
-      let r;
-      try{
-        r=await fetch(proxyUrl,{signal:AbortSignal.timeout(10000)});
-        if(!r.ok)throw new Error('proxy '+r.status);
-      }catch{
-        // Direct fallback for localhost dev
-        r=await fetch(url,{signal:AbortSignal.timeout(8000)});
-        if(!r.ok)throw new Error("FF fetch failed "+r.status);
-      }
-      const txt=await r.text();
-      const parser=new DOMParser();
-      const xml=parser.parseFromString(txt,"text/xml");
-      const events=[];
-      xml.querySelectorAll("event").forEach(ev=>{
-        const get=(tag)=>ev.querySelector(tag)?.textContent?.trim()||"";
-        const impRaw=get("impact").toUpperCase();
-        const imp=impRaw==="HIGH"?"HIGH":impRaw==="MEDIUM"?"MED":impRaw==="LOW"?"LOW":"LOW";
-        const dateStr=get("date");
-        const timeStr=get("time")||"00:00";
-        const dt=dateStr+" "+timeStr;
-        events.push({
-          dt,ccy:get("currency"),ev:get("title"),
-          imp,type:"Economic Release",
-          fc:get("forecast")||"–",pr:get("previous")||"–",
-          actual:get("actual")||"–",source:"ForexFactory",
-          id:"ff_"+dt+"_"+get("title").slice(0,10).replace(/\s/g,"_")
-        });
-      });
-      return events;
-    };
-    try{
-      const [thisWeek,nextWeek]=await Promise.all([
-        parseFF("https://nfs.faireconomy.media/ff_calendar_thisweek.xml"),
-        parseFF("https://nfs.faireconomy.media/ff_calendar_nextweek.xml"),
-      ]);
-      const allEvents=[...thisWeek,...nextWeek].sort((a,b)=>a.dt.localeCompare(b.dt));
-      setCalEvents(allEvents);
-      setCalLive(true);
-      setCalLastFetch(Date.now());
-    }catch(e){
-      // Sandbox or network blocked — use CB_MEETINGS only
-      setCalEvents([]);
-      setCalLive(false);
-    }
-    setCalLoading(false);
-  },[calLoading,calLive,calLastFetch]);
-
-  useEffect(()=>{if(tab==="calendar")loadCalendar();},[tab]);
 
   const [aiMsgs,setAiMsgs]=useState([{role:"assistant",content:"I'm AXIOM v6 — your institutional G10 FX intelligence. I have full context of all 28 pairs, 51 strategies, live prices, and confirmed April 2026 macro data.\n\nYour API key is pre-configured. Just type your question below and tap SEND — no setup needed."}]);
   const [aiInput,setAiInput]=useState("");
@@ -486,22 +413,54 @@ function AxiomFX(){
   useEffect(()=>save("axiom_history",history),[history]);
   useEffect(()=>{aiRef.current?.scrollIntoView({behavior:"smooth"});},[aiMsgs]);
 
-  // Immediate signal generation 15–90s random
-  useEffect(()=>{
-    const fire=()=>{
-      const ps=settings.pairs&&settings.pairs.length>0?settings.pairs:ALL_PAIRS;
-      if(Math.random()>0.15){
-        const pair=ps[Math.floor(Math.random()*ps.length)];
-        const sig=genSignal(pair,style,settings.acct,enabledStrats,prices);
-        setSignals(prev=>[sig,...prev]);
-        toast_(`⚡ ${sig.direction} ${sig.pair}  ${sig.probability}%  ·  ${sig.primaryStrategy.cat}`,sig.direction==="BUY"?C.green:C.red);
-        try{if(typeof Notification!=="undefined"&&Notification.permission==="granted"){new Notification(`AXIOM: ${sig.direction} ${sig.pair}`,{body:`${sig.probability}% · ${sig.primaryStrategy.name}\nEntry ${sig.entry} | SL ${sig.sl}`});}}catch(_){}
+  // ── REAL SIGNAL SCANNER ────────────────────────────────────────────────────
+  const runSignalScan=useCallback(async()=>{
+    if(sigScanning)return;
+    setSigScanning(true);
+    setScanStatus("Scanning 28 pairs — fetching live candles & running real analysis...");
+    try{
+      const acctP=settings.acct||10000;const riskP=settings.risk||2;
+      const res=await fetch(`/.netlify/functions/analyze?acct=${acctP}&risk=${riskP}`,{signal:AbortSignal.timeout(120000)});
+      if(!res.ok)throw new Error("Analyze returned "+res.status);
+      const data=await res.json();
+      const now=Date.now();setLastScanTime(now);
+      if(data.signals&&data.signals.length>0){
+        const existingKeys=new Set(signals.map(s=>s.pair+s.direction));
+        const freshSigs=data.signals
+          .filter(s=>!existingKeys.has(s.pair+s.direction))
+          .map(s=>({...s,id:now+Math.random(),
+            primaryStrategy:{id:s.primaryStrategy?.id||"REAL",name:s.primaryStrategy?.id||"Multi-Strategy",
+              tier:s.strategiesTriggered>=6?"S":s.strategiesTriggered>=4?"A":"B",
+              cat:"REAL ANALYSIS",wr:s.probability,
+              note:`${s.strategiesTriggered} strategies · Score:${s.technicalScore}`},
+            supportingStrategy:{id:s.supportingStrategy?.id||"TECH",name:s.supportingStrategy?.id||"Confluence"},
+            style:s.slPips<=20?"scalp":s.slPips<=60?"day":"swing",
+            timeframe:s.slPips<=20?"M5/M15":s.slPips<=60?"H1/H4":"H4/D1",
+            holdTime:s.slPips<=20?"15-60 min":s.slPips<=60?"2-8 hrs":"2-10 days",
+            winExits:[`TP1 ${s.tp1} — move SL to breakeven`,`TP2 ${s.tp2} — trail stop`,`TP3 ${s.tp3} — full exit ${s.rr3}R`,s.technicalDetails?.sessionNote||""],
+            lossExits:[`Hard SL ${s.sl} — ${s.slPips}p — no exceptions`,`Regime change — exit immediately`,`CB communication reversal`,`Correlated pairs reversing`],
+            ts:new Date(s.timestamp||Date.now()),status:"PENDING",pnl:0,pips:0,currentPrice:s.entry}));
+        if(freshSigs.length>0){
+          setSignals(prev=>[...freshSigs,...prev].slice(0,50));
+          freshSigs.forEach(sig=>{
+            toast_(`⚡ REAL: ${sig.direction} ${sig.pair} ${sig.probability}% · ${sig.strategiesTriggered} strategies`,sig.direction==="BUY"?C.green:C.red);
+            try{if(typeof Notification!=="undefined"&&Notification.permission==="granted"){new Notification(`AXIOM: ${sig.direction} ${sig.pair}`,{body:`${sig.probability}% · ${sig.strategiesTriggered} strategies
+Entry:${sig.entry} SL:${sig.sl}`});}}catch(_){}
+          });
+        }
+        setScanStatus(`Scan complete — ${data.signals.length} signal${data.signals.length!==1?"s":""} found · ${data.scanned} pairs scanned`);
+      }else{
+        setScanStatus(`No setups found across ${data.scanned||28} pairs (${data.skipped||0} rejected) · Next scan in 5 min`);
       }
-      sigTimerRef.current=setTimeout(fire,15000+Math.random()*75000);
-    };
-    sigTimerRef.current=setTimeout(fire,3000);
-    return()=>{if(sigTimerRef.current)clearTimeout(sigTimerRef.current);};
-  },[style,settings.pairs,settings.acct,toast_]);
+    }catch(e){setScanStatus(`Scan error: ${e.message}`);}
+    setSigScanning(false);
+  },[sigScanning,signals,settings.acct,settings.risk,toast_]);
+
+  useEffect(()=>{
+    const t=setTimeout(()=>runSignalScan(),5000);
+    const iv=setInterval(()=>runSignalScan(),5*60*1000);
+    return()=>{clearTimeout(t);clearInterval(iv);};
+  },[]);// eslint-disable-line
 
   // Live P&L — throttled
   useEffect(()=>{
@@ -525,30 +484,17 @@ function AxiomFX(){
 
   async function sendAI(msg){
     if(!msg.trim()||aiLoading)return;
-    // API key handled server-side by Netlify function — no client key needed
+    // API key handled server-side
     const msgs=[...aiMsgs,{role:"user",content:msg}];
     setAiMsgs(msgs);setAiLoading(true);
     const openPnl=trades.reduce((a,t)=>a+t.pnl,0);
-    const topSigs=signals.slice(0,5).map(s=>`${s.pair} ${s.direction} ${s.probability}% (${s.primaryStrategy?.tier||"A"}-tier ${s.primaryStrategy?.name||""})`).join(" | ")||"none";
-    const liveP=Object.entries(prices).slice(0,8).map(([p,d])=>`${p}:${d.mid?.toFixed(5)||"–"}`).join(" | ");
-    const sys=`You are AXIOM — institutional G10 FX trading intelligence. Direct, precise, no hedging language.
-
-ACCOUNT: $${settings.acct} | STYLE: ${style.toUpperCase()} | RISK: 2%/trade ($${(settings.acct*0.02).toFixed(0)}) | LEVERAGE: 50:1 | SIZE: micro lots
-OPEN TRADES: ${trades.length} | P&L: ${openPnl>=0?"+":""}$${openPnl.toFixed(2)} | SIGNALS: ${signals.length}
-PRICES: ${liveP}
-TOP SIGNALS: ${topSigs}
-
-CB RATES APR 2026: Fed 3.875% Hold | ECB 2.00% Hawkish | BOJ 0.75% Hiking (only G10 hiker) | BOE 3.75% Easing | RBA 3.85% Hold | BOC 2.25% Dovish | RBNZ 3.00% Cutting | SNB 0.00% Hold
-
-WEEK APR 7-11 BIAS: USD BEARISH STRONG (DXY 100, NFP miss) | JPY BULLISH STRONG (BOJ 0.75%, wage 3.1%) | EUR BULLISH MOD (ECB hawkish, >1.16) | GBP NEUTRAL (BOE easing vs CPI) | NZD BEARISH STRONG (RBNZ cut Apr 9) | AUD BULLISH MOD (RBA hold) | CAD BEARISH MOD (USMCA risk) | CHF BULLISH MOD (safe haven)
-
-STRATEGY LIBRARY TOP S-TIER: BOJ Normalization Trend 68% WR | CB Divergence Play 66% | Safe Haven Demand 65% | Rate Surprise Extension 64% | Real Yield Differential 63% | Global Macro Thematic 62%
-
-CORRELATION ALERTS: EUR/USD+GBP/USD=0.87 (same position) | AUD/USD+NZD/USD=0.88 | USD/JPY+USD/CHF=0.72
-
-RISK RULES: Max 2% risk/trade | Max 6% portfolio heat | Max 3 concurrent | Hard SL always | Trail BE at TP1 | Exit before HIGH-impact news | Max 6% daily loss
-
-Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. Flag calendar events for timing.`;
+    const sys=`You are AXIOM, an institutional G10 FX trading AI. Direct, precise, institutional tone.
+Account: $${settings.acct} | Style: ${style} | Risk: 2%/trade ($${(settings.acct*0.02).toFixed(0)}) | 50:1 leverage | Micro lots
+Active: ${trades.length} trades | P&L: ${openPnl>=0?"+":""}$${openPnl.toFixed(2)} | ${signals.length} signals
+Prices: ${Object.entries(prices).slice(0,6).map(([p,d])=>`${p} ${d.mid.toFixed(5)}`).join(" | ")}
+CB Apr 2026: Fed 3.875% Hold | ECB 2.00% Neutral | BOJ 0.75% Hiking | BOE 3.75% Hold | RBA 3.85% | BOC 2.25% | RBNZ 3.00% Cutting
+Regime: BOJ hike confirmed, USD tariff pressure, EUR hawkish hold, JPY/CHF bid.
+Give exact price levels, pip counts, lot sizes. Only vanilla G10 spot trades.`;
     try{
       const res=await fetch("/.netlify/functions/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:sys,messages:msgs.map(m=>({role:m.role,content:m.content}))})});
       const data=await res.json();
@@ -590,13 +536,7 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
             <div key={l}><div style={{fontSize:"7px",color:C.muted,letterSpacing:"0.8px",marginBottom:"2px"}}>{l}</div><div style={{color:c,fontWeight:"700",fontSize:"9.5px"}}>{v}</div></div>
           ))}
         </div>
-        <div style={{fontSize:"9px",color:C.muted,marginBottom:"4px"}}>{sig.primaryStrategy?.name} · 1:{sig.rr1}/1:{sig.rr2}/1:{sig.rr3} · {sig.timeframe} · {sig.holdTime}</div>
-        <div style={{display:"flex",gap:"8px",marginBottom:"6px",flexWrap:"wrap"}}>
-          <span style={{fontSize:"8px",color:C.amber}}>Risk: <strong style={{color:C.red}}>${sig.riskAmount}</strong></span>
-          <span style={{fontSize:"8px",color:C.muted}}>~<strong style={{color:C.text}}>${(sig.pair?.includes("JPY")?sig.lotSize*0.01:sig.lotSize*10).toFixed(2)}</strong>/pip</span>
-          <span style={{fontSize:"8px",color:C.muted}}>SL: <strong style={{color:C.red}}>{sig.slPips}p</strong></span>
-          <span style={{fontSize:"8px",color:C.green}}>Best R: <strong>1:{sig.rr3}</strong></span>
-        </div>
+        <div style={{fontSize:"9px",color:C.muted,marginBottom:"8px"}}>{sig.primaryStrategy?.name} · 1:{sig.rr1}/1:{sig.rr2}/1:{sig.rr3} · {sig.timeframe} · {sig.holdTime}</div>
         <div style={{display:"flex",gap:"6px"}}>
           <Btn label="TAKE TRADE" color={dc} onClick={()=>takeTrade(sig)} style={{flex:1,fontSize:"10px",padding:"5px 8px"}}/>
           <Sm label="DETAILS" color={C.muted} onClick={()=>{setModal(sig);setModalTab("params");}}/>
@@ -653,58 +593,6 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
             </div>
           ))}
         </div>
-        {/* FX Session Clock */}
-        {(()=>{
-          const now=new Date();
-          const utcH=now.getUTCHours(),utcM=now.getUTCMinutes();
-          const utcMins=utcH*60+utcM;
-          // Sessions in UTC minutes
-          const sessions=[
-            {name:"Sydney",  start:21*60,end:6*60, color:"#00b4d8"},
-            {name:"Tokyo",   start:23*60,end:8*60, color:"#ff9f1c"},
-            {name:"London",  start:7*60, end:16*60,color:"#00e5a0"},
-            {name:"New York",start:12*60,end:21*60,color:"#ff4560"},
-          ];
-          const isOpen=(s)=>{
-            if(s.start<s.end)return utcMins>=s.start&&utcMins<s.end;
-            return utcMins>=s.start||utcMins<s.end;
-          };
-          const minsUntilOpen=(s)=>{
-            if(isOpen(s))return 0;
-            const diff=s.start-utcMins;
-            return diff<0?diff+1440:diff;
-          };
-          const minsUntilClose=(s)=>{
-            if(!isOpen(s))return 0;
-            const diff=s.end-utcMins;
-            return diff<0?diff+1440:diff;
-          };
-          const openSessions=sessions.filter(s=>isOpen(s));
-          const isOverlap=openSessions.length>=2;
-          return(
-            <div style={{background:C.bg2,border:`1px solid ${isOverlap?C.gold:C.bdr}`,borderRadius:"5px",padding:"7px 12px",marginBottom:"8px"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"5px"}}>
-                <span style={{fontSize:"8px",color:C.gold,fontWeight:"700",letterSpacing:"2px"}}>◷ FX SESSIONS — UTC {String(utcH).padStart(2,"0")}:{String(utcM).padStart(2,"0")}</span>
-                {isOverlap&&<span style={{fontSize:"7.5px",color:C.gold,fontWeight:"700",background:C.gold+"22",padding:"2px 7px",borderRadius:"3px",border:`1px solid ${C.gold}44`}}>⚡ OVERLAP — PEAK LIQUIDITY</span>}
-              </div>
-              <div style={{display:"flex",gap:"6px",flexWrap:"wrap"}}>
-                {sessions.map(s=>{
-                  const open=isOpen(s);
-                  const mins=open?minsUntilClose(s):minsUntilOpen(s);
-                  const hrs=Math.floor(mins/60),m=mins%60;
-                  const timeStr=hrs>0?`${hrs}h ${m}m`:`${m}m`;
-                  return(
-                    <div key={s.name} style={{flex:1,minWidth:"70px",background:open?s.color+"18":C.bg1,border:`1px solid ${open?s.color+"66":C.bdr}`,borderRadius:"4px",padding:"5px 7px",textAlign:"center"}}>
-                      <div style={{fontSize:"9.5px",fontWeight:"700",color:open?s.color:C.muted}}>{s.name}</div>
-                      <div style={{fontSize:"7.5px",color:open?C.green:C.red,fontWeight:"700",marginTop:"1px"}}>{open?"OPEN":"CLOSED"}</div>
-                      <div style={{fontSize:"7px",color:C.muted,marginTop:"1px"}}>{open?`closes ${timeStr}`:`opens ${timeStr}`}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })()}
         <div style={{background:`linear-gradient(90deg,${C.bg2},#0a1e3a)`,border:`2px solid ${C.gold}`,borderRadius:"6px",padding:"10px 14px",marginBottom:"10px",display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}}>
           <div>
             <div style={{fontSize:"8px",color:C.gold,letterSpacing:"2px",fontWeight:"700",marginBottom:"2px"}}>💰 THEORETICAL ACCOUNT</div>
@@ -739,7 +627,7 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
           </div>
           <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
             <table style={{width:"100%",borderCollapse:"collapse",minWidth:"540px"}}>
-              <thead><tr>{["PAIR","BID","LAST","ASK","CHG","CHG%","SPARK","CARRY","📊"].map(h=><th key={h} style={{padding:"4px 6px",textAlign:"left",fontSize:"7.5px",color:C.muted,letterSpacing:"1px",borderBottom:`1px solid ${C.bdr}`,fontWeight:"700",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+              <thead><tr>{["PAIR","BID","ASK","CHG","CHG%","SPARK","CARRY","📊"].map(h=><th key={h} style={{padding:"4px 6px",textAlign:"left",fontSize:"7.5px",color:C.muted,letterSpacing:"1px",borderBottom:`1px solid ${C.bdr}`,fontWeight:"700",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
               <tbody>
                 {ALL_PAIRS.map(pair=>{
                   const p=prices[pair];if(!p)return null;
@@ -752,7 +640,7 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
                       <td style={{padding:"5px 6px",fontWeight:"700",color:C.gold,fontSize:"10.5px",whiteSpace:"nowrap"}}>{pair}</td>
                       <td style={{padding:"5px 6px",color:pc,fontWeight:"700",fontFamily:"monospace",fontSize:"10px",whiteSpace:"nowrap"}}>{p.bid.toFixed(dec)}</td>
                       <td style={{padding:"5px 6px",color:pc,fontFamily:"monospace",fontSize:"10px",whiteSpace:"nowrap"}}>{p.ask.toFixed(dec)}</td>
-                      <td style={{padding:"5px 6px",color:C.text,fontWeight:"700",fontFamily:"monospace",fontSize:"10.5px",whiteSpace:"nowrap"}}>{p.mid.toFixed(dec)}</td>
+                      
                       <td style={{padding:"5px 6px",color:p.change>=0?C.green:C.red,fontFamily:"monospace",fontSize:"9.5px",whiteSpace:"nowrap"}}>{p.change>=0?"+":""}{p.change.toFixed(dec)}</td>
                       <td style={{padding:"5px 6px",color:p.pct>=0?C.green:C.red,fontWeight:"600",fontSize:"9.5px",whiteSpace:"nowrap"}}>{p.pct>=0?"+":""}{p.pct.toFixed(3)}%</td>
                       <td style={{padding:"3px 6px"}}><Spark data={p.history} color={p.pct>=0?C.green:C.red}/></td>
@@ -847,29 +735,29 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
 
   // ─── SIGNALS TAB ──────────────────────────────────────────────────────
   function SignalsTab(){
-    const [sigTierF,setSigTierF]=useState("ALL");
-    const [sigStyleF,setSigStyleF]=useState("ALL");
-    const [sigDirF,setSigDirF]=useState("ALL");
-    const tierC2={S:C.gold,A:C.green,B:C.blue};
-    const filtered=signals.filter(s=>{
-      if(sigTierF!=="ALL"&&s.primaryStrategy?.tier!==sigTierF)return false;
-      if(sigStyleF!=="ALL"&&s.style!==sigStyleF)return false;
-      if(sigDirF!=="ALL"&&s.direction!==sigDirF)return false;
-      return true;
-    });
+    const cats=[...new Set(STRATEGIES.map(s=>s.cat))];
+    const filtered=sFilter==="ALL"?signals:signals.filter(s=>s.direction===sFilter||s.primaryStrategy?.cat===sFilter||s.style===sFilter);
     return(
       <div>
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"10px 12px",marginBottom:"10px"}}>
-          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"7px"}}>
-            <span style={{fontSize:"8px",color:C.gold,fontWeight:"700",minWidth:"36px"}}>TIER:</span>
-            {["ALL","S","A","B"].map(t=><button key={t} onClick={()=>setSigTierF(t)} style={{padding:"4px 9px",background:sigTierF===t?(tierC2[t]||C.gold)+"22":"transparent",color:sigTierF===t?(tierC2[t]||C.gold):C.muted,border:`1px solid ${sigTierF===t?(tierC2[t]||C.gold):C.bdr}`,borderRadius:"3px",cursor:"pointer",fontSize:"9px",fontWeight:"700",fontFamily:"inherit"}}>{t==="ALL"?"ALL":t+"▪"}</button>)}
-            <span style={{fontSize:"8px",color:C.gold,fontWeight:"700",marginLeft:"8px",minWidth:"36px"}}>STYLE:</span>
-            {["ALL","scalp","day","swing"].map(s=><Sm key={s} label={s.toUpperCase()} active={sigStyleF===s} onClick={()=>setSigStyleF(s)} color={SC[s]}/>)}
-            <span style={{fontSize:"8px",color:C.gold,fontWeight:"700",marginLeft:"8px",minWidth:"28px"}}>DIR:</span>
-            {["ALL","BUY","SELL"].map(d=><Sm key={d} label={d} active={sigDirF===d} onClick={()=>setSigDirF(d)} color={d==="BUY"?C.green:d==="SELL"?C.red:C.gold}/>)}
-            <span style={{marginLeft:"auto",fontSize:"9.5px",color:C.muted,fontWeight:"700"}}>{filtered.length}/{signals.length}</span>
+        {/* Real Analysis Engine Status */}
+        <div style={{background:sigScanning?"#071407":"#0a0e1a",border:`1px solid ${sigScanning?C.green:C.gold}44`,borderRadius:"5px",padding:"10px 12px",marginBottom:"8px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"4px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:"7px"}}>
+              <div style={{width:"6px",height:"6px",borderRadius:"50%",background:sigScanning?C.green:C.gold,animation:sigScanning?"pulse 1s infinite":"none"}}/>
+              <span style={{fontSize:"8.5px",fontWeight:"700",color:sigScanning?C.green:C.gold,letterSpacing:"1.5px"}}>{sigScanning?"⚡ SCANNING 28 PAIRS — REAL TECHNICAL ANALYSIS":"◎ REAL SIGNAL ENGINE — NO RANDOM GENERATION"}</span>
+            </div>
+            <button onClick={runSignalScan} disabled={sigScanning} style={{padding:"4px 10px",background:C.gold+"22",color:sigScanning?C.muted:C.gold,border:`1px solid ${C.gold}44`,borderRadius:"3px",cursor:sigScanning?"not-allowed":"pointer",fontSize:"8px",fontWeight:"700",fontFamily:"inherit",opacity:sigScanning?0.5:1}}>{sigScanning?"SCANNING...":"▶ SCAN NOW"}</button>
           </div>
-          <div style={{fontSize:"8px",color:C.muted,borderTop:`1px solid ${C.bdr}22`,paddingTop:"5px"}}>Signals auto-generate every 15–90s · persist 14 days · ✕ to dismiss · S-tier ≥62% WR</div>
+          <div style={{fontSize:"8px",color:C.muted}}>{scanStatus}</div>
+          <div style={{fontSize:"7.5px",color:C.muted,marginTop:"2px"}}>Last scan: {lastScanTime?new Date(lastScanTime).toLocaleTimeString():"Never"} · Auto every 5 min · 51 strategies · EMA/RSI/MACD/ATR/Ichimoku/ADX/Swing</div>
+        </div>
+        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"10px 12px",marginBottom:"10px"}}>
+          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"8px"}}>
+            <span style={{fontSize:"9px",color:C.gold,fontWeight:"700"}}>FILTER:</span>
+            {["ALL","BUY","SELL","scalp","day","swing",...cats].map(f=><Sm key={f} label={f.toUpperCase()} active={sFilter===f} onClick={()=>setSFilter(f)}/>)}
+            <span style={{marginLeft:"auto",fontSize:"9.5px",color:C.muted}}>{filtered.length} signals</span>
+          </div>
+          <div style={{fontSize:"8.5px",color:C.muted,borderTop:`1px solid ${C.bdr}22`,paddingTop:"6px"}}>Signals persist until dismissed (✕) or 14 days. No limit on pairs. New signals every 15–90s.</div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px"}}>
           {filtered.map(s=><SigCard key={s.id} sig={s} showDismiss/>)}
@@ -931,7 +819,173 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
     );
   }
 
+  function NewsTab(){
+    const ccys=["ALL","USD","EUR","GBP","JPY","AUD","CAD","CHF","NZD","NOK","SEK"];
+    const imps=["ALL","HIGH","MED","LOW"];
+    // State lives at root — no remount loss on price ticks
+    const loading=newsLoading,setLoading=setNewsLoading;
+    const batchNum=newsBatch,setBatchNum=setNewsBatch;
+    const hasLoaded=newsLoaded,setHasLoaded=setNewsLoaded;
 
+    // loadNews called from root useEffect below
+    const src=liveArts; // liveArts always populated (API or static fallback)
+    const displayed=src.filter(n=>{
+      if(nCcy!=="ALL"&&n.ccy!==nCcy)return false;
+      if(nImp!=="ALL"&&n.imp!==nImp)return false;
+      return true;
+    });
+    const impC={HIGH:C.amber,MED:C.gold,LOW:C.muted};
+    return(
+      <div>
+        {/* Filters */}
+        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"10px 12px",marginBottom:"8px"}}>
+          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"6px"}}>
+            <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"46px"}}>CURRENCY:</span>
+            {ccys.map(f=><Sm key={f} label={f} active={nCcy===f} onClick={()=>setNCcy(f)}/>)}
+          </div>
+          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center"}}>
+            <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"46px"}}>IMPACT:</span>
+            {imps.map(f=><Sm key={f} label={f} active={nImp===f} onClick={()=>setNImp(f)} color={f==="HIGH"?C.red:f==="MED"?C.amber:f==="LOW"?C.muted:C.gold}/>)}
+          </div>
+        </div>
+        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"10px 12px"}}>
+          {/* Header */}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>
+            <div>
+              <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px"}}>◆ AXIOM NEWS — {settings.apiKey?"AI GENERATED · DEPLOY FOR LIVE":"STATIC FEED · SANDBOX MODE"}</div>
+              <div style={{fontSize:"7.5px",color:C.muted,marginTop:"2px"}}>{displayed.length} articles · AI-generated · scroll ↓ for more</div>
+            </div>
+            {settings.apiKey&&<button onClick={()=>loadNews(true)} disabled={loading} style={{padding:"4px 9px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}44`,borderRadius:"3px",cursor:"pointer",fontSize:"8.5px",fontWeight:"700",fontFamily:"inherit",opacity:loading?0.5:1}}>↺ Refresh</button>}
+          </div>
+
+          {/* Loading */}
+          {loading&&!displayed.length&&<div style={{padding:"24px",textAlign:"center"}}>
+            <div style={{fontSize:"11px",color:C.gold,marginBottom:"4px"}}>⚡ Searching web for live FX news...</div>
+            <div style={{fontSize:"8.5px",color:C.muted}}>Fetching real articles via Claude web search</div>
+          </div>}
+          {/* Articles */}
+          {displayed.map(n=>{
+            const ic=n.impact==="BULLISH"?C.green:n.impact==="BEARISH"?C.red:C.muted;
+            return(
+              <div key={n.id} onClick={()=>n.url&&window.open(n.url,"_blank","noopener")}
+                style={{background:C.bg1,border:`1px solid ${ic}22`,borderLeft:`3px solid ${ic}`,borderRadius:"4px",padding:"9px 11px",marginBottom:"7px",cursor:n.url?"pointer":"default"}}
+                onMouseEnter={e=>{if(n.url){e.currentTarget.style.borderColor=ic;e.currentTarget.style.background="#0d1e35";}}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor=ic+"22";e.currentTarget.style.background=C.bg1;}}>
+                <div style={{display:"flex",gap:"5px",alignItems:"center",marginBottom:"4px",flexWrap:"wrap"}}>
+                  <Bdg label={n.ccy} color={ic}/><Bdg label={n.imp||"MED"} color={impC[n.imp]||C.gold}/><Bdg label={n.impact} color={ic}/>
+                  {n.source&&<Bdg label={n.source} color={C.blue}/>}
+                  <span style={{marginLeft:"auto",fontSize:"8px",color:C.muted,fontFamily:"monospace"}}>{n.dt}</span>
+                  {n.url&&<span style={{fontSize:"8px",color:C.blue,fontWeight:"700"}}>↗</span>}
+                </div>
+                <div style={{fontSize:"11px",color:"#b8cde0",lineHeight:"1.5",fontWeight:n.imp==="HIGH"?"600":"400",marginBottom:n.detail?"4px":"0"}}>{n.hl}</div>
+                {n.detail&&<div style={{fontSize:"9px",color:C.muted,lineHeight:"1.45"}}>{n.detail}</div>}
+              </div>
+            );
+          })}
+          {loading&&displayed.length>0&&<div style={{padding:"10px",textAlign:"center",color:C.gold,fontSize:"10px"}}>⚡ Loading more articles...</div>}
+          {settings.apiKey&&!loading&&hasLoaded&&<button onClick={()=>loadNews(false)} style={{width:"100%",padding:"11px",background:C.bg1,color:C.gold,border:`1px solid ${C.gold}44`,borderRadius:"4px",cursor:"pointer",fontSize:"11px",fontWeight:"700",fontFamily:"inherit",marginTop:"4px"}}>↓ LOAD OLDER ARTICLES — search further back in time</button>}
+        </div>
+      </div>
+    );
+  }
+  function CalendarTab(){
+    const now=new Date();
+    const todayStr=now.toISOString().slice(0,10);
+    const ccys=["ALL","USD","EUR","GBP","JPY","AUD","CAD","CHF","NZD","NOK","SEK"];
+    const imps=["ALL","HIGH","MED","LOW"];
+    const types=["ALL","CB Decision","CB Speech","Inflation","Employment","GDP","PMI","Sentiment","Trade","Manufacturing","Retail","Housing","Indicator","Monetary","Inventory","Income"];
+    const views=["TODAY","THIS WEEK","THIS MONTH","NEXT MONTH"];
+
+    const filtered=FULL_CALENDAR.filter(e=>{
+      const eDate=e.dt.slice(0,10);
+      const eTime=new Date(e.dt);
+      if(calView==="TODAY"&&eDate!==todayStr)return false;
+      if(calView==="THIS WEEK"){const day=now.getDay(),start=new Date(now);start.setDate(now.getDate()-(day===0?6:day-1));const end=new Date(start);end.setDate(start.getDate()+7);if(eTime<start||eTime>=end)return false;}
+      if(calView==="THIS MONTH"&&eDate.slice(0,7)!==todayStr.slice(0,7))return false;
+      if(calView==="NEXT MONTH"){const nm=new Date(now.getFullYear(),now.getMonth()+1,1);const nmStr=nm.toISOString().slice(0,7);if(eDate.slice(0,7)!==nmStr)return false;}
+      if(calCcy!=="ALL"&&e.ccy!==calCcy)return false;
+      if(calImp!=="ALL"&&e.imp!==calImp)return false;
+      if(calType!=="ALL"&&e.type!==calType)return false;
+      return true;
+    });
+
+    const impColor={HIGH:C.red,MED:C.amber,LOW:C.muted};
+    // Group by date
+    const byDate={};
+    filtered.forEach(e=>{const d=e.dt.slice(0,10);if(!byDate[d])byDate[d]=[];byDate[d].push(e);});
+    const sortedDates=Object.keys(byDate).sort();
+
+    return(
+      <div>
+        {/* Controls */}
+        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"10px 12px",marginBottom:"8px"}}>
+          {/* View selector */}
+          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"8px"}}>
+            <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"38px"}}>VIEW:</span>
+            {views.map(v=><Sm key={v} label={v} active={calView===v} onClick={()=>setCalView(v)}/>)}
+          </div>
+          {/* Currency */}
+          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"6px"}}>
+            <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"38px"}}>CCY:</span>
+            {ccys.map(c=><Sm key={c} label={c} active={calCcy===c} onClick={()=>setCalCcy(c)}/>)}
+          </div>
+          {/* Impact */}
+          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"6px"}}>
+            <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"38px"}}>IMPACT:</span>
+            {imps.map(i=><Sm key={i} label={i} active={calImp===i} onClick={()=>setCalImp(i)} color={i==="HIGH"?C.red:i==="MED"?C.amber:i==="LOW"?C.muted:C.gold}/>)}
+          </div>
+          {/* Type */}
+          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center"}}>
+            <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"38px"}}>TYPE:</span>
+            {types.map(t=><Sm key={t} label={t} active={calType===t} onClick={()=>setCalType(t)}/>)}
+          </div>
+        </div>
+
+        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"10px 12px"}}>
+          <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>
+            ◷ ECONOMIC CALENDAR — {calView} · {filtered.length} EVENTS · {calCcy==="ALL"?"All Currencies":calCcy} · {calImp==="ALL"?"All Impacts":calImp}
+          </div>
+          {!sortedDates.length&&<div style={{color:C.muted,textAlign:"center",padding:"20px"}}>No events for this filter. Try changing VIEW to "THIS MONTH" or "ALL" impact level.</div>}
+          {sortedDates.map(date=>(
+            <div key={date}>
+              {/* Date header */}
+              <div style={{background:C.bg3,padding:"6px 10px",marginBottom:"4px",marginTop:"8px",borderRadius:"3px",display:"flex",alignItems:"center",gap:"8px"}}>
+                <span style={{color:C.gold,fontWeight:"700",fontSize:"10px"}}>{new Date(date+"T12:00:00Z").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric"})}</span>
+                <span style={{fontSize:"8.5px",color:C.muted}}>{byDate[date].filter(e=>e.imp==="HIGH").length} HIGH · {byDate[date].filter(e=>e.imp==="MED").length} MED</span>
+              </div>
+              {byDate[date].map((e,i)=>{
+                const et=new Date(e.dt),past=et<now,soon=!past&&(et-now)<7200000;
+                const ic=impColor[e.imp];
+                const isReleased=e.actual&&e.actual!=="–";
+                return(
+                  <div key={i} style={{display:"flex",alignItems:"flex-start",gap:"8px",padding:"7px 4px",borderBottom:`1px solid ${C.bdr}22`,opacity:past?0.5:1,background:soon?"#ff9f1c05":"transparent"}}>
+                    {/* Time */}
+                    <div style={{minWidth:"45px",fontSize:"9.5px",color:soon?C.amber:C.muted,fontFamily:"monospace",flexShrink:0}}>{e.dt.split(" ")[1]?.slice(0,5)}{soon?" ⚡":""}</div>
+                    {/* CCY badge */}
+                    <div style={{minWidth:"36px",flexShrink:0}}><Bdg label={e.ccy} color={ic}/></div>
+                    {/* Impact dot */}
+                    <div style={{width:"8px",height:"8px",borderRadius:"50%",background:ic,flexShrink:0,marginTop:"3px"}}/>
+                    {/* Event name */}
+                    <div style={{flex:1,fontSize:"10.5px",fontWeight:e.imp==="HIGH"?"700":"400",color:e.imp==="HIGH"?C.text:"#b8cde0",lineHeight:"1.4"}}>{e.ev}</div>
+                    {/* Forecast */}
+                    <div style={{minWidth:"52px",textAlign:"right",flexShrink:0}}>
+                      <div style={{fontSize:"8.5px",color:C.muted}}>F: <span style={{color:C.gold,fontWeight:"700"}}>{e.fc}</span></div>
+                      <div style={{fontSize:"8.5px",color:C.muted}}>P: {e.pr}</div>
+                      {isReleased&&<div style={{fontSize:"8.5px",color:C.green,fontWeight:"700"}}>A: {e.actual}</div>}
+                    </div>
+                    {/* Status */}
+                    <div style={{minWidth:"50px",textAlign:"right",flexShrink:0}}><Bdg label={isReleased?"ACTUAL":soon?"SOON ⚡":past?"PENDING":"UPCOMING"} color={isReleased?C.green:soon?C.amber:past?C.muted:C.dim} sz="7.5px"/></div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ─── ACTIVE TRADES ────────────────────────────────────────────────────
   function ActiveTrades(){
     return(
       <div>
@@ -968,14 +1022,7 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
                 <div style={{display:"flex",justifyContent:"space-between",fontSize:"8px",color:C.muted,marginBottom:"2px"}}><span>TP1 progress</span><span style={{color:prog>=100?C.gold:C.text}}>{Math.round(prog)}%</span></div>
                 <div style={{height:"3px",background:C.bdr,borderRadius:"2px"}}><div style={{height:"100%",width:`${prog}%`,background:prog>=100?C.gold:C.green,borderRadius:"2px",transition:"width 0.8s"}}/></div>
               </div>
-              <div style={{fontSize:"8.5px",color:C.muted,marginBottom:"6px"}}>Strategy: <span style={{color:C.gold}}>{t.primaryStrategy?.name}</span> · {t.lotSize}M lots · $${t.riskAmount} risk · R:R 1:{t.rr1}/1:{t.rr2}/1:{t.rr3}</div>
-          <textarea
-            defaultValue={t.notes||""}
-            onBlur={e=>{const v=e.target.value;setTrades(prev=>prev.map(tr=>tr.id===t.id?{...tr,notes:v}:tr));}}
-            placeholder="Trade notes... (entry reason, confluences, plan)"
-            rows={1}
-            style={{width:"100%",background:C.bg,border:`1px solid ${C.bdr}`,borderRadius:"3px",color:C.muted,padding:"5px 8px",fontSize:"8.5px",fontFamily:"inherit",outline:"none",resize:"vertical",boxSizing:"border-box",marginBottom:"6px"}}
-          />
+              <div style={{fontSize:"8.5px",color:C.muted,marginBottom:"8px"}}>Strategy: <span style={{color:C.gold}}>{t.primaryStrategy?.name}</span> · {t.lotSize}M lots · $${t.riskAmount} risk · R:R 1:{t.rr1}/1:{t.rr2}/1:{t.rr3}</div>
               <div style={{display:"flex",gap:"7px"}}>
                 <Btn label="✓ WIN"  color={C.green} onClick={()=>closeT(t.id,"WIN")}  style={{flex:1,fontSize:"10px",padding:"6px"}}/>
                 <Btn label="✗ LOSS" color={C.red}   onClick={()=>closeT(t.id,"LOSS")} style={{flex:1,fontSize:"10px",padding:"6px"}}/>
@@ -989,7 +1036,6 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
   }
 
   // ─── PERFORMANCE ─────────────────────────────────────────────────────
-
   function Performance(){
     return(
       <div>
@@ -1003,58 +1049,6 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
               </div>
             ))}
           </div>
-        </div>
-        {/* Equity Curve */}
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"12px",marginBottom:"10px"}}>
-          <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>▲ EQUITY CURVE</div>
-          {history.length<2?(
-            <div style={{textAlign:"center",padding:"20px",fontSize:"9px",color:C.muted}}>Close 2+ trades to see equity curve</div>
-          ):(()=>{
-            const startBal=settings.acct;
-            const points=[startBal];
-            history.forEach(t=>points.push(points[points.length-1]+(t.finalPnl||0)));
-            const minV=Math.min(...points),maxV=Math.max(...points);
-            const range=maxV-minV||1;
-            const W=320,H=80,pad=8;
-            const x=(i)=>pad+(i/(points.length-1))*(W-pad*2);
-            const y=(v)=>H-pad-((v-minV)/range)*(H-pad*2);
-            const path=points.map((v,i)=>`${i===0?"M":"L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
-            const fillPath=path+` L${x(points.length-1).toFixed(1)},${H} L${x(0).toFixed(1)},${H} Z`;
-            const isProfit=points[points.length-1]>=startBal;
-            const lineCol=isProfit?C.green:C.red;
-            const peak=Math.max(...points);
-            const peakIdx=points.indexOf(peak);
-            const maxDD=((peak-Math.min(...points.slice(peakIdx)))/peak*100).toFixed(1);
-            return(
-              <div>
-                <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:"80px",display:"block"}}>
-                  <defs>
-                    <linearGradient id="ecGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={lineCol} stopOpacity="0.3"/>
-                      <stop offset="100%" stopColor={lineCol} stopOpacity="0.02"/>
-                    </linearGradient>
-                  </defs>
-                  {/* Zero line */}
-                  <line x1={pad} y1={y(startBal)} x2={W-pad} y2={y(startBal)} stroke={C.bdr} strokeWidth="0.5" strokeDasharray="3,3"/>
-                  {/* Fill */}
-                  <path d={fillPath} fill="url(#ecGrad)"/>
-                  {/* Line */}
-                  <path d={path} fill="none" stroke={lineCol} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>
-                  {/* Start dot */}
-                  <circle cx={x(0)} cy={y(points[0])} r="2.5" fill={C.gold}/>
-                  {/* End dot */}
-                  <circle cx={x(points.length-1)} cy={y(points[points.length-1])} r="3" fill={lineCol}/>
-                </svg>
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:"8px",color:C.muted,marginTop:"5px",flexWrap:"wrap",gap:"4px"}}>
-                  <span>Start: <strong style={{color:C.text}}>${startBal.toLocaleString()}</strong></span>
-                  <span>Peak: <strong style={{color:C.green}}>${peak.toFixed(2)}</strong></span>
-                  <span>Current: <strong style={{color:isProfit?C.green:C.red}}>${points[points.length-1].toFixed(2)}</strong></span>
-                  <span>Max DD: <strong style={{color:C.red}}>{maxDD}%</strong></span>
-                  <span>Trades: <strong style={{color:C.text}}>{history.length}</strong></span>
-                </div>
-              </div>
-            );
-          })()}
         </div>
         <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"12px",marginBottom:"10px"}}>
           <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>▲ BY STYLE</div>
@@ -1095,8 +1089,6 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
   }
 
   // ─── ANALYZER ─────────────────────────────────────────────────────────
-
-  // ─── ANALYZER ─────────────────────────────────────────────────────────
   function Analyzer(){
     // analyzerTab lifted to root — no reset on price tick
     const byStr={};
@@ -1117,18 +1109,16 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
     // Market context data
     const REGIMES=[
       {ccy:"USD",regime:"BEARISH",strength:"STRONG",detail:"DXY testing 100 handle. Fed on hold at 3.875%. NFP 128K miss. CPI Apr 10 pivotal. Structural downtrend from 2025 peak.",best_strat:["CB_DIV","REAL_YLD","GLOB_MAC"],avoid:["CARRY"],evidence:"J.P. Morgan 2026 Outlook: post-peak USD world",url:"https://www.jpmorgan.com/insights/global-research/outlook/market-outlook"},
-      {ccy:"JPY",regime:"BULLISH",strength:"STRONG",detail:"BOJ only G10 hiker — 0.75% confirmed. Wage growth 3.1% above 3% threshold. MUFG target USD/JPY 146. Structural JPY appreciation underway.",best_strat:["BOJ_NORM","CB_DIV","SAFE_HVN"],avoid:["CARRY"],evidence:"MUFG: Post-peak USD world, Dec 2025",url:"https://www.mufgresearch.com/"},
+      {ccy:"JPY",regime:"BULLISH",strength:"STRONG",detail:"BOJ only G10 hiker — 0.75% confirmed. Wage growth 3.1% above 3% threshold. MUFG target USD/JPY 146. Structural JPY appreciation underway.",best_strat:["BOJ_NORM","CB_DIV","SAFE_HVN"],avoid:["CARRY"],evidence:"MUFG: Post-peak USD world, Dec 2025",url:"https://www.mufgresearch.com/fx/fx-focus-g10-fx-2026-outlook-in-a-post-peak-usd-world-19-december-2025/"},
       {ccy:"EUR",regime:"BULLISH",strength:"MOD",detail:"ECB hawkish hold 2.00%. Schnabel: hike more likely than cut. German fiscal stimulus supporting growth. EUR/USD above 1.16.",best_strat:["CB_DIV","CB_COMM","GRW_DIV"],avoid:["BB_FADE"],evidence:"ING Think: G10 FX Outlook 2026",url:"https://think.ing.com/articles/fx-outlook-2026-our-main-calls/"},
-      {ccy:"GBP",regime:"NEUTRAL",strength:"MOD",detail:"BOE easing bias vs sticky 3% CPI. EUR/GBP rising toward 0.88-0.90 as ECB/BOE policy divergence asserts. GBP holds only on broad USD weakness. UK GDP Apr 11 pivotal.",best_strat:["CB_DIV","REAL_YLD","CS_MOM"],avoid:["CARRY","UIP_DEV"],evidence:"ING Think: EUR/GBP toward 0.88-0.90",url:"https://think.ing.com/articles/fx-outlook-2026-our-main-calls/"},
       {ccy:"NZD",regime:"BEARISH",strength:"STRONG",detail:"RBNZ cut to 3.00% Apr 9. 325bp of cuts since Aug 2024 — most aggressive G10 easer. NZ in recession. Sell NZD on all rallies.",best_strat:["RATE_SRP","CB_DIV","CS_MOM"],avoid:["UIP_DEV"],evidence:"RBNZ Apr 2026: 3.00% decision + press conference",url:"https://www.rbnz.govt.nz/monetary-policy/"},
-      {ccy:"AUD",regime:"BULLISH",strength:"MOD",detail:"RBA hawkish hold 3.85%. Bullock: no cuts imminent. China PMI 50.5 supportive. AUD/USD 0.73 year-end target (RBC).",best_strat:["CB_DIV","COMD_CCY","EQ_BETA"],avoid:["CARRY"],evidence:"RBC Capital Markets FX Report Card",url:"https://www.rbccm.com/"},
-      {ccy:"CAD",regime:"BEARISH",strength:"MOD",detail:"BOC dovish hold 2.25%. USMCA review July 2026 trade uncertainty. Oil surplus weighs. USD/CAD toward 1.40 (RBC). Sell CAD on rallies.",best_strat:["CB_DIV","TOT_SHOCK","COMD_CCY"],avoid:["CARRY","UIP_DEV"],evidence:"RBC: USD/CAD elevated on USMCA review risk",url:"https://www.rbccm.com/"},
-      {ccy:"CHF",regime:"BULLISH",strength:"MOD",detail:"Dollar debasement trade driving CHF appreciation. SNB relaxed about strength. EUR/CHF 0.93 target. Safe haven demand in risk-off.",best_strat:["SAFE_HVN","GLOB_MAC","REAL_YLD"],avoid:["CARRY"],evidence:"BlackRock 2026 Macro Outlook",url:"https://www.blackrock.com/institutions/en-us/insights/2026-macro-outlook"},
+      {ccy:"AUD",regime:"BULLISH",strength:"MOD",detail:"RBA hawkish hold 3.85%. Bullock: no cuts imminent. China PMI 50.5 supportive. AUD/USD 0.73 year-end target (RBC).",best_strat:["CB_DIV","COMD_CCY","EQ_BETA"],avoid:["CARRY"],evidence:"RBC Capital Markets FX Report Card",url:"https://www.rbccm.com/assets/rbccm/docs/fx/currency-report-card.pdf"},
+      {ccy:"CHF",regime:"BULLISH",strength:"MOD",detail:"Dollar debasement trade driving CHF appreciation. SNB relaxed about strength. EUR/CHF 0.93 target. Safe haven demand.",best_strat:["SAFE_HVN","GLOB_MAC","REAL_YLD"],avoid:["CARRY"],evidence:"BlackRock 2026 Macro Outlook",url:"https://www.blackrock.com/institutions/en-us/insights/2026-macro-outlook"},
     ];
 
     const REGIMECOLOR={BULLISH:C.green,BEARISH:C.red,NEUTRAL:C.gold};
     const STRENGTHCOLOR={STRONG:C.green,MOD:C.gold,WEAK:C.muted};
-    const ATABS=[{id:"regime",l:"Regime"},{id:"pairs",l:"Pair Matrix"},{id:"correlation",l:"Correlation"},{id:"performance",l:"Strategy Perf"},{id:"risk",l:"Risk Metrics"}];
+    const ATABS=[{id:"regime",l:"Regime"},{id:"pairs",l:"Pair Matrix"},{id:"performance",l:"Strategy Perf"},{id:"risk",l:"Risk Metrics"}];
 
     // Pair performance
     const byPair={};
@@ -1199,83 +1189,6 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
         )}
 
         {/* PAIR MATRIX */}
-
-        {analyzerTab==="correlation"&&(
-          <div>
-            <div style={{background:C.bg2,border:`1px solid ${C.gold}33`,borderRadius:"6px",padding:"12px",marginBottom:"10px"}}>
-              <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"5px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>◎ G10 CURRENCY CORRELATION MATRIX</div>
-              <div style={{fontSize:"8.5px",color:C.muted,marginBottom:"10px",lineHeight:"1.6"}}>Rolling 3-month correlation. Red = strong positive (avoid trading both). Blue = negative (hedge potential). Values update quarterly from BIS/academic sources.</div>
-              {(()=>{
-                const ccys8=["USD","EUR","GBP","JPY","AUD","CAD","CHF","NZD"];
-                // Academically sourced G10 correlations (BIS 2024, ING Research)
-                // Values represent typical correlation of CCY/USD pairs
-                const CORR={
-                  "USD-EUR":-0.95,"USD-GBP":-0.82,"USD-JPY": 0.35,"USD-AUD":-0.72,
-                  "USD-CAD": 0.68,"USD-CHF":-0.88,"USD-NZD":-0.69,
-                  "EUR-GBP": 0.87,"EUR-JPY":-0.28,"EUR-AUD": 0.71,
-                  "EUR-CAD":-0.62,"EUR-CHF": 0.92,"EUR-NZD": 0.65,
-                  "GBP-JPY":-0.22,"GBP-AUD": 0.63,"GBP-CAD":-0.55,
-                  "GBP-CHF": 0.78,"GBP-NZD": 0.58,
-                  "JPY-AUD":-0.45,"JPY-CAD": 0.31,"JPY-CHF": 0.42,"JPY-NZD":-0.38,
-                  "AUD-CAD":-0.58,"AUD-CHF": 0.65,"AUD-NZD": 0.88,
-                  "CAD-CHF":-0.61,"CAD-NZD":-0.52,
-                  "CHF-NZD": 0.61,
-                };
-                const getCorr=(a,b)=>{
-                  if(a===b)return 1;
-                  const k1=a+"-"+b,k2=b+"-"+a;
-                  return CORR[k1]!==undefined?CORR[k1]:CORR[k2]!==undefined?CORR[k2]:0;
-                };
-                const corrColor=(v)=>{
-                  if(v>=0.8)return "#ff4560";
-                  if(v>=0.6)return "#ff7c7c";
-                  if(v>=0.4)return "#ffaa44";
-                  if(v>=-0.4)return C.muted;
-                  if(v>=-0.6)return "#44aaff";
-                  if(v>=-0.8)return "#2288ff";
-                  return "#0055ff";
-                };
-                const cellSize=36;
-                return(
-                  <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-                    <div style={{display:"grid",gridTemplateColumns:`60px ${ccys8.map(()=>cellSize+"px").join(" ")}`,gap:"2px",minWidth:`${60+ccys8.length*(cellSize+2)}px`}}>
-                      {/* Header row */}
-                      <div></div>
-                      {ccys8.map(c=><div key={c} style={{width:cellSize,textAlign:"center",fontSize:"8px",fontWeight:"700",color:C.gold,padding:"4px 0"}}>{c}</div>)}
-                      {/* Data rows */}
-                      {ccys8.map(r=>(
-                        <React.Fragment key={r}>
-                          <div style={{fontSize:"8px",fontWeight:"700",color:C.gold,display:"flex",alignItems:"center",paddingRight:"6px"}}>{r}</div>
-                          {ccys8.map(c=>{
-                            const v=getCorr(r,c);
-                            const bg=corrColor(v);
-                            const isSelf=r===c;
-                            return(
-                              <div key={c} style={{width:cellSize,height:cellSize,background:isSelf?"#ffffff22":bg+"33",border:`1px solid ${isSelf?"#ffffff22":bg+"66"}`,borderRadius:"3px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"8px",fontWeight:"700",color:isSelf?C.gold:bg}}>
-                                {isSelf?"▪":v.toFixed(2)}
-                              </div>
-                            );
-                          })}
-                        </React.Fragment>
-                      ))}
-                    </div>
-                    <div style={{display:"flex",gap:"10px",marginTop:"10px",flexWrap:"wrap"}}>
-                      {[["≥0.8 Redundant",C.red],["0.4-0.8 Positive","#ff9900"],["−0.4-0.4 Neutral",C.muted],["−0.4-−0.8 Negative","#4488ff"],["≤−0.8 Hedge","#0055ff"]].map(([l,c])=>(
-                        <div key={l} style={{display:"flex",alignItems:"center",gap:"4px"}}>
-                          <div style={{width:"10px",height:"10px",background:c+"44",border:`1px solid ${c}`,borderRadius:"2px"}}/>
-                          <span style={{fontSize:"7.5px",color:C.muted}}>{l}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{background:C.bg1,border:`1px solid ${C.bdr}`,borderRadius:"4px",padding:"8px 10px",marginTop:"8px",fontSize:"8.5px",color:C.muted,lineHeight:"1.7"}}>
-                      <strong style={{color:C.text}}>Portfolio heat rule:</strong> EUR/USD + GBP/USD correlation = 0.87 — trading both means double USD exposure. Max 6% portfolio heat. EUR/USD + USD/JPY (−0.28) is a safer diversified combination. AUD/USD + NZD/USD (0.88) should count as one position.
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
-        )}
         {analyzerTab==="pairs"&&(
           <div>
             <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"11px 13px",marginBottom:"10px"}}>
@@ -1370,32 +1283,6 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
                 </div>
               ))}
             </div>
-            {/* Risk of Ruin Calculator */}
-            {(()=>{
-              const wr2=perf.wr/100||0.55;
-              const avgRR2=perf.pf>0?perf.pf:1.5;
-              const riskPct2=settings.risk/100||0.02;
-              const edge2=wr2-(1-wr2)/avgRR2;
-              const q2=(1-edge2)/(1+edge2);
-              const rorPct=edge2>0?Math.max(0,Math.min(100,Math.pow(Math.max(0,q2),1/riskPct2)*100)):100;
-              const kelly2=(wr2-(1-wr2)/avgRR2)*100;
-              return(
-                <div style={{background:C.bg2,border:`1px solid ${C.gold}33`,borderRadius:"6px",padding:"12px",marginTop:"10px"}}>
-                  <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>⚠ RISK OF RUIN CALCULATOR</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"7px",marginBottom:"8px"}}>
-                    {[["Win Rate",`${(wr2*100).toFixed(1)}%`,wr2>=0.55?C.green:C.amber],["Avg R:R",`1:${avgRR2.toFixed(2)}`,avgRR2>=1.5?C.green:C.amber],["Risk/Trade",`${(riskPct2*100).toFixed(1)}%`,riskPct2<=0.02?C.green:C.red],["Edge",`${(edge2*100).toFixed(2)}%`,edge2>0?C.green:C.red],["Kelly %",`${kelly2.toFixed(1)}%`,kelly2>0?C.green:C.red],["Risk of Ruin",`${rorPct.toFixed(1)}%`,rorPct<5?C.green:rorPct<20?C.amber:C.red]].map(([l,v,c])=>(
-                      <div key={l} style={{background:C.bg1,border:`1px solid ${c}33`,borderRadius:"4px",padding:"8px 10px"}}>
-                        <div style={{fontSize:"7.5px",color:C.muted,letterSpacing:"1px",marginBottom:"3px"}}>{l}</div>
-                        <div style={{fontSize:"16px",fontWeight:"700",color:c}}>{v}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{background:edge2>0?"#071407":"#14070a",border:`1px solid ${edge2>0?C.green:C.red}33`,borderRadius:"4px",padding:"9px 11px",fontSize:"8.5px",color:C.muted,lineHeight:"1.8"}}>
-                    {edge2>0?<span><strong style={{color:C.green}}>Positive edge confirmed.</strong> {(wr2*100).toFixed(0)}% WR + 1:{avgRR2.toFixed(1)} R:R = {(edge2*100).toFixed(1)}% edge. Risk of ruin: <strong style={{color:C.green}}>{rorPct.toFixed(1)}%</strong>. Kelly: risk max <strong style={{color:C.gold}}>{Math.min(kelly2,5).toFixed(1)}%</strong>/trade.</span>:<span><strong style={{color:C.red}}>No positive edge yet.</strong> Keep paper trading until win rate and R:R improve. Risk of ruin at current stats: <strong style={{color:C.red}}>{rorPct.toFixed(0)}%</strong>.</span>}
-                  </div>
-                </div>
-              );
-            })()}
           </div>
         )}
       </div>
@@ -1403,278 +1290,7 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
   }
 
 
-  function NewsTab(){
-    const ccys=["ALL","USD","EUR","GBP","JPY","AUD","CAD","CHF","NZD","NOK","SEK"];
-    const imps=["ALL","HIGH","MED","LOW"];
-    // State lives at root — no remount loss on price ticks
-    const loading=newsLoading,setLoading=setNewsLoading;
-    const batchNum=newsBatch,setBatchNum=setNewsBatch;
-    const hasLoaded=newsLoaded,setHasLoaded=setNewsLoaded;
-
-    // loadNews called from root useEffect below
-    const src=liveArts;
-    const displayed=src.filter(n=>{
-      if(nCcy!=="ALL"&&n.ccy!==nCcy)return false;
-      if(nImp!=="ALL"&&n.imp!==nImp)return false;
-      return true;
-    });
-    const impC={HIGH:C.amber,MED:C.gold,LOW:C.muted};
-    return(
-      <div>
-        {/* Filters */}
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"10px 12px",marginBottom:"8px"}}>
-          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"6px"}}>
-            <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"46px"}}>CURRENCY:</span>
-            {ccys.map(f=><Sm key={f} label={f} active={nCcy===f} onClick={()=>setNCcy(f)}/>)}
-          </div>
-          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center"}}>
-            <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"46px"}}>IMPACT:</span>
-            {imps.map(f=><Sm key={f} label={f} active={nImp===f} onClick={()=>setNImp(f)} color={f==="HIGH"?C.red:f==="MED"?C.amber:f==="LOW"?C.muted:C.gold}/>)}
-          </div>
-        </div>
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"10px 12px"}}>
-          {/* Header */}
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>
-            <div>
-              <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px"}}>◆ AXIOM NEWS — {settings.apiKey?"AI GENERATED · DEPLOY FOR LIVE":"STATIC FEED · SANDBOX MODE"}</div>
-              <div style={{fontSize:"7.5px",color:C.muted,marginTop:"2px"}}>{displayed.length} articles · {settings.apiKey?"AI-generated from Apr 2026 macro context":"Sandbox: API blocked · deploy to Netlify for live AI news · scroll ↓ for more"}</div>
-            </div>
-            {settings.apiKey&&<button onClick={()=>loadNews(true)} disabled={loading} style={{padding:"4px 9px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}44`,borderRadius:"3px",cursor:"pointer",fontSize:"8.5px",fontWeight:"700",fontFamily:"inherit",opacity:loading?0.5:1}}>↺ Refresh</button>}
-          </div>
-          {/* No key prompt */}
-          {!settings.apiKey&&<div style={{background:"#1a0a00",border:`1px solid ${C.amber}44`,borderRadius:"4px",padding:"11px",marginBottom:"10px",textAlign:"center"}}>
-            <div style={{fontSize:"10px",color:C.amber,fontWeight:"700",marginBottom:"4px"}}>🔑 Add API Key for Real-Time Bloomberg-Style News</div>
-            <div style={{fontSize:"8.5px",color:C.muted,lineHeight:"1.6",marginBottom:"7px"}}>AXIOM uses Claude + real-time web search to fetch actual articles from Reuters, Bloomberg, FT, WSJ and more. Unlimited depth — tap Load Older to scroll back weeks.</div>
-            <button onClick={()=>setTab("settings")} style={{padding:"6px 14px",background:C.gold,color:C.bg,border:"none",borderRadius:"3px",cursor:"pointer",fontWeight:"700",fontSize:"9.5px",fontFamily:"inherit"}}>⚙ GO TO SETTINGS →</button>
-          </div>}
-          {/* Loading */}
-          {loading&&!displayed.length&&<div style={{padding:"24px",textAlign:"center"}}>
-            <div style={{fontSize:"11px",color:C.gold,marginBottom:"4px"}}>⚡ Searching web for live FX news...</div>
-            <div style={{fontSize:"8.5px",color:C.muted}}>Fetching real articles via Claude web search</div>
-          </div>}
-          {/* Articles */}
-          {displayed.map(n=>{
-            const ic=n.impact==="BULLISH"?C.green:n.impact==="BEARISH"?C.red:C.muted;
-            return(
-              <div key={n.id} onClick={()=>n.url&&window.open(n.url,"_blank","noopener")}
-                style={{background:C.bg1,border:`1px solid ${ic}22`,borderLeft:`3px solid ${ic}`,borderRadius:"4px",padding:"9px 11px",marginBottom:"7px",cursor:n.url?"pointer":"default"}}
-                onMouseEnter={e=>{if(n.url){e.currentTarget.style.borderColor=ic;e.currentTarget.style.background="#0d1e35";}}}
-                onMouseLeave={e=>{e.currentTarget.style.borderColor=ic+"22";e.currentTarget.style.background=C.bg1;}}>
-                <div style={{display:"flex",gap:"5px",alignItems:"center",marginBottom:"4px",flexWrap:"wrap"}}>
-                  <Bdg label={n.ccy} color={ic}/><Bdg label={n.imp||"MED"} color={impC[n.imp]||C.gold}/><Bdg label={n.impact} color={ic}/>
-                  {n.source&&<Bdg label={n.source} color={C.blue}/>}
-                  <span style={{marginLeft:"auto",fontSize:"8px",color:C.muted,fontFamily:"monospace"}}>{n.dt}</span>
-                  {n.url&&<span style={{fontSize:"8px",color:C.blue,fontWeight:"700"}}>↗</span>}
-                </div>
-                <div style={{fontSize:"11px",color:"#b8cde0",lineHeight:"1.5",fontWeight:n.imp==="HIGH"?"600":"400",marginBottom:n.detail?"4px":"0"}}>{n.hl}</div>
-                {n.detail&&<div style={{fontSize:"9px",color:C.muted,lineHeight:"1.45"}}>{n.detail}</div>}
-              </div>
-            );
-          })}
-          {loading&&displayed.length>0&&<div style={{padding:"10px",textAlign:"center",color:C.gold,fontSize:"10px"}}>⚡ Loading more articles...</div>}
-          {!loading&&hasLoaded&&<button onClick={()=>loadNews(false)} style={{width:"100%",padding:"11px",background:C.bg1,color:C.gold,border:`1px solid ${C.gold}44`,borderRadius:"4px",cursor:"pointer",fontSize:"11px",fontWeight:"700",fontFamily:"inherit",marginTop:"4px"}}>↓ LOAD OLDER ARTICLES — search further back in time</button>}
-        </div>
-      </div>
-    );
-  }
-  function CalendarTab(){
-    const now=new Date();
-    const todayStr=now.toISOString().slice(0,10);
-
-    // Merge live FF events with CB_MEETINGS — CB_MEETINGS always shown
-    // Live FF events shown on top when available (Netlify), CB fills gaps
-    const allEvents=calLive
-      ? [...calEvents, ...CB_MEETINGS.filter(cb=>{
-          // Only add CB meetings not already in live FF feed
-          return !calEvents.some(ff=>
-            ff.dt.slice(0,10)===cb.dt.slice(0,10)&&
-            ff.ccy===cb.ccy&&
-            ff.ev.toLowerCase().includes("rate")&&
-            cb.type==="CB Decision"
-          );
-        })]
-      : CB_MEETINGS; // sandbox: CB dates only
-
-    const ccys=["ALL","USD","EUR","GBP","JPY","AUD","CAD","CHF","NZD"];
-    const imps=["ALL","HIGH","MED","LOW"];
-    const types=["ALL","CB Decision","CB Speech","Inflation","Employment","GDP","PMI","Sentiment","Trade","Manufacturing","Retail","Housing","Indicator","Monetary","Inventory","Income","Economic Release"];
-    const views=["TODAY","THIS WEEK","NEXT WEEK","CB DATES"];
-
-    // Get week boundaries (Mon-Sun)
-    const getWeekBounds=(offset=0)=>{
-      const d=new Date(now);
-      const day=d.getDay();
-      const mon=new Date(d);
-      mon.setDate(d.getDate()-(day===0?6:day-1)+(offset*7));
-      mon.setHours(0,0,0,0);
-      const sun=new Date(mon);
-      sun.setDate(mon.getDate()+7);
-      return{start:mon,end:sun};
-    };
-
-    const filtered=allEvents.filter(e=>{
-      const eDate=e.dt.slice(0,10);
-      const eTime=new Date(e.dt.replace(" ","T")+"Z");
-      if(calView==="TODAY"&&eDate!==todayStr)return false;
-      if(calView==="THIS WEEK"){
-        const{start,end}=getWeekBounds(0);
-        if(eTime<start||eTime>=end)return false;
-      }
-      if(calView==="NEXT WEEK"){
-        const{start,end}=getWeekBounds(1);
-        if(eTime<start||eTime>=end)return false;
-      }
-      if(calView==="CB DATES"&&e.type!=="CB Decision"&&e.type!=="CB Speech")return false;
-      if(calCcy!=="ALL"&&e.ccy!==calCcy)return false;
-      if(calImp!=="ALL"&&e.imp!==calImp)return false;
-      if(calType!=="ALL"&&e.type!==calType)return false;
-      return true;
-    }).sort((a,b)=>a.dt.localeCompare(b.dt));
-
-    // Group by date
-    const grouped={};
-    filtered.forEach(e=>{
-      const d=e.dt.slice(0,10);
-      if(!grouped[d])grouped[d]=[];
-      grouped[d].push(e);
-    });
-
-    const fmtDate=(ds)=>{
-      const d=new Date(ds+"T12:00:00Z");
-      return d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric"});
-    };
-
-    const impC={HIGH:C.red,MED:C.amber,LOW:C.muted};
-    const impDot={HIGH:"🔴",MED:"🟡",LOW:"⚪"};
-
-    return(
-      <div>
-        {/* Filters */}
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"10px 12px",marginBottom:"8px"}}>
-          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"6px"}}>
-            <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"40px"}}>VIEW:</span>
-            {views.map(v=><Sm key={v} label={v} active={calView===v} onClick={()=>setCalView(v)}/>)}
-          </div>
-          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"6px"}}>
-            <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"40px"}}>CCY:</span>
-            {ccys.map(c=><Sm key={c} label={c} active={calCcy===c} onClick={()=>setCalCcy(c)}/>)}
-          </div>
-          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"6px"}}>
-            <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"40px"}}>IMPACT:</span>
-            {imps.map(i=><Sm key={i} label={i} active={calImp===i} onClick={()=>setCalImp(i)} color={i==="HIGH"?C.red:i==="MED"?C.amber:i==="LOW"?C.muted:C.gold}/>)}
-          </div>
-          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center"}}>
-            <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"40px"}}>TYPE:</span>
-            {types.map(t=><Sm key={t} label={t} active={calType===t} onClick={()=>setCalType(t)}/>)}
-          </div>
-        </div>
-
-        {/* Live status bar */}
-        <div style={{background:calLive?"#071407":"#14100a",border:`1px solid ${calLive?C.green:C.amber}33`,borderRadius:"5px",padding:"8px 12px",marginBottom:"8px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"6px"}}>
-          <div>
-            <div style={{fontSize:"9px",fontWeight:"700",color:calLive?C.green:C.amber,letterSpacing:"1.5px"}}>
-              {calLoading?"⏳ LOADING FOREXFACTORY FEED...":calLive?"✓ LIVE — ForexFactory + CB Official Dates (ET)":"📅 CB MEETING DATES ONLY — Deploy to Netlify for live FF data"}
-            </div>
-            <div style={{fontSize:"7.5px",color:C.muted,marginTop:"2px"}}>
-              {calLive?`${calEvents.length} live events + CB meetings · Auto-refreshes every 30 min · All times ET`:"CB meeting dates from official central bank websites · All macro releases require Netlify deployment"}
-            </div>
-          </div>
-          <button onClick={()=>{setCalLive(false);setCalLastFetch(0);loadCalendar();}}
-            disabled={calLoading}
-            style={{padding:"4px 10px",background:calLive?C.green+"22":C.amber+"22",color:calLive?C.green:C.amber,border:`1px solid ${calLive?C.green:C.amber}44`,borderRadius:"3px",cursor:"pointer",fontSize:"8.5px",fontWeight:"700",fontFamily:"inherit",opacity:calLoading?0.5:1}}>
-            ↺ Refresh
-          </button>
-        </div>
-
-        {/* Calendar content */}
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"10px 12px"}}>
-          <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <span>◷ ECONOMIC CALENDAR — {calView} · {filtered.length} EVENTS</span>
-            <span style={{fontSize:"8px",color:C.muted}}>{calCcy!=="ALL"?calCcy:"All CCY"} · {calImp!=="ALL"?calImp:"All Impacts"}</span>
-          </div>
-
-          {calLoading&&(
-            <div style={{padding:"20px",textAlign:"center"}}>
-              <div style={{fontSize:"11px",color:C.gold,marginBottom:"4px"}}>⏳ Fetching ForexFactory live data...</div>
-              <div style={{fontSize:"8.5px",color:C.muted}}>Connecting to nfs.faireconomy.media</div>
-            </div>
-          )}
-
-          {!calLoading&&filtered.length===0&&(
-            <div style={{padding:"20px",textAlign:"center",fontSize:"10px",color:C.muted,lineHeight:"1.8"}}>
-              {calLive
-                ?"No events match your filters. Try changing CCY, Impact, or View."
-                :<span>No live data in sandbox.<br/>CB meeting dates shown in <strong style={{color:C.gold}}>CB DATES</strong> view.<br/>Deploy to Netlify for full ForexFactory feed.</span>
-              }
-            </div>
-          )}
-
-          {Object.keys(grouped).sort().map(dateStr=>{
-            const dayEvents=grouped[dateStr];
-            const highCount=dayEvents.filter(e=>e.imp==="HIGH").length;
-            const medCount=dayEvents.filter(e=>e.imp==="MED").length;
-            return(
-              <div key={dateStr} style={{marginBottom:"12px"}}>
-                {/* Date header */}
-                <div style={{display:"flex",alignItems:"center",gap:"8px",padding:"6px 8px",background:C.bg1,borderRadius:"4px",marginBottom:"6px"}}>
-                  <span style={{fontWeight:"700",color:C.gold,fontSize:"11px"}}>{fmtDate(dateStr)}</span>
-                  {dateStr===todayStr&&<span style={{padding:"2px 6px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}44`,borderRadius:"2px",fontSize:"7.5px",fontWeight:"700"}}>TODAY</span>}
-                  <span style={{marginLeft:"auto",fontSize:"8px",color:C.muted}}>
-                    {highCount>0&&<span style={{color:C.red,fontWeight:"700"}}>{highCount} HIGH</span>}
-                    {highCount>0&&medCount>0&&" · "}
-                    {medCount>0&&<span style={{color:C.amber}}>{medCount} MED</span>}
-                  </span>
-                </div>
-
-                {/* Events */}
-                {dayEvents.map((e,i)=>{
-                  const ic=impC[e.imp]||C.muted;
-                  const isLive=e.source==="ForexFactory";
-                  const isCB=e.type==="CB Decision"||e.type==="CB Speech";
-                  const hasActual=e.actual&&e.actual!=="–"&&e.actual!=="";
-                  return(
-                    <div key={i} style={{display:"flex",alignItems:"stretch",gap:"0",marginBottom:"4px",border:`1px solid ${isCB?C.gold+"44":ic+"22"}`,borderLeft:`3px solid ${isCB?C.gold:ic}`,borderRadius:"4px",background:isCB?C.bg1+"88":C.bg,overflow:"hidden"}}>
-                      {/* Time */}
-                      <div style={{padding:"7px 8px",minWidth:"52px",borderRight:`1px solid ${C.bdr}22`,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                        <span style={{fontSize:"9px",color:C.muted,fontFamily:"monospace",whiteSpace:"nowrap"}}>{e.dt.slice(11,16)||"All"}</span>
-                      </div>
-                      {/* CCY badge */}
-                      <div style={{padding:"7px 6px",borderRight:`1px solid ${C.bdr}22`,display:"flex",alignItems:"center"}}>
-                        <span style={{padding:"2px 5px",background:ic+"22",color:ic,border:`1px solid ${ic}33`,borderRadius:"2px",fontSize:"7.5px",fontWeight:"700",minWidth:"28px",textAlign:"center"}}>{e.ccy}</span>
-                      </div>
-                      {/* Impact dot */}
-                      <div style={{padding:"7px 5px",display:"flex",alignItems:"center"}}>
-                        <span style={{fontSize:"9px"}}>{impDot[e.imp]||"⚪"}</span>
-                      </div>
-                      {/* Event name */}
-                      <div style={{flex:1,padding:"7px 8px",display:"flex",alignItems:"center",gap:"5px",flexWrap:"wrap"}}>
-                        <span style={{fontSize:"10px",color:isCB?C.gold:C.text,fontWeight:e.imp==="HIGH"?"700":"400",lineHeight:"1.3"}}>{e.ev}</span>
-                        {isLive&&<span style={{fontSize:"7px",color:C.green,fontWeight:"700"}}>FF</span>}
-                        {isCB&&<span style={{fontSize:"7px",color:C.gold,fontWeight:"700"}}>🏦</span>}
-                      </div>
-                      {/* Forecast / Previous / Actual */}
-                      <div style={{padding:"5px 7px",display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"flex-end",borderLeft:`1px solid ${C.bdr}22`,minWidth:"80px"}}>
-                        {e.fc&&e.fc!=="–"&&<div style={{fontSize:"7.5px",color:C.muted}}>F: <strong style={{color:C.text}}>{e.fc}</strong></div>}
-                        {e.pr&&e.pr!=="–"&&<div style={{fontSize:"7.5px",color:C.muted}}>P: <strong style={{color:C.text}}>{e.pr}</strong></div>}
-                        {hasActual&&<div style={{fontSize:"7.5px",color:C.muted}}>A: <strong style={{color:e.actual>e.fc?C.green:C.red}}>{e.actual}</strong></div>}
-                      </div>
-                      {/* Status */}
-                      <div style={{padding:"7px 6px",display:"flex",alignItems:"center"}}>
-                        <span style={{padding:"2px 5px",background:hasActual?C.green+"22":C.amber+"22",color:hasActual?C.green:C.amber,border:`1px solid ${hasActual?C.green:C.amber}33`,borderRadius:"2px",fontSize:"7px",fontWeight:"700",whiteSpace:"nowrap"}}>
-                          {hasActual?"ACTUAL":"PENDING"}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
-
+  // ─── CB RATES ─────────────────────────────────────────────────────────
   function CBRates(){
     // selCB lifted to root — no reset on price tick
     const CB_HIST={
@@ -1930,39 +1546,10 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
             )}
           </div>
         ))}
-        {/* Seasonal FX Patterns — Q2 2026 */}
-        <div style={{background:C.bg2,border:`1px solid ${C.blue}33`,borderRadius:"6px",padding:"12px",marginTop:"10px"}}>
-          <div style={{fontSize:"9px",fontWeight:"700",color:C.blue,letterSpacing:"2px",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>📅 SEASONAL PATTERNS — Q2 2026 (APR–JUN)</div>
-          <div style={{fontSize:"8.5px",color:C.muted,marginBottom:"10px",lineHeight:"1.6"}}>Historically documented G10 tendencies for Q2. Based on 20-year averages (NBER, BIS, AQR). Use as low-weight confluence only — not standalone signals.</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"7px"}}>
-            {[
-              {ccy:"USD",tend:"BEARISH Q2",reason:"Historically weakest Q2 — fiscal year-end selling, risk-on flows reduce safe haven demand.",hist:"15/20 yrs"},
-              {ccy:"EUR",tend:"BULLISH Q2",reason:"Tourism flows begin, ECB communication cycle typically hawkish pre-summer.",hist:"12/20 yrs"},
-              {ccy:"JPY",tend:"BEARISH APR",reason:"Fiscal year repatriation reverses in April. JPY seasonally weak early Q2.",hist:"13/20 yrs"},
-              {ccy:"AUD",tend:"BULLISH APR-MAY",reason:"China infrastructure spending drives iron ore. AUD/USD avg +2.1% Apr-May.",hist:"14/20 yrs"},
-              {ccy:"GBP",tend:"BULLISH MAY-JUN",reason:"UK data season typically strong. EUR/GBP falls late Q2 (GBP outperforms).",hist:"11/20 yrs"},
-              {ccy:"NZD",tend:"BEARISH Q2",reason:"NZ fiscal year end March. Dairy auction cycle turns. RBNZ cutting adds pressure.",hist:"13/20 yrs"},
-              {ccy:"CAD",tend:"NEUTRAL Q2",reason:"Oil supply increases ahead of summer driving. OPEC+ decisions override seasonal.",hist:"10/20 yrs"},
-              {ccy:"CHF",tend:"BEARISH Q2",reason:"Risk appetite improves Q2 reducing safe haven demand. EUR/CHF tends to rise.",hist:"12/20 yrs"},
-            ].map((s,i)=>{
-              const col=s.tend.includes("BULLISH")?C.green:s.tend.includes("BEARISH")?C.red:C.gold;
-              return(
-                <div key={i} style={{background:C.bg1,border:`1px solid ${col}22`,borderLeft:`3px solid ${col}`,borderRadius:"4px",padding:"8px 10px"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"3px"}}>
-                    <span style={{fontWeight:"700",color:C.text,fontSize:"11px"}}>{s.ccy}</span>
-                    <span style={{fontSize:"7px",color:col,fontWeight:"700"}}>{s.tend}</span>
-                  </div>
-                  <div style={{fontSize:"8px",color:C.muted,lineHeight:"1.5",marginBottom:"3px"}}>{s.reason}</div>
-                  <div style={{fontSize:"7px",color:C.muted}}>Historical: <strong style={{color:C.text}}>{s.hist}</strong></div>
-                </div>
-              );
-            })}
-          </div>
-          <div style={{fontSize:"7.5px",color:C.muted,marginTop:"8px",padding:"7px 9px",background:C.bg1,borderRadius:"3px",lineHeight:"1.6"}}>Source: NBER WP 20427 · BIS Quarterly Review · AQR Factor Research. Seasonal patterns weakened post-2020 due to CB intervention.</div>
-        </div>
       </div>
     );
   }
+  // ─── AI TAB ───────────────────────────────────────────────────────────
   function AITab(){
     const quickQ=["Analyze my open trades","Best USD/JPY setup","Optimal strategy for regime","RBNZ trade plan","Review risk exposure","Top 3 ideas","AUD/JPY with BOJ hike","BOJ impact on crosses"];
     return(
@@ -2275,9 +1862,9 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
                 <input type="text" inputMode="text" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false}
                   value={local.oandaKey||""}
                   onChange={e=>setLocal(p=>({...p,oandaKey:e.target.value}))}
-                  placeholder="Your OANDA live API key..."
+                  placeholder="b41a0f67df1e1284a11d9487cedc06b2-..."
                   style={{width:"100%",background:"#030608",border:`1px solid ${local.oandaKey?C.green:C.bdr}`,borderRadius:"3px",color:local.oandaKey?C.green:C.text,padding:"10px 11px",fontSize:"10px",fontFamily:"monospace",outline:"none",marginBottom:"5px",WebkitAppearance:"none"}}/>
-                <div style={{fontSize:"8px",color:local.oandaKey?C.green:C.muted,lineHeight:"1.5"}}>{"✓ OANDA live prices active via server proxy"}</div>
+                <div style={{fontSize:"8px",color:local.oandaKey?C.green:C.muted,lineHeight:"1.5"}}>{local.oandaKey?"✓ OANDA key set — live prices activate when deployed to Netlify":"OANDA demo key pre-wired in app. Live prices (OANDA LIVE) activate on Netlify deploy. Shows SIM in Claude sandbox (API blocked by browser security)."}</div>
               </div>
             </div>
 
@@ -2606,7 +2193,7 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
             </div>
           </Sec>
           <Sec title="🔑 YOUR PRE-CONFIGURED KEYS" color={C.amber}>
-            {[["Anthropic API Key","sk-ant-api03-...*** (set in Netlify)","AI Chat + News","Pre-wired ✓"],["OANDA API Key","5f7ee6bf-...*** (set in Netlify)","Live FX Prices (LIVE ACCT)","Pre-wired ✓"],["OANDA Account","001-001-21201857-001","Demo Account","Pre-wired ✓"]].map(([l,v,use,status])=>(
+            {[["Anthropic API Key","sk-ant-api03-... (set in Netlify env vars)","AI Chat + News","Pre-wired ✓"],["OANDA API Key","b41a0f67df1e1284...8b255","Live FX Prices","Pre-wired ✓"],["OANDA Account","001-001-21201857-001","Demo Account","Pre-wired ✓"]].map(([l,v,use,status])=>(
               <div key={l} style={{background:C.bg1,border:`1px solid ${C.bdr}`,borderRadius:"4px",padding:"8px 10px",marginBottom:"6px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"3px"}}>
                   <span style={{fontWeight:"700",color:C.text,fontSize:"10px"}}>{l}</span>
@@ -2645,7 +2232,8 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
 <script>
   window.addEventListener('load',()=>{
     const root=ReactDOM.createRoot(document.getElementById('root'));
-    root.render(React.createElement(AxiomFX));
+    window.AxiomFX = AxiomFX;
+root.render(React.createElement(AxiomFX));
   });
 </script>
 </body></html>`}
@@ -2747,182 +2335,68 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
     );
   }
 
-  // ─── SOURCES TAB — 100+ Live Research Sources ──────────────────────────
+  // ─── SOURCES TAB ─────────────────────────────────────────────────────────
   function SourcesTab(){
-    const [srcPage,setSrcPage]=useState(0);
-    const [srcCat,setSrcCat]=useState("ALL");
-    const [liveSrcs,setLiveSrcs]=useState([]);
-    const [srcLoading,setSrcLoading]=useState(false);
-
-    // MASTER SOURCE LIBRARY — 100+ vetted institutional sources
-    const ALL_SOURCES=[
-      // CENTRAL BANKS
-      {cat:"CENTRAL BANKS",name:"Federal Reserve",role:"Fed Funds Rate, FOMC Minutes, Beige Book, PCE",url:"https://www.federalreserve.gov/monetarypolicy/",freq:"8x/year",tier:"S"},
-      {cat:"CENTRAL BANKS",name:"European Central Bank",role:"ECB rate decisions, Schnabel/Lagarde speeches, TLTRO data",url:"https://www.ecb.europa.eu/mopo/",freq:"8x/year",tier:"S"},
-      {cat:"CENTRAL BANKS",name:"Bank of Japan",role:"BOJ rate decisions, Outlook Report, Ueda speeches",url:"https://www.boj.or.jp/en/mopo/",freq:"8x/year",tier:"S"},
-      {cat:"CENTRAL BANKS",name:"Bank of England",role:"MPC decisions, Monetary Policy Report, Governor Bailey",url:"https://www.bankofengland.co.uk/monetary-policy/",freq:"8x/year",tier:"S"},
-      {cat:"CENTRAL BANKS",name:"Reserve Bank of Australia",role:"RBA Board Minutes, Governor Bullock speeches, SMP",url:"https://www.rba.gov.au/monetary-policy/",freq:"11x/year",tier:"S"},
-      {cat:"CENTRAL BANKS",name:"Bank of Canada",role:"BOC decisions, Monetary Policy Report, Macklem",url:"https://www.bankofcanada.ca/core-functions/monetary-policy/",freq:"8x/year",tier:"S"},
-      {cat:"CENTRAL BANKS",name:"Swiss National Bank",role:"SNB decisions, Quarterly Bulletin, Jordan speeches",url:"https://www.snb.ch/en/monetary-policy/overview/",freq:"4x/year",tier:"S"},
-      {cat:"CENTRAL BANKS",name:"RBNZ",role:"OCR decisions, MPS, Governor Orr — 325bp cutting cycle",url:"https://www.rbnz.govt.nz/monetary-policy/",freq:"7x/year",tier:"S"},
-      {cat:"CENTRAL BANKS",name:"BIS — Bank for International Settlements",role:"Global CB coordination, FX research, financial stability",url:"https://www.bis.org/research/",freq:"Continuous",tier:"S"},
-      {cat:"CENTRAL BANKS",name:"Fed FRED Database",role:"All US economic data: PCE, CPI, employment, yields",url:"https://fred.stlouisfed.org/",freq:"Daily",tier:"S"},
-      // MACRO RESEARCH HOUSES
-      {cat:"MACRO RESEARCH",name:"J.P. Morgan Global Research",role:"EUR/USD 1.20, USD/JPY 164 year-end. CB transition themes.",url:"https://www.jpmorgan.com/insights/global-research/outlook/market-outlook",freq:"Weekly",tier:"S"},
-      {cat:"MACRO RESEARCH",name:"MUFG Research",role:"Post-peak USD world. EUR/USD 1.24, USD/JPY 146 targets.",url:"https://www.mufgresearch.com/",freq:"Weekly",tier:"S"},
-      {cat:"MACRO RESEARCH",name:"ING Think — G10 FX",role:"Fundamentals return. EUR/GBP 0.88-0.90. BOE easing.",url:"https://think.ing.com/",freq:"Daily",tier:"S"},
-      {cat:"MACRO RESEARCH",name:"Goldman Sachs FX Research",role:"USD index forecasts, EM vs DM flows, commodity FX",url:"https://www.goldmansachs.com/insights/",freq:"Weekly",tier:"S"},
-      {cat:"MACRO RESEARCH",name:"BlackRock Investment Institute",role:"Short USD, dollar debasement, multi-asset regime views",url:"https://www.blackrock.com/institutions/en-us/insights/",freq:"Monthly",tier:"S"},
-      {cat:"MACRO RESEARCH",name:"RBC Capital Markets FX",role:"AUD/USD 0.73, EUR/CHF 0.93, USMCA CAD risk",url:"https://www.rbccm.com/",freq:"Weekly",tier:"A"},
-      {cat:"MACRO RESEARCH",name:"Deutsche Bank FX Research",role:"G10 carry signals, USD positioning, EM contagion",url:"https://www.db.com/newsroom/",freq:"Weekly",tier:"A"},
-      {cat:"MACRO RESEARCH",name:"Citigroup FX Strategy",role:"Pain trade analysis, positioning extremes, flow data",url:"https://www.citigroup.com/global/insights/",freq:"Weekly",tier:"A"},
-      {cat:"MACRO RESEARCH",name:"Morgan Stanley FX",role:"USD structural views, cross-asset FX signals",url:"https://www.morganstanley.com/im/en-us/individual-investor/insights/",freq:"Weekly",tier:"A"},
-      {cat:"MACRO RESEARCH",name:"Barclays FX Research",role:"EUR/USD short-term fair value, CB surprise indices",url:"https://home.barclays/news/",freq:"Weekly",tier:"A"},
-      {cat:"MACRO RESEARCH",name:"UBS FX Strategy",role:"Safe haven flows, CHF/JPY dynamics, wealth management FX",url:"https://www.ubs.com/global/en/investment-bank/insights.html",freq:"Weekly",tier:"A"},
-      {cat:"MACRO RESEARCH",name:"Nomura FX Research",role:"Asia-Pacific flows, JPY structural analysis, BOJ forecasting",url:"https://www.nomuraholdings.com/",freq:"Weekly",tier:"A"},
-      {cat:"MACRO RESEARCH",name:"Credit Suisse/UBS FX",role:"EUR/CHF, Swiss macro, European cross dynamics",url:"https://www.ubs.com/global/en/investment-bank/insights.html",freq:"Weekly",tier:"A"},
-      {cat:"MACRO RESEARCH",name:"Société Générale Cross-Asset",role:"EUR macro, positioning, flow-of-funds analysis",url:"https://wholesale.banking.societegenerale.com/en/",freq:"Weekly",tier:"A"},
-      {cat:"MACRO RESEARCH",name:"Capital Economics FX",role:"Independent macro forecasting, unbiased CB outlook",url:"https://www.capitaleconomics.com/",freq:"Daily",tier:"A"},
-      // IMF / WORLD BANK / OECD
-      {cat:"INTERNATIONAL INSTITUTIONS",name:"IMF World Economic Outlook",role:"Global growth forecasts, exchange rate equilibrium (CGER)",url:"https://www.imf.org/en/Publications/WEO",freq:"2x/year",tier:"S"},
-      {cat:"INTERNATIONAL INSTITUTIONS",name:"IMF Working Papers",role:"Currency crises, capital flows, CB divergence research",url:"https://www.imf.org/en/Publications/WP",freq:"Continuous",tier:"S"},
-      {cat:"INTERNATIONAL INSTITUTIONS",name:"OECD PPP Database",role:"Purchasing Power Parity FX fair value — EUR/USD ~1.14",url:"https://stats.oecd.org/index.aspx?queryid=221",freq:"Annual",tier:"A"},
-      {cat:"INTERNATIONAL INSTITUTIONS",name:"World Bank Global Finance",role:"Remittance flows, EM currency pressures, DM growth",url:"https://www.worldbank.org/en/research",freq:"Quarterly",tier:"A"},
-      {cat:"INTERNATIONAL INSTITUTIONS",name:"BIS Quarterly Review",role:"FX market turnover, OTC derivatives, global liquidity",url:"https://www.bis.org/publ/qtrpdf/",freq:"Quarterly",tier:"S"},
-      {cat:"INTERNATIONAL INSTITUTIONS",name:"BIS Working Papers",role:"CB communication, carry trade, safe haven, stop-loss orders",url:"https://www.bis.org/research/workingpapers.htm",freq:"Continuous",tier:"S"},
-      // ECONOMIC DATA
-      {cat:"ECONOMIC DATA",name:"Bureau of Labor Statistics",role:"NFP, CPI, PPI, unemployment — primary USD movers",url:"https://www.bls.gov/news.release/",freq:"Monthly",tier:"S"},
-      {cat:"ECONOMIC DATA",name:"Bureau of Economic Analysis",role:"GDP, PCE, personal income — Fed's preferred inflation gauge",url:"https://www.bea.gov/data/",freq:"Monthly",tier:"S"},
-      {cat:"ECONOMIC DATA",name:"Eurostat",role:"Eurozone CPI flash, GDP, industrial production",url:"https://ec.europa.eu/eurostat/statistics-explained/",freq:"Monthly",tier:"S"},
-      {cat:"ECONOMIC DATA",name:"Statistics Japan (e-Stat)",role:"Japan wage data, CPI, industrial output, trade balance",url:"https://www.e-stat.go.jp/en/",freq:"Monthly",tier:"S"},
-      {cat:"ECONOMIC DATA",name:"ONS UK",role:"UK CPI, GDP, employment, retail sales",url:"https://www.ons.gov.uk/economy/",freq:"Monthly",tier:"S"},
-      {cat:"ECONOMIC DATA",name:"Statistics Canada",role:"Canada CPI, employment, trade balance, GDP",url:"https://www150.statcan.gc.ca/",freq:"Monthly",tier:"A"},
-      {cat:"ECONOMIC DATA",name:"Australian Bureau of Statistics",role:"AUS employment, CPI, GDP, trade",url:"https://www.abs.gov.au/statistics/",freq:"Monthly",tier:"A"},
-      {cat:"ECONOMIC DATA",name:"Statistics NZ",role:"NZ GDP, CPI — recession confirmation data",url:"https://www.stats.govt.nz/",freq:"Monthly",tier:"A"},
-      {cat:"ECONOMIC DATA",name:"ForexFactory Economic Calendar",role:"Real-time global economic releases, consensus forecasts",url:"https://www.forexfactory.com/calendar",freq:"Daily",freq:"Daily",tier:"S"},
-      {cat:"ECONOMIC DATA",name:"Investing.com Economic Calendar",role:"Global economic events, historical data, forecasts",url:"https://www.investing.com/economic-calendar/",freq:"Daily",tier:"S"},
-      // POSITIONING & FLOW DATA
-      {cat:"POSITIONING & FLOW",name:"CFTC Commitment of Traders",role:"Weekly institutional net positioning — USD extremes",url:"https://www.cftc.gov/MarketReports/CommitmentsofTraders/",freq:"Weekly",tier:"S"},
-      {cat:"POSITIONING & FLOW",name:"LSEG WM/Reuters Fix",role:"4PM London Fix methodology — institutional order flow",url:"https://www.lseg.com/en/data-analytics/financial-data/foreign-exchange/wm-reuters-rates",freq:"Daily",tier:"S"},
-      {cat:"POSITIONING & FLOW",name:"CME Group FX Options",role:"G10 option expiry strikes, gamma levels, open interest",url:"https://www.cmegroup.com/trading/fx/",freq:"Daily",tier:"S"},
-      {cat:"POSITIONING & FLOW",name:"ICE FX Futures",role:"EUR, GBP, JPY, AUD futures positioning data",url:"https://www.theice.com/products/29271",freq:"Daily",tier:"A"},
-      {cat:"POSITIONING & FLOW",name:"Bank of Japan Flow Data",role:"Japan current account, portfolio investment flows",url:"https://www.boj.or.jp/en/statistics/br/index.htm",freq:"Monthly",tier:"A"},
-      {cat:"POSITIONING & FLOW",name:"US Treasury TIC Data",role:"Foreign purchases of US assets — USD demand indicator",url:"https://ticdata.treasury.gov/resource-center/data-chart-center/tic/Pages/ticsec2.aspx",freq:"Monthly",tier:"A"},
-      // ACADEMIC / QUANTITATIVE RESEARCH
-      {cat:"ACADEMIC RESEARCH",name:"AQR Capital — Factor Research",role:"Carry, momentum, value everywhere. Cross-asset factors.",url:"https://www.aqr.com/Insights/Research/",freq:"Quarterly",tier:"S"},
-      {cat:"ACADEMIC RESEARCH",name:"NBER Working Papers",role:"Carry (WP11631), news drift (WP20427), UIP puzzle (Fama 1984)",url:"https://www.nber.org/",freq:"Continuous",tier:"S"},
-      {cat:"ACADEMIC RESEARCH",name:"SSRN Finance & Economics",role:"FX technical patterns, VWAP, Fibonacci, session breakouts",url:"https://papers.ssrn.com/",freq:"Continuous",tier:"S"},
-      {cat:"ACADEMIC RESEARCH",name:"Journal of Finance",role:"Peer-reviewed: arbitrage, carry, FX anomalies",url:"https://afajof.org/journal-of-finance/",freq:"Quarterly",tier:"A"},
-      {cat:"ACADEMIC RESEARCH",name:"Journal of International Economics",role:"UIP, purchasing power parity, exchange rate determination",url:"https://www.journals.elsevier.com/journal-of-international-economics",freq:"Quarterly",tier:"A"},
-      {cat:"ACADEMIC RESEARCH",name:"Review of Financial Studies",role:"Liquidity, market microstructure, FX price discovery",url:"https://academic.oup.com/rfs",freq:"Monthly",tier:"A"},
-      {cat:"ACADEMIC RESEARCH",name:"Quantitative Finance Journal",role:"Technical patterns, systematic strategies, FX models",url:"https://www.tandfonline.com/toc/rquf20/current",freq:"Monthly",tier:"A"},
-      {cat:"ACADEMIC RESEARCH",name:"Federal Reserve IFDP Papers",role:"Real interest rate differentials, FX regime analysis",url:"https://www.federalreserve.gov/pubs/ifdp/",freq:"Continuous",tier:"A"},
-      // REAL-TIME MARKET INTELLIGENCE
-      {cat:"REAL-TIME INTELLIGENCE",name:"Reuters FX Markets",role:"Breaking CB news, G10 price action, sovereign flows",url:"https://www.reuters.com/markets/currencies/",freq:"Continuous",tier:"S"},
-      {cat:"REAL-TIME INTELLIGENCE",name:"Bloomberg FX Markets",role:"Live FX analysis, macro strategy, CB watch",url:"https://www.bloomberg.com/markets/currencies",freq:"Continuous",tier:"S"},
-      {cat:"REAL-TIME INTELLIGENCE",name:"Financial Times Markets",role:"In-depth macro analysis, CB policy, global FX narrative",url:"https://www.ft.com/currencies",freq:"Continuous",tier:"S"},
-      {cat:"REAL-TIME INTELLIGENCE",name:"Wall Street Journal Markets",role:"USD policy analysis, macro narratives, Fed coverage",url:"https://www.wsj.com/market-data/currencies",freq:"Continuous",tier:"S"},
-      {cat:"REAL-TIME INTELLIGENCE",name:"FT Alphaville",role:"Deep-dive macro commentary, critical CB analysis",url:"https://www.ft.com/alphaville",freq:"Daily",tier:"A"},
-      {cat:"REAL-TIME INTELLIGENCE",name:"MarketWatch FX",role:"US-focused macro news, Fed commentary, economic data",url:"https://www.marketwatch.com/investing/currencies",freq:"Continuous",tier:"A"},
-      {cat:"REAL-TIME INTELLIGENCE",name:"Forexlive",role:"Real-time FX dealer commentary, CB speaker wire",url:"https://www.forexlive.com/",freq:"Continuous",tier:"A"},
-      {cat:"REAL-TIME INTELLIGENCE",name:"MNI Market News",role:"Professional CB monitoring, policy change signals",url:"https://marketnews.com/",freq:"Continuous",tier:"A"},
-      {cat:"REAL-TIME INTELLIGENCE",name:"The Macro Compass",role:"Cross-asset macro flows, institutional positioning shifts",url:"https://themacrocompass.substack.com/",freq:"Weekly",tier:"A"},
-      {cat:"REAL-TIME INTELLIGENCE",name:"Real Vision FX",role:"Institutional macro interviews, trading strategies",url:"https://www.realvision.com/finance/currencies",freq:"Weekly",tier:"A"},
-      // COMMODITY & CROSS-ASSET
-      {cat:"COMMODITY & CROSS-ASSET",name:"World Gold Council",role:"Gold-USD inverse correlation, central bank gold buying",url:"https://www.gold.org/goldhub/research/",freq:"Monthly",tier:"A"},
-      {cat:"COMMODITY & CROSS-ASSET",name:"IEA Oil Market Report",role:"Oil demand/supply — direct CAD/NOK/RUB FX driver",url:"https://www.iea.org/reports/oil-market-report",freq:"Monthly",tier:"S"},
-      {cat:"COMMODITY & CROSS-ASSET",name:"RBA Commodity Index",role:"Iron ore/copper prices → AUD correlation",url:"https://www.rba.gov.au/statistics/frequency/commodity-prices.html",freq:"Monthly",tier:"A"},
-      {cat:"COMMODITY & CROSS-ASSET",name:"CBOE VIX Index",role:"Risk regime indicator — VIX >25 = JPY/CHF bid",url:"https://www.cboe.com/tradable_products/vix/",freq:"Daily",tier:"S"},
-      {cat:"COMMODITY & CROSS-ASSET",name:"Bloomberg Commodity Index",role:"Broad commodity direction — commodity CCY beta",url:"https://www.bloomberg.com/markets/commodities",freq:"Daily",tier:"A"},
-      // TECHNICAL & SYSTEMATIC
-      {cat:"TECHNICAL & SYSTEMATIC",name:"CTA/Trend Following Research",role:"Turtle Rules, Donchian breakout systems, CTAs",url:"https://www.trendfollowing.com/",freq:"Continuous",tier:"A"},
-      {cat:"TECHNICAL & SYSTEMATIC",name:"Investopedia Technical Analysis",role:"Bollinger, Keltner, Ichimoku, Fibonacci — retail benchmark",url:"https://www.investopedia.com/technical-analysis-4689657",freq:"Continuous",tier:"B"},
-      {cat:"TECHNICAL & SYSTEMATIC",name:"CMT Association Research",role:"Chartered Market Technician — peer-reviewed TA research",url:"https://cmtassociation.org/",freq:"Quarterly",tier:"A"},
-      {cat:"TECHNICAL & SYSTEMATIC",name:"Pedersen (NYU Stern): FX Momentum",role:"Cross-sectional momentum in currency markets",url:"https://pages.stern.nyu.edu/~lpederse/papers/MomentumCurrencies.pdf",freq:"Static",tier:"S"},
-      // TRADE & GEOPOLITICAL
-      {cat:"TRADE & GEOPOLITICAL",name:"USTR — US Trade Policy",role:"Tariff announcements, USMCA review, trade war risk",url:"https://ustr.gov/about-us/policy-offices/press-office/press-releases",freq:"Irregular",tier:"S"},
-      {cat:"TRADE & GEOPOLITICAL",name:"WTO Trade Statistics",role:"Global trade flows, G10 CA surplus/deficit data",url:"https://www.wto.org/english/res_e/statis_e/statis_e.htm",freq:"Quarterly",tier:"A"},
-      {cat:"TRADE & GEOPOLITICAL",name:"Japan MOF: Trade & BOP",role:"Japan current account surplus — structural JPY support",url:"https://www.mof.go.jp/english/policy/balance_of_payments/",freq:"Monthly",tier:"S"},
-      {cat:"TRADE & GEOPOLITICAL",name:"Council on Foreign Relations",role:"Geopolitical risk analysis — safe haven demand driver",url:"https://www.cfr.org/global/",freq:"Continuous",tier:"A"},
-      {cat:"TRADE & GEOPOLITICAL",name:"PIIE — Peterson Institute",role:"US trade policy, tariff impact analysis, FX implications",url:"https://www.piie.com/research/topics/",freq:"Weekly",tier:"A"},
-      // RISK & VOLATILITY
-      {cat:"RISK & VOLATILITY",name:"Cboe FX Volatility (CVIX)",role:"G10 implied volatility index — risk premium signal",url:"https://www.cboe.com/tradable_products/vix/",freq:"Daily",tier:"S"},
-      {cat:"RISK & VOLATILITY",name:"DTCC FX Data",role:"Global FX settlement data, counterparty flow volumes",url:"https://www.dtcc.com/repository-otc-data",freq:"Daily",tier:"A"},
-      {cat:"RISK & VOLATILITY",name:"JPMorgan FX Volatility Index",role:"G10 3M implied vol index — option premium signal",url:"https://www.jpmorgan.com/insights/research/",freq:"Daily",tier:"A"},
+    const cats=[
+      {title:"📊 PRICE DATA",color:C.green,items:[
+        {name:"OANDA v20 REST API",role:"Live interbank bid/ask — all 28 G10 pairs, ~3s polling",url:"https://developer.oanda.com/rest-live-v20/introduction/",note:"Your OANDA demo account (001-001-21201857-001) provides real interbank bid/ask prices. Pre-wired in Settings. Activates when deployed outside Claude sandbox."},
+        {name:"Frankfurter / ECB API",role:"Free ECB reference rates — 30s fallback when deployed",url:"https://www.frankfurter.app/",note:"Free, no API key, CORS-enabled. EUR base cross-rates. Activates when OANDA key not provided. Shows ECB LIVE in header."},
+        {name:"TradingView Watchlist",role:"Confirmed Apr 8, 2026 snapshot prices — used as seed",url:"https://www.tradingview.com/markets/currencies/",note:"AUD/CAD 0.97776, EUR/USD 1.16819, USD/JPY 158.395 — confirmed from Sal's watchlist screenshot Apr 8, 2026."},
+      ]},
+      {title:"🏦 CENTRAL BANKS",color:C.gold,items:[
+        {name:"Federal Reserve",role:"USD — 3.875% Hold. Next: Apr 30",url:"https://www.federalreserve.gov/monetarypolicy/",note:"Held for 2nd meeting. NFP 128K miss. Jun cut odds 38%. CPI Apr 10 pivotal. DXY testing 100."},
+        {name:"European Central Bank",role:"EUR — 2.00% Hawkish Hold",url:"https://www.ecb.europa.eu/mopo/",note:"Schnabel: next move more likely a hike. German fiscal stimulus supporting growth. EUR/USD 1.20 year-end (JPM)."},
+        {name:"Bank of Japan",role:"JPY — 0.75% Hiking. MUFG target USD/JPY 146",url:"https://www.boj.or.jp/en/mopo/",note:"Only G10 hiker 2026. Wage growth 3.1% above 3% normalization threshold."},
+        {name:"Bank of England",role:"GBP — 3.75% Easing Bias",url:"https://www.bankofengland.co.uk/monetary-policy/",note:"75bp more cuts expected 2026 (ING). CPI 3.0% above target complicates timing."},
+        {name:"Reserve Bank of Australia",role:"AUD — 3.85% Hawkish Hold",url:"https://www.rba.gov.au/monetary-policy/",note:"Bullock: no cuts imminent. RBC AUD/USD year-end target 0.73."},
+        {name:"Bank of Canada",role:"CAD — 2.25% Dovish Hold",url:"https://www.bankofcanada.ca/",note:"USMCA review July 2026 risk. Oil surplus headwind. Next: Apr 15."},
+        {name:"Swiss National Bank",role:"CHF — 0.00% Hold",url:"https://www.snb.ch/en/",note:"Dollar debasement trade driving CHF appreciation. EUR/CHF 0.93 target (RBC)."},
+        {name:"RBNZ",role:"NZD — 3.00% Cutting (325bp since Aug 2024)",url:"https://www.rbnz.govt.nz/",note:"Most aggressive G10 cutter. Cut to 3.00% Apr 9. Further cuts likely."},
+        {name:"Norges Bank",role:"NOK — 4.00% Hold",url:"https://www.norges-bank.no/",note:"1-2 cuts mid-2026 if CPI below 3%. Oil decline headwind."},
+        {name:"Riksbank",role:"SEK — 1.75% Hold",url:"https://www.riksbank.se/",note:"Best G10 performer 2025 (+19% vs USD). Late-2026 hike bias."},
+      ]},
+      {title:"📄 STRATEGY EVIDENCE",color:C.amber,items:[
+        {name:"Bank for International Settlements",role:"CB divergence, safe haven, stop-loss, CB communication research",url:"https://www.bis.org/research/",note:"BIS WP #801 (CB divergence), #570 (safe haven), #492 (stop-loss), #952 (CB communication). Primary institutional source."},
+        {name:"AQR Capital Management",role:"Time-series momentum, carry-momentum, risk parity, cross-carry",url:"https://www.aqr.com/Insights/Research/",note:"AQR: Time-Series Momentum, Value and Momentum Everywhere, Currency Carry Trades, Risk Parity."},
+        {name:"NBER Working Papers",role:"Carry trade, news drift, UIP puzzle",url:"https://www.nber.org/",note:"NBER WP 11631 (carry), WP 20427 (news drift), WP 1393 (Fama 1984 UIP puzzle)."},
+        {name:"SSRN Academic Papers",role:"Technical patterns, VWAP, Fibonacci, session breakouts, volatility",url:"https://papers.ssrn.com/",note:"Multiple SSRN papers cited in strategy evidence links across all 51 strategies."},
+        {name:"CFTC Commitment of Traders",role:"Official weekly institutional positioning data",url:"https://www.cftc.gov/MarketReports/CommitmentsofTraders/",note:"COT Extreme Positioning strategy. Free weekly official US data."},
+        {name:"LSEG / WM Reuters Fix",role:"WMR 4PM London Fix methodology",url:"https://www.lseg.com/en/data-analytics/financial-data/foreign-exchange/wm-reuters-rates",note:"WMR Fix Anticipation strategy. Documented pre-fix institutional order flow."},
+        {name:"IMF Working Papers & WEO",role:"Growth divergence, BOP flows, currency crises",url:"https://www.imf.org/en/Publications/WP",note:"IMF WEO, WP on capital flows, early warning systems, CGER equilibrium FX."},
+      ]},
+      {title:"🌐 MACRO RESEARCH — 2026",color:C.blue,items:[
+        {name:"J.P. Morgan Global Research",role:"EUR/USD 1.20, USD/JPY 164 year-end targets",url:"https://www.jpmorgan.com/insights/global-research/outlook/market-outlook",note:"CB transition to simultaneous hold. Pro-cyclical growth dynamic. Two main 2026 FX themes."},
+        {name:"MUFG Research",role:"Post-peak USD world. EUR/USD 1.24, USD/JPY 146",url:"https://www.mufgresearch.com/",note:"USD weakening 5% DXY in 2026. Fed cutting more than priced. Trade uncertainty diminishing."},
+        {name:"ING Think — G10 FX 2026",role:"Fundamentals return. EUR well-positioned. BOE easing",url:"https://think.ing.com/",note:"Playing the ball not the man. Strong USD isn't coming back. EUR/GBP toward 0.88-0.90."},
+        {name:"BlackRock 2026 Macro Outlook",role:"Short USD, long relative value, short long-duration bonds",url:"https://www.blackrock.com/institutions/en-us/insights/2026-macro-outlook",note:"Enter 2026 short USD. Dollar debasement trade. Cross-country dispersion = alpha opportunity."},
+        {name:"RBC Capital Markets FX",role:"AUD/USD 0.73, EUR/CHF 0.93, USD/CAD USMCA risk",url:"https://www.rbccm.com/",note:"AUD revised higher. EUR/CHF lower. CAD elevated on USMCA review risk."},
+      ]},
     ];
-
-    const Tag=({label,color})=>(<span style={{padding:"2px 8px",background:color+"22",color,border:`1px solid ${color}44`,borderRadius:"3px",fontSize:"8px",fontWeight:"700",marginRight:"4px"}}>{label}</span>);
-    const cats=["ALL",...new Set(ALL_SOURCES.map(s=>s.cat))];
-    const tierC={S:C.gold,A:C.green,B:C.blue};
-    const PAGE=15;
-
-    const filtered=ALL_SOURCES.filter(s=>srcCat==="ALL"||s.cat===srcCat);
-    const displayed=filtered.slice(0,(srcPage+1)*PAGE);
-    const hasMore=displayed.length<filtered.length;
-
     return(
       <div>
-        <div style={{background:`linear-gradient(90deg,${C.bg2},#0a1a2a)`,border:`2px solid ${C.gold}`,borderRadius:"7px",padding:"13px 15px",marginBottom:"12px"}}>
-          <div style={{fontSize:"12px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"5px"}}>📄 RESEARCH SOURCES — {ALL_SOURCES.length}+ VETTED INSTITUTIONS</div>
-          <div style={{fontSize:"9px",color:C.muted,lineHeight:"1.65",marginBottom:"8px"}}>Every source AXIOM uses for strategy evidence, macro narrative, and signal generation. Tap any source to open directly. Updated as new institutional research is published.</div>
-          <div style={{display:"flex",gap:"5px",flexWrap:"wrap"}}>
-            {cats.map(c=>(
-              <button key={c} onClick={()=>{setSrcCat(c);setSrcPage(0);}}
-                style={{padding:"5px 9px",background:srcCat===c?C.gold+"22":"transparent",color:srcCat===c?C.gold:C.muted,border:`1px solid ${srcCat===c?C.gold:C.bdr}`,borderRadius:"3px",cursor:"pointer",fontSize:"8px",fontWeight:"700",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                {c==="ALL"?`ALL (${ALL_SOURCES.length})`:c}
-              </button>
+        <div style={{background:`linear-gradient(90deg,${C.bg2},#0a1a2a)`,border:`2px solid ${C.gold}`,borderRadius:"6px",padding:"13px 15px",marginBottom:"11px"}}>
+          <div style={{fontSize:"12px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"5px"}}>📄 DATA SOURCES & CITATIONS</div>
+          <div style={{fontSize:"9px",color:C.muted,lineHeight:"1.65"}}>Every price, strategy WR, CB rate, and macro narrative in AXIOM is sourced from verifiable institutional references. All sources are documented here for transparency and compliance.</div>
+        </div>
+        {cats.map((cat,ci)=>(
+          <div key={ci} style={{background:C.bg2,border:`1px solid ${cat.color}33`,borderRadius:"6px",padding:"10px 12px",marginBottom:"9px"}}>
+            <div style={{fontSize:"9px",fontWeight:"700",color:cat.color,letterSpacing:"2px",marginBottom:"9px",paddingBottom:"5px",borderBottom:`1px solid ${cat.color}22`}}>{cat.title}</div>
+            {cat.items.map((s,si)=>(
+              <div key={si} style={{background:C.bg1,border:`1px solid ${C.bdr}`,borderRadius:"4px",padding:"9px 11px",marginBottom:"6px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:"8px",marginBottom:"4px",flexWrap:"wrap"}}>
+                  <div><div style={{fontWeight:"700",color:C.text,fontSize:"11px"}}>{s.name}</div><div style={{fontSize:"8.5px",color:cat.color,fontWeight:"600",marginTop:"1px"}}>{s.role}</div></div>
+                  <a href={s.url} target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",padding:"4px 9px",background:cat.color+"22",color:cat.color,border:`1px solid ${cat.color}44`,borderRadius:"3px",textDecoration:"none",fontSize:"8.5px",fontWeight:"700",flexShrink:0}}>Visit ↗</a>
+                </div>
+                <div style={{fontSize:"8.5px",color:C.muted,lineHeight:"1.55",borderTop:`1px solid ${C.bdr}22`,paddingTop:"5px"}}>{s.note}</div>
+              </div>
             ))}
           </div>
-        </div>
-
-        <div style={{fontSize:"8.5px",color:C.muted,background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"8px 11px",marginBottom:"10px",lineHeight:"1.7"}}>
-          Showing <strong style={{color:C.text}}>{displayed.length}</strong> of <strong style={{color:C.text}}>{filtered.length}</strong> sources
-          {srcCat!=="ALL"&&<span> in <strong style={{color:C.gold}}>{srcCat}</strong></span>}
-          {" · "}<Tag label="S-TIER" color={C.gold}/> Essential daily
-          {" "}<Tag label="A-TIER" color={C.green}/> High value
-          {" "}<Tag label="B-TIER" color={C.blue}/> Supplementary
-        </div>
-
-        {displayed.map((s,i)=>{
-          const tc=tierC[s.tier]||C.muted;
-          return(
-            <div key={i} onClick={()=>window.open(s.url,"_blank","noopener")}
-              style={{background:C.bg2,border:`1px solid ${tc}22`,borderLeft:`3px solid ${tc}`,borderRadius:"5px",padding:"11px 13px",marginBottom:"7px",cursor:"pointer"}}
-              onMouseEnter={e=>{e.currentTarget.style.background=C.bg1;e.currentTarget.style.borderColor=tc+"55";}}
-              onMouseLeave={e=>{e.currentTarget.style.background=C.bg2;e.currentTarget.style.borderColor=tc+"22";}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:"8px",marginBottom:"4px"}}>
-                <div style={{flex:1}}>
-                  <div style={{display:"flex",alignItems:"center",gap:"6px",marginBottom:"3px",flexWrap:"wrap"}}>
-                    <span style={{fontWeight:"700",color:C.text,fontSize:"11px"}}>{s.name}</span>
-                    <span style={{padding:"1px 5px",background:tc+"22",color:tc,border:`1px solid ${tc}33`,borderRadius:"2px",fontSize:"7px",fontWeight:"700"}}>{s.tier}</span>
-                    <span style={{padding:"1px 5px",background:"#ffffff08",color:C.muted,borderRadius:"2px",fontSize:"7px",fontWeight:"700"}}>{s.freq}</span>
-                  </div>
-                  <div style={{fontSize:"8.5px",color:tc,fontWeight:"600",marginBottom:"3px"}}>{s.role}</div>
-                </div>
-                <span style={{fontSize:"14px",color:C.blue,flexShrink:0}}>↗</span>
-              </div>
-              <div style={{fontSize:"7.5px",color:C.muted,fontFamily:"monospace"}}>{s.cat}</div>
-            </div>
-          );
-        })}
-
-        {hasMore&&(
-          <button onClick={()=>setSrcPage(p=>p+1)}
-            style={{width:"100%",padding:"11px",background:C.bg1,color:C.gold,border:`1px solid ${C.gold}44`,borderRadius:"4px",cursor:"pointer",fontSize:"11px",fontWeight:"700",fontFamily:"inherit",marginTop:"4px"}}>
-            ↓ LOAD MORE SOURCES — {filtered.length-displayed.length} remaining
-          </button>
-        )}
-        {!hasMore&&displayed.length>0&&(
-          <div style={{textAlign:"center",padding:"12px",fontSize:"9px",color:C.muted}}>
-            ✓ All {filtered.length} sources loaded{srcCat!=="ALL"?` for ${srcCat}`:""}
-          </div>
-        )}
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"10px 12px",marginTop:"6px",fontSize:"8.5px",color:C.muted,lineHeight:"1.7"}}>
-          <strong style={{color:C.text}}>Disclaimer:</strong> AXIOM is a theoretical paper trading simulation for educational purposes. Signals are algorithmic and do not constitute financial advice. Strategy win rates reflect academic research and do not guarantee future performance. Price data anchored to Apr 8, 2026 snapshots; OANDA/ECB live prices activate on Netlify deploy.
-        </div>
+        ))}
+        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"10px 12px",fontSize:"8.5px",color:C.muted,lineHeight:"1.7"}}><strong style={{color:C.text}}>Disclaimer:</strong> AXIOM is a theoretical paper trading simulation for educational purposes. Signals are algorithmic and do not constitute financial advice. Strategy win rates reflect academic research and do not guarantee future performance. Price data is anchored to confirmed Apr 8, 2026 snapshots; OANDA/ECB rates activate when deployed outside the Claude artifact sandbox.</div>
       </div>
     );
   }
+
   // ─── ROOT RENDER ─────────────────────────────────────────────────────
   // Memoized content — only re-renders active tab, not on every price tick
   const tabContent=useMemo(()=>{
@@ -2944,49 +2418,30 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
       case "deploy":    return <DeployTab/>;
       default:          return <Dashboard/>;
     }
-  },[tab,signals,trades,history,analyzerTab,selCB,wkView,chartTf,enabledStrats,nCcy,nImp,stratCatFilter,stratTierFilter,modal,modalTab,expandedTheme,expandedStrat,newsStaticPage,calCcy,calImp,calType,calView,calEvents,calLive,calLoading,liveArts]);
+  },[tab,signals,trades,history,analyzerTab,selCB,wkView,chartTf,enabledStrats,nCcy,nImp,stratCatFilter,stratTierFilter,modal,modalTab,expandedTheme,expandedStrat,newsStaticPage]);
 
   return(
-    <div className="axiom-root" style={{fontFamily:"'IBM Plex Mono','Courier New',monospace",background:C.bg,color:C.text,height:"100dvh",display:"flex",flexDirection:"column",fontSize:"clamp(12px,1.1vw,15px)",overflow:"hidden",WebkitTextSizeAdjust:"100%"}}>
+    <div style={{fontFamily:"'IBM Plex Mono','Courier New',monospace",background:C.bg,color:C.text,height:"100dvh",display:"flex",flexDirection:"column",fontSize:"clamp(12px,1.1vw,15px)",overflow:"hidden",WebkitTextSizeAdjust:"100%"}}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap');
         *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-        ::-webkit-scrollbar{width:4px;height:4px;}
+        ::-webkit-scrollbar{width:3px;height:3px;}
         ::-webkit-scrollbar-track{background:#05090f;}
         ::-webkit-scrollbar-thumb{background:#172f50;border-radius:2px;}
-        ::-webkit-scrollbar-thumb:hover{background:#1e3d5c;}
         button{-webkit-appearance:none;transition:opacity 0.15s;}
-        button:hover:not(:disabled){opacity:0.85;}
         button:active:not(:disabled){opacity:0.7;}
-        input,textarea{-webkit-appearance:none;border-radius:3px;}
-        input:focus,textarea:focus{border-color:#d4af37!important;outline:none!important;}
+        input{-webkit-appearance:none;border-radius:3px;}
+        input:focus{border-color:#d4af37!important;outline:none!important;}
         @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.25;}}
         @keyframes slideIn{from{transform:translateX(24px);opacity:0;}to{transform:translateX(0);opacity:1;}}
         tr:hover td{background:#091525!important;}
         .tv-container iframe{border:none!important;}
         /* Desktop responsive layout */
-        :root{--fs-base:12.5px;--fs-sm:9px;--fs-xs:8px;--pad:14px;--gap:10px;}
         @media(min-width:1024px){
-          :root{--fs-base:13.5px;--fs-sm:10.5px;--fs-xs:9px;--pad:20px;--gap:14px;}
-          .axiom-root{font-size:var(--fs-base)!important;}
-          .axiom-header{height:58px!important;padding:0 24px!important;}
-          .axiom-header .logo-text{font-size:20px!important;letter-spacing:5px!important;}
-          .axiom-nav{padding:0 8px!important;}
-          .axiom-nav button{font-size:11px!important;padding:0 18px!important;}
-          .axiom-content{padding:16px 24px!important;font-size:var(--fs-base)!important;}
-          .axiom-content .card{padding:14px 18px!important;}
+          .axiom-content{padding:16px 24px!important;font-size:13.5px!important;}
         }
         @media(min-width:1280px){
-          :root{--fs-base:14px;--fs-sm:11px;--fs-xs:9.5px;}
-          .axiom-content{padding:18px 32px!important;}
-        }
-        @media(min-width:1600px){
-          :root{--fs-base:15px;--fs-sm:12px;--fs-xs:10px;}
-          .axiom-content{padding:20px 48px!important;max-width:1600px;margin:0 auto;}
-        }
-        /* Mobile stays as-is */
-        @media(max-width:768px){
-          :root{--fs-base:12px;--fs-sm:8.5px;--fs-xs:7.5px;}
+          .axiom-content{padding:18px 32px!important;font-size:14px!important;}
         }
       `}</style>
 
@@ -2995,8 +2450,8 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
       <SignalModal/>
 
       {/* HEADER */}
-      <div className="axiom-header" style={{background:"linear-gradient(90deg,#08152a,#0d2240,#08152a)",borderBottom:`1px solid ${C.bdr}`,padding:"0 clamp(14px,2vw,28px)",display:"flex",alignItems:"center",gap:"clamp(8px,1vw,16px)",height:"clamp(50px,4vh,64px)",flexShrink:0,minWidth:0}}>
-        <div style={{flexShrink:0}}><div className="axiom-header logo-text" style={{fontSize:"clamp(14px,1.4vw,20px)",fontWeight:"700",letterSpacing:"4px",color:C.gold}}>AXIOM</div><div style={{fontSize:"clamp(7px,0.6vw,9px)",color:C.muted,letterSpacing:"2px"}}>G10 FX v6</div></div>
+      <div style={{background:"linear-gradient(90deg,#08152a,#0d2240,#08152a)",borderBottom:`1px solid ${C.bdr}`,padding:"0 14px",display:"flex",alignItems:"center",gap:"10px",height:"50px",flexShrink:0,minWidth:0}}>
+        <div style={{flexShrink:0}}><div style={{fontSize:"16px",fontWeight:"700",letterSpacing:"4px",color:C.gold}}>AXIOM</div><div style={{fontSize:"7px",color:C.muted,letterSpacing:"2px"}}>G10 FX v6</div></div>
         <div style={{display:"flex",alignItems:"center",gap:"4px"}}><div style={{width:"5px",height:"5px",borderRadius:"50%",background:apiStatus==="live_oanda"?C.green:apiStatus==="live_ecb"?"#00d4ff":C.amber,animation:"pulse 2s infinite"}}/><span style={{color:C.green,fontWeight:"700",fontSize:"8.5px"}}>{apiStatus==="live_oanda"?"OANDA LIVE":apiStatus==="live_ecb"?"ECB LIVE":"SIM"}</span></div>
         <div onClick={()=>{setSettingsSaved(false);setTab("settings");}} style={{background:C.bg1,border:`2px solid ${C.gold}55`,borderRadius:"4px",padding:"3px 9px",cursor:"pointer",flexShrink:0}} onMouseEnter={e=>e.currentTarget.style.borderColor=C.gold} onMouseLeave={e=>e.currentTarget.style.borderColor=C.gold+"55"}>
           <div style={{fontSize:"7px",color:C.muted,marginBottom:"1px"}}>ACCOUNT</div>
@@ -3035,5 +2490,3 @@ Give exact: price levels, pip counts, lot sizes, R:R. Reference strategy names. 
     </div>
   );
 }
-
-window.AxiomFX = AxiomFX;
