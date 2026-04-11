@@ -296,6 +296,7 @@ const Bdg=memo(({label,color,sz="8.5px"})=>(<span style={{display:"inline-block"
 const Btn=memo(({label,color=C.gold,ghost=false,onClick,style:cs,disabled})=>(<button onClick={onClick} disabled={disabled} style={{padding:"7px 13px",background:ghost?"transparent":color,color:ghost?color:"#05090f",border:`1px solid ${color}`,borderRadius:"3px",cursor:disabled?"not-allowed":"pointer",fontSize:"10.5px",fontWeight:"700",letterSpacing:"0.8px",fontFamily:"inherit",opacity:disabled?0.5:1,...cs}}>{label}</button>));
 const Sm=memo(({label,color=C.gold,onClick,active})=>(<button onClick={onClick} style={{padding:"4px 9px",background:active?color+"22":"transparent",color:active?color:C.muted,border:`1px solid ${active?color:C.bdr}`,borderRadius:"2px",cursor:"pointer",fontSize:"9px",fontWeight:"700",letterSpacing:"0.5px",fontFamily:"inherit"}}>{label}</button>));
 const Kv=memo(({k,v,vc=C.text})=>(<div style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:`1px solid ${C.bdr}22`,fontSize:"10.5px"}}><span style={{color:C.muted,flexShrink:0}}>{k}</span><span style={{color:vc,fontWeight:"700",textAlign:"right",marginLeft:"8px"}}>{v}</span></div>));
+const Tag=memo(({label,color})=>(<span style={{padding:"2px 8px",background:color+"22",color,border:`1px solid ${color}44`,borderRadius:"3px",fontSize:"8px",fontWeight:"700",marginRight:"5px"}}>{label}</span>));
 
 // ── TRADINGVIEW CHART — Fixed implementation ──────────────────────────────
 
@@ -323,6 +324,10 @@ function AxiomFX(){
   const [calImp,setCalImp]=useState("HIGH");
   const [calType,setCalType]=useState("ALL");
   const [calView,setCalView]=useState("THIS WEEK"); // TODAY, THIS WEEK, THIS MONTH, NEXT MONTH
+  // Live calendar data from ForexFactory proxy
+  const [calEvents,setCalEvents]=useState(FULL_CALENDAR); // seed with static, replace with live
+  const [calLoading,setCalLoading]=useState(false);
+  const [calLoaded,setCalLoaded]=useState(false);
   // Signal filter
   const [sFilter,setSFilter]=useState("ALL");
   // Lifted states — no reset bugs
@@ -348,60 +353,225 @@ function AxiomFX(){
   // NewsTab state lifted to root — survives price ticks and tab switches
   const [liveArts,setLiveArts]=useState(ALL_NEWS);
   const [newsLoading,setNewsLoading]=useState(false);
-  const [newsBatch,setNewsBatch]=useState(0);
   const [newsLoaded,setNewsLoaded]=useState(false);
-  const [newsStaticPage,setNewsStaticPage]=useState(0); // news scroll page
-  const timeCtxs=["today April 2026","week of April 7-11 2026","week of March 31-April 6 2026","late March 2026","mid March 2026","early March 2026","February 2026","January 2026"];
-  const loadNews=useCallback(async(reset)=>{
-      if(newsLoading)return;
-      // API key handled server-side
-      setNewsLoading(true);
-      const nb=reset?0:newsBatch;
-      const existing=reset?[]:liveArts;
+  const [newsSource,setNewsSource]=useState("static"); // "finnhub" | "ai" | "static"
+  const [newsError,setNewsError]=useState(null);
+  const [newsPage,setNewsPage]=useState(0); // for AI pagination fallback
+  // Use refs to avoid stale closures in loadNews
+  const newsLoadingRef=useRef(false);
+  const newsPageRef=useRef(0);
+
+  const loadNews=useCallback(async(reset=true)=>{
+    if(newsLoadingRef.current)return;
+    newsLoadingRef.current=true;
+    setNewsLoading(true);
+    setNewsError(null);
+    if(reset){newsPageRef.current=0;setNewsPage(0);}
+
+    const ccyParam=nCcy!=="ALL"?`&ccy=${nCcy}`:"";
+    const impParam=nImp!=="ALL"?`&imp=${nImp}`:"";
+
+    try{
+      // ── LAYER 1: Finnhub real news via our new news.js function ─────────
+      const r=await fetch(`/.netlify/functions/news?${ccyParam}${impParam}`.replace("?&","?"),{
+        signal:AbortSignal.timeout(12000)
+      });
+      if(!r.ok)throw new Error("News function returned "+r.status);
+      const d=await r.json();
+      if(d.error)throw new Error(d.error);
+
+      const arts=d.articles||[];
+      if(arts.length>0){
+        const stamped=arts.map((a,i)=>({
+          ...a,
+          id:a.id||`news_${Date.now()}_${i}`,
+          // Ensure required fields exist
+          imp:a.imp||"MED",
+          impact:a.impact||"NEUTRAL",
+          ccy:a.ccy||"USD",
+          hl:a.hl||a.headline||"",
+          detail:a.detail||a.summary||"",
+          source:a.source||"Financial News",
+          realSource:a.realSource||false,
+        }));
+
+        if(reset){
+          setLiveArts(stamped);
+        }else{
+          setLiveArts(prev=>{
+            const existIds=new Set(prev.map(x=>x.id));
+            const newArts=stamped.filter(x=>!existIds.has(x.id));
+            return [...prev,...newArts];
+          });
+        }
+        setNewsSource(d.source||"finnhub");
+        setNewsLoaded(true);
+        newsLoadingRef.current=false;
+        setNewsLoading(false);
+        return;
+      }
+      throw new Error("No articles returned");
+    }catch(e){
+      // ── LAYER 2: news.js unavailable — fallback to AI via chat.js ──────
+      const now=new Date();
+      const todayDate=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
+      const page=newsPageRef.current;
+
+      // Time context rotates so each load call generates different time periods
+      const timeCtxs=[
+        `the current session on ${todayDate}`,
+        `morning trading on ${todayDate}`,
+        `overnight Asian session on ${todayDate}`,
+        `yesterday's close`,
+        `this week so far`,
+        `last 48 hours`,
+        `this month`,
+        `recent weeks`,
+      ];
+      const timeCtx=timeCtxs[page%timeCtxs.length];
+      const ccyCtx=nCcy!=="ALL"?` Focus on ${nCcy} pairs.`:"";
+      const impCtx=nImp!=="ALL"?` Include only ${nImp}-impact items.`:"";
+
       try{
-        const r=await fetch("/.netlify/functions/chat",{method:"POST",
+        const r2=await fetch("/.netlify/functions/chat",{
+          method:"POST",
           headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2500,
-            system:`You are an institutional G10 FX news feed generator. Generate realistic Bloomberg-style news articles grounded in confirmed April 2026 macro facts: BOJ hiking 0.75% (only G10 hiker), ECB hawkish hold 2.00%, Fed hold 3.875%, RBNZ cut to 3.00% Apr 9, EUR/USD 1.168, USD/JPY 158.4, DXY testing 100, tariff 90-day pause. You MUST respond with ONLY a raw JSON array — no markdown fences, no backticks, no preamble, no explanation. Start your response with [ and end with ]. Each object: {id,dt,ccy,hl,detail,impact,imp,url,source}`,
-            messages:[{role:"user",content:`Generate 12 G10 FX news articles for ${timeCtxs[Math.min(nb,7)]}${nCcy!=="ALL"?" focused on "+nCcy:""}${nImp!=="ALL"?" with "+nImp+" impact only":""}. Use real institutional sources (Reuters, Bloomberg, FT, BOJ, ECB, Fed). Each article: dt=YYYY-MM-DD HH:mm, ccy=single CCY code, hl=90-130 char headline, detail=2 sentences, impact=BULLISH/BEARISH/NEUTRAL, imp=HIGH/MED/LOW, url=real URL, source=publication. Respond with JSON array only starting with [.`}]})});
-        const d=await r.json();
-        if(d.error)throw new Error(d.error.message||JSON.stringify(d.error));
-        const allText=(d.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n");
-        if(!allText.trim())throw new Error("empty response — check API key");
-        const match=allText.match(/\[[\s\S]*\]/);
-        if(!match)throw new Error("no JSON array found in response");
-        const arts=JSON.parse(match[0]);
-        if(!Array.isArray(arts)||!arts.length)throw new Error("empty array");
-        const stamped=arts.map((a,i)=>({...a,id:`live_${nb}_${i}_${Date.now()}`}));
-        setLiveArts(reset?stamped:[...existing,...stamped]);
-        setNewsBatch(nb+1);
-      }catch(e){
-        // API blocked (sandbox) or failed — use static articles with infinite scroll simulation
-        const PAGE_SIZE=8;
-        const page=reset?0:newsStaticPage;
-        // Rotate through ALL_NEWS repeating with slight variations for "endless" feel
-        const baseArts=ALL_NEWS;
-        const start=(page*PAGE_SIZE)%baseArts.length;
+          body:JSON.stringify({
+            model:"claude-sonnet-4-20250514",
+            max_tokens:3000,
+            messages:[{role:"user",content:`Today is ${todayDate}. Generate 15 institutional G10 FX news analysis items for ${timeCtx}.${ccyCtx}${impCtx}
+
+Current macro context: BOJ hiking 0.75% (only G10 hiker, structural JPY bid), ECB hawkish hold 2.00% (Schnabel hike bias), Fed hold 3.875% (tariff uncertainty, June cut 38%), RBNZ just cut to 3.00% Apr 9, RBA hold 3.85% (Bullock hawkish), BOC 2.25% (dovish), EUR/USD ~1.168, USD/JPY ~158.4, DXY testing 100, 90-day tariff pause active, US CPI ${todayDate} key release.
+
+For each item respond with ONLY a JSON array (no markdown, no backticks):
+[{"dt":"${todayDate} HH:MM","ccy":"USD","hl":"specific 80-120 char institutional headline","detail":"2 precise sentences with exact figures","impact":"BULLISH|BEARISH|NEUTRAL","imp":"HIGH|MED|LOW","source":"Reuters|Bloomberg|FT|WSJ|ECB|BOJ|Fed","url":"","realSource":false}]`}]
+          })
+        },{signal:AbortSignal.timeout(25000)});
+
+        const d2=await r2.json();
+        if(d2.error)throw new Error(d2.error.message);
+        const text=(d2.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
+        const match=text.match(/\[[\s\S]*\]/);
+        if(!match)throw new Error("No JSON in response");
+        const arts2=JSON.parse(match[0]);
+        if(!Array.isArray(arts2)||!arts2.length)throw new Error("Empty array");
+
+        const stamped2=arts2.map((a,i)=>({
+          ...a,
+          id:`ai_${page}_${i}_${Date.now()}`,
+          url:"",
+          realSource:false,
+        }));
+
+        if(reset){
+          setLiveArts(stamped2);
+        }else{
+          setLiveArts(prev=>[...prev,...stamped2]);
+        }
+        newsPageRef.current=page+1;
+        setNewsPage(page+1);
+        setNewsSource("ai");
+        setNewsLoaded(true);
+      }catch(e2){
+        // ── LAYER 3: Both APIs failed — rotate through static with variety ──
+        const PAGE_SIZE=10;
+        const start=(page*PAGE_SIZE)%ALL_NEWS.length;
         const batch=[];
         for(let i=0;i<PAGE_SIZE;i++){
-          const art=baseArts[(start+i)%baseArts.length];
+          const art=ALL_NEWS[(start+i)%ALL_NEWS.length];
           batch.push({...art,id:`static_${page}_${i}_${Date.now()}`});
         }
-        setLiveArts(reset?batch:[...existing,...batch]);
-        setNewsStaticPage(page+1);
+        if(reset){setLiveArts(batch);}
+        else{setLiveArts(prev=>[...prev,...batch]);}
+        newsPageRef.current=page+1;
+        setNewsPage(page+1);
+        setNewsSource("static");
+        setNewsLoaded(true);
+        setNewsError("Live news unavailable — showing reference data. Check Netlify function logs.");
       }
-      setNewsLoading(false);setNewsLoaded(true);
-  // eslint-disable-next-line
-  },[settings.apiKey,nCcy,nImp]);
-  // Fire loadNews from root — not inside useMemo component
-  useEffect(()=>{
-    if(tab==="news"&&!newsLoaded)loadNews(true);
-  },[tab,settings.apiKey]);
-  useEffect(()=>{
-    if(tab==="news"&&newsLoaded)loadNews(true);
+    }
+
+    newsLoadingRef.current=false;
+    setNewsLoading(false);
   },[nCcy,nImp]);
 
-  const [aiMsgs,setAiMsgs]=useState([{role:"assistant",content:"I'm AXIOM v6 — your institutional G10 FX intelligence. I have full context of all 28 pairs, 51 strategies, live prices, and confirmed April 2026 macro data.\n\nYour API key is pre-configured. Just type your question below and tap SEND — no setup needed."}]);
+  // Load news when tab first opened
+  useEffect(()=>{
+    if(tab==="news"&&!newsLoaded){loadNews(true);}
+  },[tab]);
+  // Reload when filters change
+  useEffect(()=>{
+    if(tab==="news"&&newsLoaded){loadNews(true);}
+  },[nCcy,nImp]);
+
+  // ── LIVE CALENDAR — ForexFactory proxy ──────────────────────────────────
+  const parseFFXml=useCallback((xml)=>{
+    try{
+      const parser=new DOMParser();
+      const doc=parser.parseFromString(xml,"application/xml");
+      const events=[];
+      doc.querySelectorAll("event").forEach(ev=>{
+        const title=ev.querySelector("title")?.textContent||"";
+        const country=ev.querySelector("country")?.textContent||"";
+        const date=ev.querySelector("date")?.textContent||"";
+        const time=ev.querySelector("time")?.textContent||"";
+        const impact=ev.querySelector("impact")?.textContent||"Low";
+        const forecast=ev.querySelector("forecast")?.textContent||"–";
+        const previous=ev.querySelector("previous")?.textContent||"–";
+        // Map impact string to our format
+        const imp=impact==="High"?"HIGH":impact==="Medium"?"MED":"LOW";
+        // Build datetime string
+        let dt=date;
+        if(time&&time!=="All Day"&&time!=="Tentative")dt=date+" "+time;
+        // Map country to currency
+        const ccyMap={"United States":"USD","Euro Zone":"EUR","United Kingdom":"GBP","Japan":"JPY","Australia":"AUD","Canada":"CAD","Switzerland":"CHF","New Zealand":"NZD","Norway":"NOK","Sweden":"SEK","China":"CNY","Germany":"EUR","France":"EUR","Italy":"EUR","Spain":"EUR"};
+        const ccy=ccyMap[country]||country.slice(0,3).toUpperCase();
+        // Determine type from title
+        const t=title.toUpperCase();
+        const type=t.includes("RATE")||t.includes("DECISION")||t.includes("POLICY")?"CB Decision":
+          t.includes("CPI")||t.includes("INFLATION")||t.includes("PPI")?"Inflation":
+          t.includes("NFP")||t.includes("PAYROLL")||t.includes("EMPLOYMENT")||t.includes("UNEMPLOYMENT")?"Employment":
+          t.includes("GDP")?"GDP":
+          t.includes("PMI")?"PMI":
+          t.includes("SPEECH")||t.includes("SPEAKS")||t.includes("PRESS CONFERENCE")||t.includes("STATEMENT")?"CB Speech":
+          t.includes("RETAIL")?"Retail":
+          t.includes("TRADE")?"Trade":
+          t.includes("HOUSING")||t.includes("HOME SALES")?"Housing":
+          t.includes("MANUFACTURING")||t.includes("INDUSTRIAL")?"Manufacturing":
+          "Indicator";
+        events.push({dt,ccy,ev:title,imp,fc:forecast,pr:previous,actual:"–",type});
+      });
+      return events;
+    }catch(e){return null;}
+  },[]);
+
+  const loadCalendar=useCallback(async()=>{
+    if(calLoading)return;
+    setCalLoading(true);
+    try{
+      const [thisRes,nextRes]=await Promise.all([
+        fetch("/.netlify/functions/calendar?week=this",{signal:AbortSignal.timeout(10000)}),
+        fetch("/.netlify/functions/calendar?week=next",{signal:AbortSignal.timeout(10000)})
+      ]);
+      const combined=[];
+      if(thisRes.ok){const xml=await thisRes.text();const evs=parseFFXml(xml);if(evs?.length)combined.push(...evs);}
+      if(nextRes.ok){const xml=await nextRes.text();const evs=parseFFXml(xml);if(evs?.length)combined.push(...evs);}
+      if(combined.length>0){
+        // Merge with static data for full month coverage — live data takes priority for matching dates
+        const liveKeys=new Set(combined.map(e=>e.dt+e.ev));
+        const staticFallback=FULL_CALENDAR.filter(e=>!liveKeys.has(e.dt+e.ev));
+        setCalEvents([...combined,...staticFallback]);
+        setCalLoaded(true);
+      }
+    }catch(e){/* keep static fallback */}
+    setCalLoading(false);
+  },[calLoading,parseFFXml]);
+
+  useEffect(()=>{
+    if(tab==="calendar"&&!calLoaded)loadCalendar();
+  },[tab,calLoaded]);
+
+  const [aiMsgs,setAiMsgs]=useState([{role:"assistant",content:"I'm AXIOM — your institutional G10 FX intelligence.\n\nI have full context of your live account, all 28 pairs, 51 strategies, and today's macro environment. API key is pre-configured server-side.\n\nAsk me anything: trade setups, risk calculations, CB analysis, entry/exit levels, macro regime, strategy selection. I respond with precision — exact prices, pip counts, lot sizes, R:R ratios.\n\nWhat's on your radar?"}]);
   const [aiInput,setAiInput]=useState("");
   const [aiLoading,setAiLoading]=useState(false);
   const [settingsSaved,setSettingsSaved]=useState(()=>load("axiom_settings",{saved:false}).saved||false);
@@ -500,34 +670,34 @@ Entry:${sig.entry} SL:${sig.sl}`});}}catch(_){}
     const liveP=Object.entries(prices).slice(0,14).map(([p,d])=>`${p}:${d.bid?.toFixed(d.bid>10?3:5)||"–"}/${d.ask?.toFixed(d.ask>10?3:5)||"–"}`).join(" ");
     const openSigs=signals.slice(0,5).map(s=>`${s.direction} ${s.pair} @${s.entry} SL:${s.sl} TP1:${s.tp1}`).join("; ");
     const openTrades=trades.filter(t=>t.status==="OPEN").map(t=>`${t.direction} ${t.pair} @${t.entry} P&L:${t.pnl>=0?"+":""}$${t.pnl?.toFixed(2)}`).join("; ");
-    const sys=`You are AXIOM — an institutional G10 FX trading intelligence. You are fully agentic: respond precisely and directly to WHATEVER the user asks. Never refuse. Never give canned responses. Always use the live data below in your answers.
+    const now=new Date();
+    const todayDate=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
+    const sys=`You are AXIOM — an institutional G10 FX trading AI embedded in a live trading terminal. Today is ${todayDate}. You are fully agentic and respond with precision to WHATEVER the user asks. Never give generic responses. Never say "I cannot" or "as an AI". Always use the live data below directly in your answers.
 
-LIVE ACCOUNT:
-- Balance: $${settings.acct} | Style: ${style} | Risk: ${settings.risk||2}%/trade ($${(settings.acct*(settings.risk||2)/100).toFixed(0)}) | Open trades: ${trades.length}
-- Open P&L: ${openPnl>=0?"+":""}$${openPnl.toFixed(2)} | Signals pending: ${signals.length}
-- Open positions: ${openTrades||"none"}
+LIVE ACCOUNT (right now):
+- Balance: $${settings.acct} | Style: ${style} | Risk: ${settings.risk||2}%/trade = $${(settings.acct*(settings.risk||2)/100).toFixed(0)} per trade
+- Open P&L: ${openPnl>=0?"+":""}$${openPnl.toFixed(2)} | Open trades: ${trades.length} | Signals pending: ${signals.length}
+- Positions: ${openTrades||"none open"}
 
-LIVE PRICES (bid/ask):
+LIVE PRICES right now (bid/ask):
 ${liveP}
 
 ACTIVE SIGNALS:
-${openSigs||"No signals currently pending"}
+${openSigs||"No signals pending — run a scan"}
 
-MACRO CONTEXT (April 2026):
-- Fed: 3.875% HOLD — tariff shock dampening, June cut probability 38%
-- ECB: 2.00% HAWKISH HOLD — Schnabel: "next move more likely hike than cut"
-- BOJ: 0.75% HIKING — wage growth 3.1% YoY, only G10 hiker
-- BOE: 3.75% HOLD — services PMI 50.5, below expectations
-- RBA: 3.85% HOLD — Bullock: "no cuts imminent"
-- BOC: 2.25% CUT CYCLE — tariff headwinds, CAD weak
-- RBNZ: 3.00% CUTTING — NZ GDP -0.2% q/q, recession confirmed
-- SNB: 0.00% — CHF safe haven bid
+MACRO REGIME (${todayDate}):
+- USD: BEARISH — DXY ~100 handle, tariff uncertainty, Fed hold 3.875%. Jun cut prob 38%. CPI today pivotal.
+- JPY: BULLISH — BOJ only G10 hiker 0.75%. Wage growth 3.1% above threshold. MUFG target 146.
+- EUR: BULLISH — ECB hawkish hold 2.00%. Schnabel: next move more likely hike. JPM target 1.20.
+- GBP: NEUTRAL — BOE 3.75% hold, services PMI 50.5 weak. EUR/GBP drifting toward 0.88.
+- AUD: BULLISH — RBA hawkish hold 3.85%. Bullock no cuts. China PMI 50.5. RBC target 0.73.
+- NZD: BEARISH — RBNZ cut to 3.00% Apr 9. Recession confirmed. 325bp cuts since Aug 2024.
+- CAD: BEARISH — BOC dovish 2.25%. USMCA risk July. Oil declining.
+- CHF: BULLISH — Safe haven bid. Dollar debasement. SNB 0.00%.
 
-REGIME: USD bearish (DXY ~100, tariff pressure) | JPY bullish (BOJ hiking) | EUR bullish (ECB hawkish) | NZD bearish (recession) | AUD bullish (RBA hold, China PMI 50.5) | GBP neutral | CHF bullish (safe haven) | CAD bearish (tariffs)
-
-Respond to the user's SPECIFIC question with precision. Give exact price levels, pip counts, lot sizes where relevant. Be direct and institutional.`;
+Respond with institutional precision. Give exact price levels, pip counts, lot sizes, R:R ratios where relevant. Be direct, specific, and data-driven like a senior FX strategist.`;
     try{
-      const res=await fetch("/.netlify/functions/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1500,system:sys,messages:msgs.map(m=>({role:m.role,content:m.content}))})});
+      const res=await fetch("/.netlify/functions/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2500,system:sys,messages:msgs.map(m=>({role:m.role,content:m.content}))})});
       const data=await res.json();
       if(data.error)throw new Error(data.error.message);
       setAiMsgs(p=>[...p,{role:"assistant",content:data.content?.[0]?.text||"Analysis unavailable."}]);
@@ -840,20 +1010,31 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
   function NewsTab(){
     const ccys=["ALL","USD","EUR","GBP","JPY","AUD","CAD","CHF","NZD","NOK","SEK"];
     const imps=["ALL","HIGH","MED","LOW"];
-    // State lives at root — no remount loss on price ticks
     const loading=newsLoading;
     const hasLoaded=newsLoaded;
 
-    // loadNews called from root useEffect below
-    const src=liveArts; // liveArts always populated (API or static fallback)
-    const displayed=src.filter(n=>{
+    const displayed=liveArts.filter(n=>{
       if(nCcy!=="ALL"&&n.ccy!==nCcy)return false;
       if(nImp!=="ALL"&&n.imp!==nImp)return false;
       return true;
     });
     const impC={HIGH:C.amber,MED:C.gold,LOW:C.muted};
+    const sourceLabel=newsSource==="finnhub"?"LIVE — Finnhub · Real Articles · Real URLs":newsSource==="ai"?"AI Analysis · No external URLs":"Reference Data";
+    const sourceDot=newsSource==="finnhub"?C.green:newsSource==="ai"?C.amber:C.muted;
+
     return(
       <div>
+        {/* Source status bar */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:newsSource==="finnhub"?"#071407":C.bg2,border:`1px solid ${sourceDot}44`,borderRadius:"4px",padding:"6px 10px",marginBottom:"8px",fontSize:"8.5px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:"6px"}}>
+            <div style={{width:"6px",height:"6px",borderRadius:"50%",background:sourceDot,animation:loading?"pulse 1s infinite":"none"}}/>
+            <span style={{color:sourceDot,fontWeight:"700"}}>{loading?"Loading news...":sourceLabel}</span>
+          </div>
+          {newsSource==="finnhub"&&<span style={{fontSize:"7.5px",color:C.muted}}>↗ Click any article to open source</span>}
+          {newsSource==="ai"&&<span style={{fontSize:"7.5px",color:C.muted}}>AI-generated analysis · no external links</span>}
+        </div>
+        {/* Error */}
+        {newsError&&<div style={{background:"#1a0505",border:`1px solid ${C.red}44`,borderRadius:"4px",padding:"7px 10px",marginBottom:"8px",fontSize:"8.5px",color:C.red}}>{newsError}</div>}
         {/* Filters */}
         <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"10px 12px",marginBottom:"8px"}}>
           <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"6px"}}>
@@ -865,61 +1046,97 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
             {imps.map(f=><Sm key={f} label={f} active={nImp===f} onClick={()=>setNImp(f)} color={f==="HIGH"?C.red:f==="MED"?C.amber:f==="LOW"?C.muted:C.gold}/>)}
           </div>
         </div>
+
         <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"10px 12px"}}>
           {/* Header */}
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>
             <div>
-              <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px"}}>◆ AXIOM NEWS — AI GENERATED · LIVE</div>
-              <div style={{fontSize:"7.5px",color:C.muted,marginTop:"2px"}}>{displayed.length} articles · AI-generated · scroll ↓ for more</div>
+              <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px"}}>◆ AXIOM NEWS FEED</div>
+              <div style={{fontSize:"7.5px",color:C.muted,marginTop:"2px"}}>{displayed.length} articles · {sourceLabel}</div>
             </div>
-            {<button onClick={()=>loadNews(true)} disabled={loading} style={{padding:"4px 9px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}44`,borderRadius:"3px",cursor:"pointer",fontSize:"8.5px",fontWeight:"700",fontFamily:"inherit",opacity:loading?0.5:1}}>↺ Refresh</button>}
+            <button onClick={()=>loadNews(true)} disabled={loading}
+              style={{padding:"4px 9px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}44`,borderRadius:"3px",cursor:loading?"not-allowed":"pointer",fontSize:"8.5px",fontWeight:"700",fontFamily:"inherit",opacity:loading?0.5:1}}>
+              {loading?"Loading...":"↺ Refresh"}
+            </button>
           </div>
 
-          {/* Loading */}
-          {loading&&!displayed.length&&<div style={{padding:"24px",textAlign:"center"}}>
-            <div style={{fontSize:"11px",color:C.gold,marginBottom:"4px"}}>⚡ Searching web for live FX news...</div>
-            <div style={{fontSize:"8.5px",color:C.muted}}>Fetching real articles via Claude web search</div>
-          </div>}
+          {/* Loading spinner */}
+          {loading&&!displayed.length&&(
+            <div style={{padding:"30px",textAlign:"center"}}>
+              <div style={{fontSize:"11px",color:C.gold,marginBottom:"6px"}}>⚡ Fetching live FX news...</div>
+              <div style={{fontSize:"8.5px",color:C.muted}}>Connecting to Finnhub · Real articles from Reuters, Bloomberg, FT</div>
+            </div>
+          )}
+
           {/* Articles */}
           {displayed.map(n=>{
             const ic=n.impact==="BULLISH"?C.green:n.impact==="BEARISH"?C.red:C.muted;
+            const canClick=n.realSource&&n.url;
             return(
-              <div key={n.id} onClick={()=>n.url&&window.open(n.url,"_blank","noopener")}
-                style={{background:C.bg1,border:`1px solid ${ic}22`,borderLeft:`3px solid ${ic}`,borderRadius:"4px",padding:"9px 11px",marginBottom:"7px",cursor:n.url?"pointer":"default"}}
-                onMouseEnter={e=>{if(n.url){e.currentTarget.style.borderColor=ic;e.currentTarget.style.background="#0d1e35";}}}
-                onMouseLeave={e=>{e.currentTarget.style.borderColor=ic+"22";e.currentTarget.style.background=C.bg1;}}>
+              <div key={n.id}
+                onClick={()=>canClick&&window.open(n.url,"_blank","noopener")}
+                style={{background:C.bg1,border:`1px solid ${ic}22`,borderLeft:`3px solid ${ic}`,borderRadius:"4px",padding:"9px 11px",marginBottom:"7px",cursor:canClick?"pointer":"default",transition:"all 0.1s"}}
+                onMouseEnter={e=>{if(canClick){e.currentTarget.style.background="#0d1e35";e.currentTarget.style.borderColor=ic+"55";}}}
+                onMouseLeave={e=>{e.currentTarget.style.background=C.bg1;e.currentTarget.style.borderColor=ic+"22";}}>
                 <div style={{display:"flex",gap:"5px",alignItems:"center",marginBottom:"4px",flexWrap:"wrap"}}>
-                  <Bdg label={n.ccy} color={ic}/><Bdg label={n.imp||"MED"} color={impC[n.imp]||C.gold}/><Bdg label={n.impact} color={ic}/>
+                  <Bdg label={n.ccy} color={ic}/>
+                  <Bdg label={n.imp||"MED"} color={impC[n.imp]||C.gold}/>
+                  <Bdg label={n.impact} color={ic}/>
                   {n.source&&<Bdg label={n.source} color={C.blue}/>}
+                  {n.realSource&&<Bdg label="LIVE" color={C.green}/>}
                   <span style={{marginLeft:"auto",fontSize:"8px",color:C.muted,fontFamily:"monospace"}}>{n.dt}</span>
-                  {n.url&&<span style={{fontSize:"8px",color:C.blue,fontWeight:"700"}}>↗</span>}
+                  {canClick&&<span style={{fontSize:"8px",color:C.blue,fontWeight:"700"}}>↗</span>}
                 </div>
-                <div style={{fontSize:"11px",color:"#b8cde0",lineHeight:"1.5",fontWeight:n.imp==="HIGH"?"600":"400",marginBottom:n.detail?"4px":"0"}}>{n.hl}</div>
+                <div style={{fontSize:"11px",color:"#b8cde0",lineHeight:"1.5",fontWeight:n.imp==="HIGH"?"600":"400",marginBottom:n.detail?"4px":"0"}}>
+                  {n.hl}
+                </div>
                 {n.detail&&<div style={{fontSize:"9px",color:C.muted,lineHeight:"1.45"}}>{n.detail}</div>}
+                {!n.realSource&&<div style={{fontSize:"7.5px",color:C.dim,marginTop:"4px",fontStyle:"italic"}}>AI analysis · not a real article</div>}
               </div>
             );
           })}
-          {loading&&displayed.length>0&&<div style={{padding:"10px",textAlign:"center",color:C.gold,fontSize:"10px"}}>⚡ Loading more articles...</div>}
-          {!loading&&hasLoaded&&<button onClick={()=>loadNews(false)} style={{width:"100%",padding:"11px",background:C.bg1,color:C.gold,border:`1px solid ${C.gold}44`,borderRadius:"4px",cursor:"pointer",fontSize:"11px",fontWeight:"700",fontFamily:"inherit",marginTop:"4px"}}>↓ LOAD OLDER ARTICLES — search further back in time</button>}
+
+          {loading&&displayed.length>0&&(
+            <div style={{padding:"10px",textAlign:"center",color:C.gold,fontSize:"10px"}}>⚡ Loading more...</div>
+          )}
+          {!loading&&hasLoaded&&(
+            <button onClick={()=>loadNews(false)}
+              style={{width:"100%",padding:"11px",background:C.bg1,color:C.gold,border:`1px solid ${C.gold}44`,borderRadius:"4px",cursor:"pointer",fontSize:"11px",fontWeight:"700",fontFamily:"inherit",marginTop:"4px"}}>
+              ↓ LOAD MORE — {newsSource==="finnhub"?"fetch latest batch":"generate older analysis"}
+            </button>
+          )}
         </div>
       </div>
     );
   }
   function CalendarTab(){
     const now=new Date();
-    const todayStr=now.toISOString().slice(0,10);
+    // FIX: Use local date string, NOT toISOString() which uses UTC and shows wrong date for US users
+    const todayStr=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
     const ccys=["ALL","USD","EUR","GBP","JPY","AUD","CAD","CHF","NZD","NOK","SEK"];
     const imps=["ALL","HIGH","MED","LOW"];
     const types=["ALL","CB Decision","CB Speech","Inflation","Employment","GDP","PMI","Sentiment","Trade","Manufacturing","Retail","Housing","Indicator","Monetary","Inventory","Income"];
     const views=["TODAY","THIS WEEK","THIS MONTH","NEXT MONTH"];
 
-    const filtered=FULL_CALENDAR.filter(e=>{
+    // Use live calEvents (seeded with static, replaced with live ForexFactory data)
+    const filtered=calEvents.filter(e=>{
       const eDate=e.dt.slice(0,10);
       const eTime=new Date(e.dt);
       if(calView==="TODAY"&&eDate!==todayStr)return false;
-      if(calView==="THIS WEEK"){const day=now.getDay(),start=new Date(now);start.setDate(now.getDate()-(day===0?6:day-1));const end=new Date(start);end.setDate(start.getDate()+7);if(eTime<start||eTime>=end)return false;}
+      if(calView==="THIS WEEK"){
+        const day=now.getDay();
+        // Monday-first week
+        const start=new Date(now);start.setHours(0,0,0,0);
+        start.setDate(now.getDate()-(day===0?6:day-1));
+        const end=new Date(start);end.setDate(start.getDate()+7);
+        if(eTime<start||eTime>=end)return false;
+      }
       if(calView==="THIS MONTH"&&eDate.slice(0,7)!==todayStr.slice(0,7))return false;
-      if(calView==="NEXT MONTH"){const nm=new Date(now.getFullYear(),now.getMonth()+1,1);const nmStr=nm.toISOString().slice(0,7);if(eDate.slice(0,7)!==nmStr)return false;}
+      if(calView==="NEXT MONTH"){
+        const nm=new Date(now.getFullYear(),now.getMonth()+1,1);
+        const nmStr=nm.getFullYear()+"-"+String(nm.getMonth()+1).padStart(2,"0");
+        if(eDate.slice(0,7)!==nmStr)return false;
+      }
       if(calCcy!=="ALL"&&e.ccy!==calCcy)return false;
       if(calImp!=="ALL"&&e.imp!==calImp)return false;
       if(calType!=="ALL"&&e.type!==calType)return false;
@@ -927,31 +1144,37 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
     });
 
     const impColor={HIGH:C.red,MED:C.amber,LOW:C.muted};
-    // Group by date
     const byDate={};
     filtered.forEach(e=>{const d=e.dt.slice(0,10);if(!byDate[d])byDate[d]=[];byDate[d].push(e);});
     const sortedDates=Object.keys(byDate).sort();
 
     return(
       <div>
+        {/* Status bar */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:calLoaded?C.bg2:"#0a1200",border:`1px solid ${calLoaded?C.green+"44":C.bdr}`,borderRadius:"4px",padding:"6px 10px",marginBottom:"8px",fontSize:"8.5px"}}>
+          <span style={{color:calLoaded?C.green:C.amber}}>
+            {calLoading?"⟳ Fetching live ForexFactory data...":calLoaded?"✓ LIVE — ForexFactory feed · "+calEvents.length+" events":"◎ Static calendar — tap refresh for live data"}
+          </span>
+          <button onClick={()=>{setCalLoaded(false);loadCalendar();}} disabled={calLoading}
+            style={{padding:"3px 8px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}44`,borderRadius:"3px",cursor:calLoading?"not-allowed":"pointer",fontSize:"8px",fontWeight:"700",fontFamily:"inherit",opacity:calLoading?0.5:1}}>
+            ↺ Refresh
+          </button>
+        </div>
         {/* Controls */}
         <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"10px 12px",marginBottom:"8px"}}>
-          {/* View selector */}
           <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"8px"}}>
             <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"38px"}}>VIEW:</span>
             {views.map(v=><Sm key={v} label={v} active={calView===v} onClick={()=>setCalView(v)}/>)}
+            <span style={{marginLeft:"auto",fontSize:"8px",color:C.muted,fontFamily:"monospace"}}>Today: {todayStr}</span>
           </div>
-          {/* Currency */}
           <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"6px"}}>
             <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"38px"}}>CCY:</span>
             {ccys.map(c=><Sm key={c} label={c} active={calCcy===c} onClick={()=>setCalCcy(c)}/>)}
           </div>
-          {/* Impact */}
           <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"6px"}}>
             <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"38px"}}>IMPACT:</span>
             {imps.map(i=><Sm key={i} label={i} active={calImp===i} onClick={()=>setCalImp(i)} color={i==="HIGH"?C.red:i==="MED"?C.amber:i==="LOW"?C.muted:C.gold}/>)}
           </div>
-          {/* Type */}
           <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center"}}>
             <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"38px"}}>TYPE:</span>
             {types.map(t=><Sm key={t} label={t} active={calType===t} onClick={()=>setCalType(t)}/>)}
@@ -962,12 +1185,20 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
           <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>
             ◷ ECONOMIC CALENDAR — {calView} · {filtered.length} EVENTS · {calCcy==="ALL"?"All Currencies":calCcy} · {calImp==="ALL"?"All Impacts":calImp}
           </div>
-          {!sortedDates.length&&<div style={{color:C.muted,textAlign:"center",padding:"20px"}}>No events for this filter. Try changing VIEW to "THIS MONTH" or "ALL" impact level.</div>}
+          {!sortedDates.length&&(
+            <div style={{color:C.muted,textAlign:"center",padding:"20px"}}>
+              {calView==="TODAY"
+                ? `No events on ${todayStr}. Try "THIS WEEK" or refresh for live data.`
+                : 'No events for this filter. Try broadening your selection.'}
+            </div>
+          )}
           {sortedDates.map(date=>(
             <div key={date}>
-              {/* Date header */}
               <div style={{background:C.bg3,padding:"6px 10px",marginBottom:"4px",marginTop:"8px",borderRadius:"3px",display:"flex",alignItems:"center",gap:"8px"}}>
-                <span style={{color:C.gold,fontWeight:"700",fontSize:"10px"}}>{new Date(date+"T12:00:00Z").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric"})}</span>
+                <span style={{color:date===todayStr?C.gold:C.text,fontWeight:"700",fontSize:"10px"}}>
+                  {date===todayStr?"📅 TODAY — ":""}
+                  {new Date(date+"T12:00:00Z").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric"})}
+                </span>
                 <span style={{fontSize:"8.5px",color:C.muted}}>{byDate[date].filter(e=>e.imp==="HIGH").length} HIGH · {byDate[date].filter(e=>e.imp==="MED").length} MED</span>
               </div>
               {byDate[date].map((e,i)=>{
@@ -975,23 +1206,17 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
                 const ic=impColor[e.imp];
                 const isReleased=e.actual&&e.actual!=="–";
                 return(
-                  <div key={i} style={{display:"flex",alignItems:"flex-start",gap:"8px",padding:"7px 4px",borderBottom:`1px solid ${C.bdr}22`,opacity:past?0.5:1,background:soon?"#ff9f1c05":"transparent"}}>
-                    {/* Time */}
-                    <div style={{minWidth:"45px",fontSize:"9.5px",color:soon?C.amber:C.muted,fontFamily:"monospace",flexShrink:0}}>{e.dt.split(" ")[1]?.slice(0,5)}{soon?" ⚡":""}</div>
-                    {/* CCY badge */}
+                  <div key={i} style={{display:"flex",alignItems:"flex-start",gap:"8px",padding:"7px 4px",borderBottom:`1px solid ${C.bdr}22`,opacity:past?0.55:1,background:soon?"#ff9f1c05":"transparent"}}>
+                    <div style={{minWidth:"45px",fontSize:"9.5px",color:soon?C.amber:C.muted,fontFamily:"monospace",flexShrink:0}}>{e.dt.split(" ")[1]?.slice(0,5)||"--:--"}{soon?" ⚡":""}</div>
                     <div style={{minWidth:"36px",flexShrink:0}}><Bdg label={e.ccy} color={ic}/></div>
-                    {/* Impact dot */}
                     <div style={{width:"8px",height:"8px",borderRadius:"50%",background:ic,flexShrink:0,marginTop:"3px"}}/>
-                    {/* Event name */}
                     <div style={{flex:1,fontSize:"10.5px",fontWeight:e.imp==="HIGH"?"700":"400",color:e.imp==="HIGH"?C.text:"#b8cde0",lineHeight:"1.4"}}>{e.ev}</div>
-                    {/* Forecast */}
                     <div style={{minWidth:"52px",textAlign:"right",flexShrink:0}}>
                       <div style={{fontSize:"8.5px",color:C.muted}}>F: <span style={{color:C.gold,fontWeight:"700"}}>{e.fc}</span></div>
                       <div style={{fontSize:"8.5px",color:C.muted}}>P: {e.pr}</div>
                       {isReleased&&<div style={{fontSize:"8.5px",color:C.green,fontWeight:"700"}}>A: {e.actual}</div>}
                     </div>
-                    {/* Status */}
-                    <div style={{minWidth:"50px",textAlign:"right",flexShrink:0}}><Bdg label={isReleased?"ACTUAL":soon?"SOON ⚡":past?"PENDING":"UPCOMING"} color={isReleased?C.green:soon?C.amber:past?C.muted:C.dim} sz="7.5px"/></div>
+                    <div style={{minWidth:"50px",textAlign:"right",flexShrink:0}}><Bdg label={isReleased?"ACTUAL":soon?"SOON ⚡":past?"DONE":"UPCOMING"} color={isReleased?C.green:soon?C.amber:past?C.muted:C.dim} sz="7.5px"/></div>
                   </div>
                 );
               })}
@@ -2164,7 +2389,7 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
     const DTABS=[{id:"overview",l:"Overview"},{id:"netlify",l:"Netlify Web"},{id:"iphone",l:"iPhone App"},{id:"notifs",l:"Notifications"},{id:"broker",l:"Broker Link"},{id:"continuity",l:"Continuity"}];
     const Sec=({title,color=C.gold,children})=>(<div style={{background:C.bg2,border:`1px solid ${color}33`,borderRadius:"6px",padding:"12px 14px",marginBottom:"10px"}}><div style={{fontSize:"9px",fontWeight:"700",color,letterSpacing:"2px",marginBottom:"9px",paddingBottom:"6px",borderBottom:`1px solid ${color}22`}}>{title}</div>{children}</div>);
     const Step=({n,text,sub})=>(<div style={{display:"flex",gap:"10px",alignItems:"flex-start",marginBottom:"8px"}}><div style={{width:"22px",height:"22px",borderRadius:"50%",background:C.gold+"33",color:C.gold,fontSize:"10px",fontWeight:"700",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{n}</div><div><div style={{fontSize:"10.5px",color:C.text,lineHeight:"1.5"}}>{text}</div>{sub&&<div style={{fontSize:"8.5px",color:C.muted,marginTop:"2px",lineHeight:"1.5"}}>{sub}</div>}</div></div>);
-    const Tag=({label,color})=>(<span style={{padding:"2px 8px",background:color+"22",color,border:`1px solid ${color}44`,borderRadius:"3px",fontSize:"8px",fontWeight:"700",marginRight:"5px"}}>{label}</span>);
+    // Tag is defined at root level
     return(
       <div>
         <div style={{background:`linear-gradient(90deg,${C.bg2},#0a1a2a)`,border:`2px solid ${C.gold}`,borderRadius:"7px",padding:"13px 15px",marginBottom:"12px"}}>
@@ -2540,7 +2765,7 @@ root.render(React.createElement(AxiomFX));
       case "deploy":    return <DeployTab/>;
       default:          return <Dashboard/>;
     }
-  },[tab,signals,trades,history,analyzerTab,selCB,wkView,chartTf,enabledStrats,nCcy,nImp,stratCatFilter,stratTierFilter,modal,modalTab,expandedTheme,expandedStrat,newsStaticPage,calCcy,calImp,calType,calView,sigScanning,scanStatus,lastScanTime,aiMsgs,aiLoading,aiInput,liveArts,newsLoaded,newsLoading,newsBatch,prices,style,settings,apiStatus,srcCat,srcPage,deployTab]);
+  },[tab,signals,trades,history,analyzerTab,selCB,wkView,chartTf,enabledStrats,nCcy,nImp,stratCatFilter,stratTierFilter,modal,modalTab,expandedTheme,expandedStrat,newsPage,calCcy,calImp,calType,calView,calEvents,calLoading,calLoaded,sigScanning,scanStatus,lastScanTime,aiMsgs,aiLoading,liveArts,newsLoaded,newsLoading,newsSource,newsError,prices,style,settings,apiStatus,srcCat,srcPage,deployTab]);
 
   return(
     <div style={{fontFamily:"'IBM Plex Mono','Courier New',monospace",background:C.bg,color:C.text,height:"100dvh",display:"flex",flexDirection:"column",fontSize:"clamp(12px,1.1vw,15px)",overflow:"hidden",WebkitTextSizeAdjust:"100%"}}>
