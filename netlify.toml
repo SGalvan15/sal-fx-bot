@@ -30,3 +30,8 @@
   from = "/api/candles"
   to = "/.netlify/functions/candles"
   status = 200
+
+[[redirects]]
+  from = "/api/news"
+  to = "/.netlify/functions/news"
+  status = 200
