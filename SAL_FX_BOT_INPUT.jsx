@@ -2,7 +2,7 @@
 const { useState, useEffect, useRef, useCallback, useMemo, memo } = React;
 
 // ═══════════════════════════════════════════════════════════════════════════
-// AXIOM FX TERMINAL v5.0
+// AXIOM FX TERMINAL v6.0
 // All fixes applied: chart loading, API key input, notifications, calendar,
 // infinite scroll news, alphabetical pairs, modal glitch, perf, fullscreen
 // ═══════════════════════════════════════════════════════════════════════════
@@ -271,7 +271,7 @@ const SC={scalp:C.scalp,day:C.day,swing:C.swing};
 const CATC={MOMENTUM:"#1d5c35",CARRY:"#7a5500","MEAN REVERT":"#005a5a",MACRO:"#1a3a6a",FLOW:"#4a1f6a",TECHNICAL:"#1a4a6a",CORRELATION:"#6a2a00","RISK MGMT":"#6a1111"};
 
 // ── PRICE ENGINE (memoized, stable) ──────────────────────────────────────
-function usePrices(_oandaKey){
+function usePrices(oandaKey){
   const [prices,setPrices]=useState(()=>{const p={};ALL_PAIRS.forEach(pair=>{const mid=BASE_PRICES[pair]||1.0;const isH=pair.includes("JPY");const sp=isH?0.00015:0.000012;p[pair]={bid:+(mid*(1-sp/2)).toFixed(5),ask:+(mid*(1+sp/2)).toFixed(5),mid,change:0,pct:0,dir:"flat",live:false,history:Array(60).fill(0).map((_,i)=>mid*(1+(Math.sin(i*0.3)+Math.random()-0.5)*0.0004))};});return p;});
   const [apiStatus,setApiStatus]=useState("connecting");
   const OINSTR={"AUD/CAD":"AUD_CAD","AUD/CHF":"AUD_CHF","AUD/JPY":"AUD_JPY","AUD/NZD":"AUD_NZD","AUD/USD":"AUD_USD","CAD/CHF":"CAD_CHF","CAD/JPY":"CAD_JPY","CHF/JPY":"CHF_JPY","EUR/AUD":"EUR_AUD","EUR/CAD":"EUR_CAD","EUR/CHF":"EUR_CHF","EUR/GBP":"EUR_GBP","EUR/JPY":"EUR_JPY","EUR/NZD":"EUR_NZD","EUR/USD":"EUR_USD","GBP/AUD":"GBP_AUD","GBP/CAD":"GBP_CAD","GBP/CHF":"GBP_CHF","GBP/JPY":"GBP_JPY","GBP/NZD":"GBP_NZD","GBP/USD":"GBP_USD","NZD/CAD":"NZD_CAD","NZD/CHF":"NZD_CHF","NZD/JPY":"NZD_JPY","NZD/USD":"NZD_USD","USD/CAD":"USD_CAD","USD/CHF":"USD_CHF","USD/JPY":"USD_JPY"};
@@ -317,13 +317,12 @@ function AxiomFX(){
   const [history,setHistory]=useState(()=>load("axiom_history",[]));
   const [modal,setModal]=useState(null);
   const [chartPair,setChartPair]=useState("EUR/USD");
-  const [chartFullscreen,setChartFullscreen]=useState(false);
   const [toast,setToast]=useState(null);
   // Calendar filters
   const [calCcy,setCalCcy]=useState("ALL");
   const [calImp,setCalImp]=useState("HIGH");
   const [calType,setCalType]=useState("ALL");
-  const [calView,setCalView]=useState("TODAY"); // TODAY, WEEK, MONTH
+  const [calView,setCalView]=useState("THIS WEEK"); // TODAY, THIS WEEK, THIS MONTH, NEXT MONTH
   // Signal filter
   const [sFilter,setSFilter]=useState("ALL");
   // Lifted states — no reset bugs
@@ -341,6 +340,11 @@ function AxiomFX(){
   const [selCB,setSelCB]=useState(null);
   const [expandedTheme,setExpandedTheme]=useState(null);
   const [expandedStrat,setExpandedStrat]=useState(null);
+  // SourcesTab state lifted — prevents reset on tab switch
+  const [srcCat,setSrcCat]=useState("ALL");
+  const [srcPage,setSrcPage]=useState(0);
+  // DeployTab state lifted — prevents reset on tab switch
+  const [deployTab,setDeployTab]=useState("overview");
   // NewsTab state lifted to root — survives price ticks and tab switches
   const [liveArts,setLiveArts]=useState(ALL_NEWS);
   const [newsLoading,setNewsLoading]=useState(false);
@@ -370,7 +374,7 @@ function AxiomFX(){
         if(!Array.isArray(arts)||!arts.length)throw new Error("empty array");
         const stamped=arts.map((a,i)=>({...a,id:`live_${nb}_${i}_${Date.now()}`}));
         setLiveArts(reset?stamped:[...existing,...stamped]);
-        setBatchNum(nb+1);
+        setNewsBatch(nb+1);
       }catch(e){
         // API blocked (sandbox) or failed — use static articles with infinite scroll simulation
         const PAGE_SIZE=8;
@@ -401,7 +405,6 @@ function AxiomFX(){
   const [aiInput,setAiInput]=useState("");
   const [aiLoading,setAiLoading]=useState(false);
   const [settingsSaved,setSettingsSaved]=useState(()=>load("axiom_settings",{saved:false}).saved||false);
-  const sigTimerRef=useRef(null);
   const aiRef=useRef(null);
   const [sigScanning,setSigScanning]=useState(false);
   const [scanStatus,setScanStatus]=useState("Waiting for first scan...");
@@ -560,7 +563,7 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
           <span style={{marginLeft:"auto",color:sig.probability>=68?C.green:sig.probability>=58?C.gold:C.amber,fontWeight:"700",fontSize:"11px"}}>{sig.probability}%</span>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:"4px",marginBottom:"7px"}}>
-          {[["ENTRY",sig.entry,C.text],["SL",sig.sl,C.red],["TP1",sig.tp1,C.green],["TP3",sig.tp3,C.gold],["LOTS",`${sig.lotSize}M`,C.gold]].map(([l,v,c])=>(
+          {[["ENTRY",sig.entry,C.text],["SL",sig.sl,C.red],["TP1",sig.tp1,C.green],["TP3",sig.tp3,C.gold],["LOTS",`${sig.lotSize}`,C.gold]].map(([l,v,c])=>(
             <div key={l}><div style={{fontSize:"7px",color:C.muted,letterSpacing:"0.8px",marginBottom:"2px"}}>{l}</div><div style={{color:c,fontWeight:"700",fontSize:"9.5px"}}>{v}</div></div>
           ))}
         </div>
@@ -582,7 +585,7 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
     {id:"trades",   icon:"◉",label:"Trades"},
     {id:"perf",     icon:"▲",label:"Performance"},
     {id:"analyzer", icon:"◎",label:"Analyzer"},
-    {id:"news",     icon:"◆",label:"News", badge:()=>{const h=ALL_NEWS.filter(n=>n.imp==="HIGH").length;return h>0?h:null;}},
+    {id:"news",     icon:"◆",label:"News", badge:()=>{const h=liveArts.filter(n=>n.imp==="HIGH").length;return h>0?h:null;}},
     {id:"calendar", icon:"◷",label:"Calendar"},
     {id:"cb",       icon:"◈",label:"CB Rates"},
     {id:"weekend",  icon:"◫",label:"Weekend"},
@@ -706,28 +709,6 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
             ))}
           </div>
         </div>
-        {/* ── Market Pulse ─────────────────────────────────────────────── */}
-        {(()=>{
-          const topMover=ALL_PAIRS.reduce((b,pair)=>{const pp=prices[pair];if(!pp)return b;return Math.abs(pp.pct)>Math.abs(b.pct)?{pair,pct:pp.pct}:b;},{pair:"EUR/USD",pct:0});
-          const regime=topMover.pct>0.4?"RISK ON":topMover.pct<-0.4?"RISK OFF":"NEUTRAL";
-          const rc=regime==="RISK ON"?C.green:regime==="RISK OFF"?C.red:C.gold;
-          return(
-            <div style={{display:"flex",gap:"6px",alignItems:"center",background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"7px 12px",marginBottom:"9px",overflowX:"auto",scrollbarWidth:"none",WebkitOverflowScrolling:"touch"}}>
-              <div style={{flexShrink:0,display:"flex",alignItems:"center",gap:"4px"}}>
-                <div style={{width:"6px",height:"6px",borderRadius:"50%",background:apiStatus==="live_oanda"?C.green:apiStatus==="live_ecb"?"#00d4ff":C.amber,animation:"pulse 2s infinite"}}/>
-                <span style={{fontSize:"7.5px",color:apiStatus==="live_oanda"?C.green:apiStatus==="live_ecb"?"#00d4ff":C.amber,fontWeight:"700"}}>{apiStatus==="live_oanda"?"OANDA LIVE":apiStatus==="live_ecb"?"ECB LIVE":"SIM"}</span>
-              </div>
-              <span style={{color:C.dim}}>│</span>
-              <div style={{flexShrink:0}}><span style={{fontSize:"7.5px",color:C.muted}}>REGIME </span><span style={{fontSize:"8px",color:rc,fontWeight:"700"}}>{regime}</span></div>
-              <span style={{color:C.dim}}>│</span>
-              <div style={{flexShrink:0}}><span style={{fontSize:"7.5px",color:C.muted}}>TOP </span><span style={{fontSize:"8px",color:topMover.pct>=0?C.green:C.red,fontWeight:"700"}}>{topMover.pair} {topMover.pct>=0?"+":""}{topMover.pct.toFixed(3)}%</span></div>
-              <span style={{color:C.dim}}>│</span>
-              <div style={{flexShrink:0}}><span style={{fontSize:"7.5px",color:C.muted}}>SIGNALS </span><span style={{fontSize:"8px",color:C.gold,fontWeight:"700"}}>{signals.length}</span></div>
-              <span style={{color:C.dim}}>│</span>
-              <div style={{flexShrink:0}}><span style={{fontSize:"7.5px",color:C.muted}}>OPEN </span><span style={{fontSize:"8px",color:trades.length>0?C.amber:C.muted,fontWeight:"700"}}>{trades.length} trades</span></div>
-            </div>
-          );
-        })()}
         {/* Signals + News */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px"}}>
           <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"10px 12px",minWidth:0}}>
@@ -743,7 +724,7 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
               <span style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px"}}>◆ LATEST NEWS</span>
               <Sm label="ALL →" onClick={()=>setTab("news")}/>
             </div>
-            {ALL_NEWS.slice(0,5).map(n=>{
+            {liveArts.slice(0,5).map(n=>{
               const ic=n.impact==="BULLISH"?C.green:n.impact==="BEARISH"?C.red:C.muted;
               return(
                 <div key={n.id} onClick={()=>window.open(n.url,"_blank","noopener")} style={{borderBottom:`1px solid ${C.bdr}22`,paddingBottom:"7px",marginBottom:"7px",cursor:"pointer"}}>
@@ -799,11 +780,18 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
   function ChartsTab(){
     const selectedTf=chartTf,setSelectedTf=setChartTf;
     const TFS=[{v:"5",l:"5m"},{v:"15",l:"15m"},{v:"30",l:"30m"},{v:"60",l:"1H"},{v:"240",l:"4H"},{v:"D",l:"1D"},{v:"W",l:"1W"}];
+    const highlightRef=useRef(null);
+    useEffect(()=>{
+      if(highlightRef.current){
+        highlightRef.current.scrollIntoView({behavior:"smooth",block:"center"});
+      }
+    },[]);
     return(
       <div>
         <div style={{background:`linear-gradient(90deg,${C.bg2},#0a1a2a)`,border:`2px solid ${C.gold}`,borderRadius:"7px",padding:"14px 16px",marginBottom:"12px"}}>
           <div style={{fontSize:"12px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"5px"}}>📊 AXIOM CHART LAUNCHER</div>
           <div style={{fontSize:"9px",color:C.muted,lineHeight:"1.65",marginBottom:"10px"}}>Select a timeframe, then tap any pair to open the live TradingView chart — real candles, real prices, full drawing toolkit.</div>
+          {chartPair&&<div style={{fontSize:"8.5px",color:C.amber,marginBottom:"8px"}}>◈ Navigated from: <strong style={{color:C.gold}}>{chartPair}</strong> — highlighted below</div>}
           <div style={{display:"flex",gap:"6px",flexWrap:"wrap"}}>
             {TFS.map(t=>(
               <button key={t.v} onClick={()=>setSelectedTf(t.v)}
@@ -819,15 +807,17 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
             const isUp=p&&p.pct>=0;
             const [base,quote]=pair.split("/");
             const carry=((CB[base]?.rate||0)-(CB[quote]?.rate||0));
+            const isSelected=pair===chartPair;
             return(
-              <button key={pair} onClick={()=>window.open(tvUrl(pair,selectedTf),"_blank","noopener")}
-                style={{background:C.bg2,border:`1px solid ${isUp?C.green+"33":C.red+"33"}`,borderRadius:"6px",padding:"11px 12px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",WebkitTapHighlightColor:"transparent"}}>
+              <button key={pair} ref={isSelected?highlightRef:null}
+                onClick={()=>{setChartPair(pair);window.open(tvUrl(pair,selectedTf),"_blank","noopener");}}
+                style={{background:isSelected?C.bg3:C.bg2,border:`1px solid ${isSelected?C.gold:isUp?C.green+"33":C.red+"33"}`,borderRadius:"6px",padding:"11px 12px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",WebkitTapHighlightColor:"transparent",boxShadow:isSelected?`0 0 0 2px ${C.gold}44`:"none"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"5px"}}>
-                  <span style={{fontWeight:"700",color:C.gold,fontSize:"12px"}}>{pair}</span>
+                  <span style={{fontWeight:"700",color:isSelected?C.gold:C.gold,fontSize:"12px"}}>{pair}{isSelected&&<span style={{fontSize:"8px",color:C.gold,marginLeft:"5px"}}>◈</span>}</span>
                   <span style={{fontSize:"13px",color:isUp?C.green:C.red}}>{isUp?"▲":"▼"}</span>
                 </div>
                 {p&&<div style={{display:"flex",alignItems:"baseline",gap:"5px",marginBottom:"4px"}}>
-                  <span style={{fontSize:"7.5px",color:C.muted}}>LAST</span>
+                  <span style={{fontSize:"7.5px",color:C.muted}}>MID</span>
                   <span style={{fontWeight:"700",color:C.text,fontSize:"13px",fontFamily:"monospace"}}>{p.mid.toFixed(dec)}</span>
                   <span style={{fontSize:"9px",color:isUp?C.green:C.red}}>{isUp?"+":""}{p.pct.toFixed(3)}%</span>
                 </div>}
@@ -851,9 +841,8 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
     const ccys=["ALL","USD","EUR","GBP","JPY","AUD","CAD","CHF","NZD","NOK","SEK"];
     const imps=["ALL","HIGH","MED","LOW"];
     // State lives at root — no remount loss on price ticks
-    const loading=newsLoading,setLoading=setNewsLoading;
-    const batchNum=newsBatch,setBatchNum=setNewsBatch;
-    const hasLoaded=newsLoaded,setHasLoaded=setNewsLoaded;
+    const loading=newsLoading;
+    const hasLoaded=newsLoaded;
 
     // loadNews called from root useEffect below
     const src=liveArts; // liveArts always populated (API or static fallback)
@@ -1024,7 +1013,7 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
         </div>
         {!trades.length?<div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"30px",textAlign:"center",color:C.muted}}>No active trades.</div>:trades.map(t=>{
           const dc=t.direction==="BUY"?C.green:C.red,pc=t.pnl>=0?C.green:C.red;
-          const prog=t.pips>0?Math.min(100,(t.pips/t.tp1Pips)*100):0;
+          const prog=t.pips>0&&t.tp1Pips?Math.min(100,(t.pips/t.tp1Pips)*100):0;
           const isH=t.pair.includes("JPY")||t.pair.includes("NOK");
           return(
             <div key={t.id} style={{background:C.bg1,border:`1px solid ${dc}22`,borderRadius:"6px",padding:"12px",marginBottom:"10px",contain:"content"}}>
@@ -1050,7 +1039,7 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
                 <div style={{display:"flex",justifyContent:"space-between",fontSize:"8px",color:C.muted,marginBottom:"2px"}}><span>TP1 progress</span><span style={{color:prog>=100?C.gold:C.text}}>{Math.round(prog)}%</span></div>
                 <div style={{height:"3px",background:C.bdr,borderRadius:"2px"}}><div style={{height:"100%",width:`${prog}%`,background:prog>=100?C.gold:C.green,borderRadius:"2px",transition:"width 0.8s"}}/></div>
               </div>
-              <div style={{fontSize:"8.5px",color:C.muted,marginBottom:"8px"}}>Strategy: <span style={{color:C.gold}}>{t.primaryStrategy?.name}</span> · {t.lotSize}M lots · $${t.riskAmount} risk · R:R 1:{t.rr1}/1:{t.rr2}/1:{t.rr3}</div>
+              <div style={{fontSize:"8.5px",color:C.muted,marginBottom:"8px"}}>Strategy: <span style={{color:C.gold}}>{t.primaryStrategy?.name}</span> · {t.lotSize} std lots · $${t.riskAmount} risk · R:R 1:{t.rr1}/1:{t.rr2}/1:{t.rr3}</div>
               <div style={{display:"flex",gap:"7px"}}>
                 <Btn label="✓ WIN"  color={C.green} onClick={()=>closeT(t.id,"WIN")}  style={{flex:1,fontSize:"10px",padding:"6px"}}/>
                 <Btn label="✗ LOSS" color={C.red}   onClick={()=>closeT(t.id,"LOSS")} style={{flex:1,fontSize:"10px",padding:"6px"}}/>
@@ -1292,7 +1281,7 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
         {analyzerTab==="risk"&&(
           <div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"9px",marginBottom:"10px"}}>
-              {[["TOTAL TRADES",totalTrades,C.text],["WIN RATE",totalTrades>0?(wins/totalTrades*100).toFixed(1)+"%":"-",wins/totalTrades>=0.55?C.green:C.amber],["NET P&L",totalPnl>=0?"+$"+totalPnl.toFixed(2):"−$"+Math.abs(totalPnl).toFixed(2),totalPnl>=0?C.green:C.red],["PROFIT FACTOR",profitFactor,parseFloat(profitFactor)>=1.5?C.green:parseFloat(profitFactor)>=1?C.gold:C.red],["AVG WIN","$"+avgWin,C.green],["AVG LOSS","−$"+avgLoss,C.red],["MAX DRAWDOWN","−$"+maxDD.toFixed(2),maxDD>500?C.red:maxDD>200?C.amber:C.green],["OPEN TRADES",trades.length,C.text]].map(([l,v,c])=>(
+              {[["TOTAL TRADES",totalTrades,C.text],["WIN RATE",totalTrades>0?(wins/totalTrades*100).toFixed(1)+"%":"-",totalTrades===0?C.muted:wins/totalTrades>=0.55?C.green:C.amber],["NET P&L",totalPnl>=0?"+$"+totalPnl.toFixed(2):"−$"+Math.abs(totalPnl).toFixed(2),totalPnl>=0?C.green:C.red],["PROFIT FACTOR",profitFactor,parseFloat(profitFactor)>=1.5?C.green:parseFloat(profitFactor)>=1?C.gold:C.red],["AVG WIN","$"+avgWin,C.green],["AVG LOSS","−$"+avgLoss,C.red],["MAX DRAWDOWN","−$"+maxDD.toFixed(2),maxDD>500?C.red:maxDD>200?C.amber:C.green],["OPEN TRADES",trades.length,C.text]].map(([l,v,c])=>(
                 <div key={l} style={{background:C.bg2,border:`1px solid ${c}33`,borderRadius:"5px",padding:"11px",textAlign:"center"}}>
                   <div style={{fontSize:"8px",color:C.muted,letterSpacing:"1px",marginBottom:"4px",fontWeight:"700"}}>{l}</div>
                   <div style={{fontSize:"18px",fontWeight:"700",color:c,fontFamily:"monospace"}}>{v}</div>
@@ -1391,7 +1380,6 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
                 </div>
                 {hist.length>=2&&<svg width={sw} height={sh} style={{display:"block",marginBottom:"6px",overflow:"visible"}}><polyline points={`${sx(0)},${sh} ${spts} ${sx(hist.length-1)},${sh}`} fill={bc+"22"}/><polyline points={spts} fill="none" stroke={bc} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                 <div style={{display:"flex",gap:"5px",alignItems:"center",marginBottom:"4px"}}><Bdg label={cb.outlook.toUpperCase()} color={cb.outlook==="Hiking"?C.green:cb.outlook==="Cutting"?C.red:C.muted}/><span style={{fontSize:"8px",color:C.muted}}>Next: {cb.next}</span></div>
-                {cb.note&&<div style={{fontSize:"7.5px",color:C.muted,lineHeight:"1.5",borderTop:`1px solid ${C.bdr}22`,paddingTop:"4px"}}>{cb.note}</div>}
               </div>
             );
           })}
@@ -1587,7 +1575,7 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
             <div style={{width:"38px",height:"38px",background:`linear-gradient(135deg,${C.gold},${C.amber})`,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"16px",fontWeight:"900",color:C.bg,flexShrink:0}}>A</div>
             <div>
               <div style={{fontWeight:"700",color:C.gold,fontSize:"13px",letterSpacing:"3px"}}>AXIOM AI</div>
-              <div style={{fontSize:"8px",color:settings.apiKey?C.green:C.amber,letterSpacing:"1px"}}>{settings.apiKey?"✓ ACTIVE — CLAUDE SONNET":"⚠ API KEY REQUIRED — GO TO SETTINGS"}</div>
+              <div style={{fontSize:"8px",color:C.green,letterSpacing:"1px"}}>✓ ACTIVE — CLAUDE SONNET · SERVER-SIDE KEY</div>
 
             </div>
             <div style={{marginLeft:"auto",display:"flex",gap:"4px",flexWrap:"wrap",justifyContent:"flex-end",maxWidth:"50%"}}>
@@ -1618,8 +1606,7 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
             autoCapitalize="none"
             spellCheck={false}
             placeholder="Ask AXIOM about strategies, setups, risk, macro..."
-            value={aiInput} onChange={e=>setAiInput(e.target.value)}
-            onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey&&aiInput.trim()){sendAI(aiInput);setAiInput("");}}}
+            onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey&&aiInput.trim()){sendAI(aiInput);}}}
             style={{flex:1,background:C.bg,border:`1px solid ${C.bdr}`,borderRadius:"3px",color:C.text,padding:"8px 10px",fontSize:"11px",fontFamily:"inherit",outline:"none",WebkitAppearance:"none",touchAction:"manipulation"}}/>
           <Btn label="SEND" color={C.gold} onClick={()=>{if(aiInput.trim()){sendAI(aiInput);}}} disabled={aiLoading}/>
         </div>
@@ -1652,7 +1639,7 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
             <div style={{position:"absolute",left:"50%",transform:"translateX(-50%)",bottom:`${pct(sig.entry)+2}%`,fontSize:"16px",color:dc}}>{isBuy?"▲":"▼"}</div>
           </div>
           <div style={{width:"130px",display:"flex",flexDirection:"column",gap:"5px",justifyContent:"space-around"}}>
-            {[{l:"TP3",v:fmt(sig.tp3),c:C.gold,sub:`+${sig.tp3Pips}p · 1:${sig.rr3}R`},{l:"TP2",v:fmt(sig.tp2),c:"#00e5a0",sub:`+${sig.tp2Pips}p · 1:${sig.rr2}R`},{l:"TP1",v:fmt(sig.tp1),c:"#00b86a",sub:`+${sig.tp1Pips}p · 1:${sig.rr1}R`},{l:"ENTRY",v:fmt(sig.entry),c:C.amber,sub:`${sig.lotSize}M lots`},{l:"SL",v:fmt(sig.sl),c:C.red,sub:`-${sig.slPips}p · $${sig.riskAmount}`}].map((r,i)=>(
+            {[{l:"TP3",v:fmt(sig.tp3),c:C.gold,sub:`+${sig.tp3Pips}p · 1:${sig.rr3}R`},{l:"TP2",v:fmt(sig.tp2),c:"#00e5a0",sub:`+${sig.tp2Pips}p · 1:${sig.rr2}R`},{l:"TP1",v:fmt(sig.tp1),c:"#00b86a",sub:`+${sig.tp1Pips}p · 1:${sig.rr1}R`},{l:"ENTRY",v:fmt(sig.entry),c:C.amber,sub:`${sig.lotSize} std lots`},{l:"SL",v:fmt(sig.sl),c:C.red,sub:`-${sig.slPips}p · $${sig.riskAmount}`}].map((r,i)=>(
               <div key={i} style={{background:C.bg,border:`1px solid ${r.c}33`,borderLeft:`2px solid ${r.c}`,borderRadius:"3px",padding:"4px 7px"}}>
                 <div style={{fontSize:"7px",color:r.c,fontWeight:"700"}}>{r.l}</div>
                 <div style={{fontSize:"10px",color:r.c,fontFamily:"monospace",fontWeight:"700"}}>{r.v}</div>
@@ -1662,7 +1649,7 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
           </div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"5px",marginTop:"10px"}}>
-          {[["RISK","$"+sig.riskAmount,C.red],["BEST R:R","1:"+sig.rr3,C.gold],["PROB",sig.probability+"%",sig.probability>=65?C.green:C.amber],["LOTS",sig.lotSize+"M",C.text]].map(([l,v,c])=>(
+          {[["RISK","$"+sig.riskAmount,C.red],["BEST R:R","1:"+sig.rr3,C.gold],["PROB",sig.probability+"%",sig.probability>=65?C.green:C.amber],["LOTS",sig.lotSize+" std",C.text]].map(([l,v,c])=>(
             <div key={l} style={{background:C.bg,border:`1px solid ${C.bdr}`,borderRadius:"3px",padding:"6px",textAlign:"center"}}>
               <div style={{fontSize:"7px",color:C.muted,marginBottom:"2px"}}>{l}</div>
               <div style={{fontSize:"13px",fontWeight:"700",color:c}}>{v}</div>
@@ -1707,7 +1694,7 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
                   <Kv k="TP1"         v={`${sig.tp1}  +${sig.tp1Pips}p  1:${sig.rr1}R`}      vc={C.green}/>
                   <Kv k="TP2"         v={`${sig.tp2}  +${sig.tp2Pips}p  1:${sig.rr2}R`}      vc={C.green}/>
                   <Kv k="TP3"         v={`${sig.tp3}  +${sig.tp3Pips}p  1:${sig.rr3}R`}      vc={C.gold}/>
-                  <Kv k="LOT SIZE"    v={`${sig.lotSize} micro lots`}                          vc={C.gold}/>
+                  <Kv k="LOT SIZE"    v={`${sig.lotSize} standard lots`}                       vc={C.gold}/>
                   <Kv k="RISK"        v={`$${sig.riskAmount} (2% account)`}                   vc={C.amber}/>
                   <Kv k="TIMEFRAME"   v={sig.timeframe}/>
                   <Kv k="HOLD TIME"   v={sig.holdTime}                                         vc={C.muted}/>
@@ -1771,7 +1758,7 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
             )}
           </div>
           <div style={{padding:"12px 16px",borderTop:`1px solid ${C.bdr}`,flexShrink:0,display:"flex",gap:"9px"}}>
-            <Btn label={`TAKE — ${sig.direction} ${sig.pair} @ ${sig.entry} · ${sig.lotSize}M`} color={dc} onClick={()=>takeTrade(sig)} style={{flex:2,padding:"10px",fontSize:"11px"}}/>
+            <Btn label={`TAKE — ${sig.direction} ${sig.pair} @ ${sig.entry} · ${sig.lotSize} lots`} color={dc} onClick={()=>takeTrade(sig)} style={{flex:2,padding:"10px",fontSize:"11px"}}/>
             <Btn label="DISMISS" color={C.muted} ghost onClick={()=>{dismissSig(sig.id);setModal(null);}} style={{flex:1}}/>
           </div>
         </div>
@@ -1876,9 +1863,9 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
                 defaultValue={local.apiKey||""}
                 onBlur={e=>setLocal(p=>({...p,apiKey:e.target.value}))}
                 placeholder="sk-ant-api03-..."
-                style={{width:"100%",background:"#030608",border:`1px solid ${C.green}`,borderRadius:"3px",color:C.green,padding:"10px 11px",fontSize:"11px",fontFamily:"monospace",outline:"none",marginBottom:"5px",WebkitAppearance:"none",touchAction:"manipulation"}}
+                style={{width:"100%",background:"#030608",border:`1px solid ${local.apiKey?C.green:C.bdr}`,borderRadius:"3px",color:local.apiKey?C.green:C.text,padding:"10px 11px",fontSize:"11px",fontFamily:"monospace",outline:"none",marginBottom:"5px",WebkitAppearance:"none",touchAction:"manipulation"}}
               />
-              <div style={{fontSize:"8.5px",color:C.green,fontWeight:"700"}}>✓ API key pre-wired — tap field to update, blur/tap-away to save</div>
+              <div style={{fontSize:"8.5px",color:local.apiKey?C.green:C.muted,fontWeight:"700"}}>{local.apiKey?"✓ API key set — tap to update, blur/tap-away to save":"API key pre-wired server-side — tap field to override, blur to save"}</div>
               <div style={{fontSize:"8px",color:C.muted,marginTop:"5px",lineHeight:"1.5"}}>iPhone: tap field → long-press → Paste. Key saves automatically when you tap away.</div>
               {/* OANDA API Key for live prices */}
               <div style={{marginTop:"12px"}}>
@@ -2172,7 +2159,8 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
 
   // ─── DEPLOY / TUTORIAL TAB ────────────────────────────────────────────
   function DeployTab(){
-    const [dtab,setDtab]=useState("overview");
+    // deployTab lifted to root state — persists across tab switches
+    const dtab=deployTab,setDtab=setDeployTab;
     const DTABS=[{id:"overview",l:"Overview"},{id:"netlify",l:"Netlify Web"},{id:"iphone",l:"iPhone App"},{id:"notifs",l:"Notifications"},{id:"broker",l:"Broker Link"},{id:"continuity",l:"Continuity"}];
     const Sec=({title,color=C.gold,children})=>(<div style={{background:C.bg2,border:`1px solid ${color}33`,borderRadius:"6px",padding:"12px 14px",marginBottom:"10px"}}><div style={{fontSize:"9px",fontWeight:"700",color,letterSpacing:"2px",marginBottom:"9px",paddingBottom:"6px",borderBottom:`1px solid ${color}22`}}>{title}</div>{children}</div>);
     const Step=({n,text,sub})=>(<div style={{display:"flex",gap:"10px",alignItems:"flex-start",marginBottom:"8px"}}><div style={{width:"22px",height:"22px",borderRadius:"50%",background:C.gold+"33",color:C.gold,fontSize:"10px",fontWeight:"700",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{n}</div><div><div style={{fontSize:"10.5px",color:C.text,lineHeight:"1.5"}}>{text}</div>{sub&&<div style={{fontSize:"8.5px",color:C.muted,marginTop:"2px",lineHeight:"1.5"}}>{sub}</div>}</div></div>);
@@ -2195,7 +2183,7 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:"9.5px",minWidth:"400px"}}>
                 <thead><tr style={{borderBottom:`1px solid ${C.bdr}`}}>{["FEATURE","CLAUDE SANDBOX","NETLIFY WEB","IPHONE PWA"].map(h=><th key={h} style={{padding:"5px 7px",color:C.gold,fontWeight:"700",textAlign:"left",fontSize:"8px",letterSpacing:"1px"}}>{h}</th>)}</tr></thead>
                 <tbody>{[
-                  ["All 14 Tabs + UI","✓ Full","✓ Full","✓ Full"],
+                  ["All 15 Tabs + UI","✓ Full","✓ Full","✓ Full"],
                   ["AI Chat (Claude)","✓ Works","✓ Works","✓ Works"],
                   ["AI News Feed","✓ Works","✓ Works","✓ Works"],
                   ["OANDA Live Prices","✗ Blocked","✓ LIVE","✓ LIVE"],
@@ -2217,7 +2205,7 @@ Respond to the user's SPECIFIC question with precision. Give exact price levels,
             </div>
           </Sec>
           <Sec title="🔑 YOUR PRE-CONFIGURED KEYS" color={C.amber}>
-            {[["Anthropic API Key","sk-ant-api03-... (set in Netlify env vars)","AI Chat + News","Pre-wired ✓"],["OANDA API Key","b41a0f67df1e1284...8b255","Live FX Prices","Pre-wired ✓"],["OANDA Account","001-001-21201857-001","Demo Account","Pre-wired ✓"]].map(([l,v,use,status])=>(
+            {[["Anthropic API Key","sk-ant-api03-... (set in Netlify env vars)","AI Chat + News","Pre-wired ✓"],["OANDA API Key","b41a0f67df1e1284...8b255","Live FX Prices","Pre-wired ✓"],["OANDA Account","001-001-21201857-001","Live Account","Pre-wired ✓"]].map(([l,v,use,status])=>(
               <div key={l} style={{background:C.bg1,border:`1px solid ${C.bdr}`,borderRadius:"4px",padding:"8px 10px",marginBottom:"6px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"3px"}}>
                   <span style={{fontWeight:"700",color:C.text,fontSize:"10px"}}>{l}</span>
@@ -2313,7 +2301,7 @@ root.render(React.createElement(AxiomFX));
         {dtab==="broker"&&(<div>
           <Sec title="🔗 BROKER CONNECTION — OANDA & TASTYFX" color={C.green}>
             <div style={{background:"#071407",border:`1px solid ${C.green}33`,borderRadius:"4px",padding:"9px 11px",marginBottom:"10px",fontSize:"9px",color:C.muted,lineHeight:"1.7"}}>
-              AXIOM currently uses your <strong style={{color:C.green}}>OANDA Demo API</strong> for live price data. Below are instructions for connecting to your live OANDA account or TastyFX MT4 when ready.
+              AXIOM currently uses your <strong style={{color:C.green}}>OANDA Live API</strong> for live price data. Below are instructions for connecting your live OANDA account or TastyFX MT4 for trade execution.
             </div>
             <div style={{fontWeight:"700",color:C.gold,fontSize:"10px",marginBottom:"8px",letterSpacing:"1px"}}>OPTION A — OANDA LIVE ACCOUNT</div>
             <Step n="1" text="Open an OANDA live account (if not already)" sub="Go to oanda.com → Open Live Account. Minimum deposit varies by region."/>
@@ -2361,10 +2349,7 @@ root.render(React.createElement(AxiomFX));
 
   // ─── SOURCES TAB ─────────────────────────────────────────────────────────
   function SourcesTab(){
-      const [srcPage,setSrcPage]=useState(0);
-      const [srcCat,setSrcCat]=useState("ALL");
-      const [liveSrcs,setLiveSrcs]=useState([]);
-      const [srcLoading,setSrcLoading]=useState(false);
+      // srcCat and srcPage lifted to root state — persist across tab switches
 
       // MASTER SOURCE LIBRARY \u2014 100+ vetted institutional sources
       const ALL_SOURCES=[
@@ -2411,7 +2396,7 @@ root.render(React.createElement(AxiomFX));
         {cat:"ECONOMIC DATA",name:"Statistics Canada",role:"Canada CPI, employment, trade balance, GDP",url:"https://www150.statcan.gc.ca/",freq:"Monthly",tier:"A"},
         {cat:"ECONOMIC DATA",name:"Australian Bureau of Statistics",role:"AUS employment, CPI, GDP, trade",url:"https://www.abs.gov.au/statistics/",freq:"Monthly",tier:"A"},
         {cat:"ECONOMIC DATA",name:"Statistics NZ",role:"NZ GDP, CPI \u2014 recession confirmation data",url:"https://www.stats.govt.nz/",freq:"Monthly",tier:"A"},
-        {cat:"ECONOMIC DATA",name:"ForexFactory Economic Calendar",role:"Real-time global economic releases, consensus forecasts",url:"https://www.forexfactory.com/calendar",freq:"Daily",freq:"Daily",tier:"S"},
+        {cat:"ECONOMIC DATA",name:"ForexFactory Economic Calendar",role:"Real-time global economic releases, consensus forecasts",url:"https://www.forexfactory.com/calendar",freq:"Daily",tier:"S"},
         {cat:"ECONOMIC DATA",name:"Investing.com Economic Calendar",role:"Global economic events, historical data, forecasts",url:"https://www.investing.com/economic-calendar/",freq:"Daily",tier:"S"},
         // POSITIONING & FLOW DATA
         {cat:"POSITIONING & FLOW",name:"CFTC Commitment of Traders",role:"Weekly institutional net positioning \u2014 USD extremes",url:"https://www.cftc.gov/MarketReports/CommitmentsofTraders/",freq:"Weekly",tier:"S"},
@@ -2555,7 +2540,7 @@ root.render(React.createElement(AxiomFX));
       case "deploy":    return <DeployTab/>;
       default:          return <Dashboard/>;
     }
-  },[tab,signals,trades,history,analyzerTab,selCB,wkView,chartTf,enabledStrats,nCcy,nImp,stratCatFilter,stratTierFilter,modal,modalTab,expandedTheme,expandedStrat,newsStaticPage,calCcy,calImp,calType,calView,sigScanning,scanStatus,lastScanTime,aiMsgs,aiLoading,aiInput,liveArts,newsLoaded,newsLoading,newsBatch,prices,style,settings,apiStatus]);
+  },[tab,signals,trades,history,analyzerTab,selCB,wkView,chartTf,enabledStrats,nCcy,nImp,stratCatFilter,stratTierFilter,modal,modalTab,expandedTheme,expandedStrat,newsStaticPage,calCcy,calImp,calType,calView,sigScanning,scanStatus,lastScanTime,aiMsgs,aiLoading,aiInput,liveArts,newsLoaded,newsLoading,newsBatch,prices,style,settings,apiStatus,srcCat,srcPage,deployTab]);
 
   return(
     <div style={{fontFamily:"'IBM Plex Mono','Courier New',monospace",background:C.bg,color:C.text,height:"100dvh",display:"flex",flexDirection:"column",fontSize:"clamp(12px,1.1vw,15px)",overflow:"hidden",WebkitTextSizeAdjust:"100%"}}>
@@ -2615,7 +2600,7 @@ root.render(React.createElement(AxiomFX));
             {t.icon}{t.label}
             {t.id==="signals"&&signals.length>0&&<span style={{display:"inline-block",padding:"0 4px",background:C.amber+"22",color:C.amber,border:`1px solid ${C.amber}44`,borderRadius:"2px",fontSize:"7.5px",fontWeight:"700"}}>{signals.length}</span>}
             {t.id==="trades"&&trades.length>0&&<span style={{display:"inline-block",padding:"0 4px",background:C.blue+"22",color:C.blue,border:`1px solid ${C.blue}44`,borderRadius:"2px",fontSize:"7.5px",fontWeight:"700"}}>{trades.length}</span>}
-            {t.id==="news"&&<span style={{display:"inline-block",padding:"0 4px",background:C.red+"22",color:C.red,border:`1px solid ${C.red}44`,borderRadius:"2px",fontSize:"7.5px",fontWeight:"700"}}>{ALL_NEWS.filter(n=>n.imp==="HIGH").length}H</span>}
+            {t.id==="news"&&<span style={{display:"inline-block",padding:"0 4px",background:C.red+"22",color:C.red,border:`1px solid ${C.red}44`,borderRadius:"2px",fontSize:"7.5px",fontWeight:"700"}}>{liveArts.filter(n=>n.imp==="HIGH").length}H</span>}
           </button>
         ))}
       </div>
