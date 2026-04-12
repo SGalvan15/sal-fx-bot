@@ -16,11 +16,6 @@
   to = "/.netlify/functions/chat"
   status = 200
 
-[[headers]]
-  for = "/*"
-  [headers.values]
-    Access-Control-Allow-Origin = "*"
-
 [[redirects]]
   from = "/api/analyze"
   to = "/.netlify/functions/analyze"
@@ -35,3 +30,18 @@
   from = "/api/news"
   to = "/.netlify/functions/news"
   status = 200
+
+[[redirects]]
+  from = "/api/cbrates"
+  to = "/.netlify/functions/cbrates"
+  status = 200
+
+[[redirects]]
+  from = "/api/cot"
+  to = "/.netlify/functions/cot"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
