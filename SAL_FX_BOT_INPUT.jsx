@@ -486,7 +486,7 @@ For each item respond with ONLY a JSON array (no markdown, no backticks):
     const now=new Date();
     const todayDate=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
     // Build live context from current CB data and prices
-    const liveP=Object.entries(prices).slice(0,8).map(([p,d])=>`${p}:${d.mid?.toFixed(d.mid>10?3:5)||"–"}`).join(" ");
+    const liveP=Object.entries(prices||{}).slice(0,8).map(([p,d])=>`${p}:${d.mid?.toFixed(d.mid>10?3:5)||"–"}`).join(" ");
     const cbSummary=cbRates
       ? Object.entries(cbRates).map(([ccy,d])=>`${ccy}:${d.rate}%(${d.outlook})`).join(" ")
       : "USD:3.75%(Hold) EUR:2.00%(Hawkish) JPY:0.50%(Hiking) GBP:4.50%(Hold) AUD:4.10%(Hold) NZD:3.50%(Cutting) CAD:2.75%(Cutting) CHF:0.25%(Hold)";
@@ -548,7 +548,7 @@ Return ONLY a valid JSON array. No markdown, no backticks, no explanation.`}]
     setRegimeLoading(true);
     const now=new Date();
     const todayDate=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
-    const liveP=Object.entries(prices).slice(0,10).map(([p,d])=>`${p}:${d.mid?.toFixed(d.mid>10?3:5)||"–"}`).join(" ");
+    const liveP=Object.entries(prices||{}).slice(0,10).map(([p,d])=>`${p}:${d.mid?.toFixed(d.mid>10?3:5)||"–"}`).join(" ");
     const cbSummary=cbRates
       ? Object.entries(cbRates).map(([ccy,d])=>`${ccy}:${d.rate}%(${d.outlook})`).join(" ")
       : "USD:3.75%(Hold) EUR:2.00%(Hawkish) JPY:0.50%(Hiking) GBP:4.50%(Hold) AUD:4.10%(Hold) NZD:3.50%(Cutting) CAD:2.75%(Cutting) CHF:0.25%(Hold)";
@@ -716,19 +716,19 @@ Entry:${sig.entry} SL:${sig.sl}`});}}catch(_){}
     setAiInput("");
     const msgs=[...aiMsgs,{role:"user",content:userMsg}];
     const openPnl=trades.reduce((a,t)=>a+t.pnl,0);
-    const liveP=Object.entries(prices).slice(0,14).map(([p,d])=>`${p}:${d.bid?.toFixed(d.bid>10?3:5)||"–"}/${d.ask?.toFixed(d.ask>10?3:5)||"–"}`).join(" ");
+    const liveP=prices?Object.entries(prices||{}).slice(0,14).map(([p,d])=>`${p}:${d.bid?.toFixed(d.bid>10?3:5)||"–"}/${d.ask?.toFixed(d.ask>10?3:5)||"–"}`).join(" "):"Prices connecting...";
     const openSigs=signals.slice(0,5).map(s=>`${s.direction} ${s.pair} @${s.entry} SL:${s.sl} TP1:${s.tp1}`).join("; ");
     const openTrades=trades.filter(t=>t.status==="OPEN").map(t=>`${t.direction} ${t.pair} @${t.entry} P&L:${t.pnl>=0?"+":""}$${t.pnl?.toFixed(2)}`).join("; ");
     const now=new Date();
     const todayDate=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
-// Build macro regime dynamically from live CB rates
-const activeCB=cbRates||{};
-const getRateStr=(ccy)=>{
-  const r=activeCB[ccy]?.rate??null;
-  const o=activeCB[ccy]?.outlook??null;
-  return r!=null?`${r.toFixed(2)}%(${o||"Hold"})`:"–";
-};
-const macroLines=[
+    // Build macro regime dynamically from live CB rates
+    const activeCB=cbRates||{};
+    const getRateStr=(ccy)=>{
+      const r=activeCB[ccy]?.rate??null;
+      const o=activeCB[ccy]?.outlook??null;
+      return r!=null?`${r.toFixed(2)}%(${o||"Hold"})`:"–";
+    };
+    const macroLines=[
   `- USD: ${getRateStr("USD")} · ${activeCB.USD?.bias||"Neutral"} · DXY ~100, tariff uncertainty, Jun cut prob ~38%`,
   `- JPY: ${getRateStr("JPY")} · ${activeCB.JPY?.bias||"Hawkish"} · BOJ only G10 hiker, structural JPY bid, wage growth 3.1%+`,
   `- EUR: ${getRateStr("EUR")} · ${activeCB.EUR?.bias||"Hawkish"} · ECB hawkish hold, German fiscal boost, JPM target 1.20`,
