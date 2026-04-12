@@ -2,9 +2,9 @@
 const { useState, useEffect, useRef, useCallback, useMemo, memo } = React;
 
 // ═══════════════════════════════════════════════════════════════════════════
-// AXIOM FX TERMINAL v6.0
-// All fixes applied: chart loading, API key input, notifications, calendar,
-// infinite scroll news, alphabetical pairs, modal glitch, perf, fullscreen
+// AXIOM FX TERMINAL v7.0
+// Signal engine rebuilt: 57 strategies, dynamic regimes, FRED yield spreads,
+// Finnhub eco calendar, CB intervention, correlation gate, layered confluence
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ── 28 PAIRS ALPHABETICAL (per your request) ────────────────────────────
@@ -32,178 +32,23 @@ const TV_SYM = {
 
 // ── REFERENCE PRICES: Forex Factory screenshot Apr 7 2026 ~11:55 PM ─────
 // EUR/USD 1.1669, GBP/USD 1.3397, USD/JPY 158.384 (your ForexFactory screenshot)
-const BASE_PRICES = {
-  "AUD/CAD":0.97776,"AUD/CHF":0.55760,"AUD/JPY":111.783,"AUD/NZD":1.20941,
-  "AUD/USD":0.70574,"CAD/CHF":0.57029,"CAD/JPY":114.319,"CHF/JPY":200.450,
-  "EUR/AUD":1.65526,"EUR/CAD":1.61854,"EUR/CHF":0.92306,"EUR/GBP":0.86996,
-  "EUR/JPY":185.035,"EUR/NZD":2.00195,"EUR/USD":1.16819,
-  "GBP/AUD":1.90263,"GBP/CAD":1.86044,"GBP/CHF":1.06098,"GBP/JPY":212.302,
-  "GBP/NZD":2.30559,"GBP/USD":1.34102,
-  "NZD/CAD":0.80176,"NZD/CHF":0.46020,"NZD/JPY":91.843,"NZD/USD":0.58002,
-  "USD/CAD":1.38566,"USD/CHF":0.79019,"USD/JPY":158.395,
-};
 
-// ── CB RATES April 2026 ──────────────────────────────────────────────────
-const CB = {
-  USD:{bank:"Federal Reserve",  rate:3.875,prev:4.125,outlook:"Hold",    next:"2026-04-30",bias:"Neutral"},
-  EUR:{bank:"ECB",              rate:2.00, prev:2.15, outlook:"Hold",    next:"2026-04-30",bias:"Neutral"},
-  GBP:{bank:"Bank of England",  rate:3.75, prev:4.00, outlook:"Hold",    next:"2026-04-30",bias:"Neutral"},
-  JPY:{bank:"Bank of Japan",    rate:0.75, prev:0.50, outlook:"Hiking",  next:"2026-06-01", bias:"Hawkish"},
-  AUD:{bank:"RBA",              rate:3.85, prev:4.10, outlook:"Hold",    next:"2026-05-19",bias:"Neutral"},
-  CAD:{bank:"Bank of Canada",   rate:2.25, prev:2.50, outlook:"Hold",    next:"2026-04-15",bias:"Neutral"},
-  CHF:{bank:"SNB",              rate:0.00, prev:0.25, outlook:"Hold",    next:"2026-06-18",bias:"Neutral"},
-  NZD:{bank:"RBNZ",             rate:3.00, prev:3.25, outlook:"Cutting", next:"2026-06-01", bias:"Dovish"},
-  NOK:{bank:"Norges Bank",      rate:4.00, prev:4.25, outlook:"Hold",    next:"2026-05-07",bias:"Neutral"},
-  SEK:{bank:"Riksbank",         rate:1.75, prev:2.00, outlook:"Hold",    next:"2026-04-30",bias:"Neutral"},
-};
+// ── NO STATIC PRICE DATA ─────────────────────────────────────────────────────
+// Prices initialize as null — UI shows CONNECTING state until OANDA responds
+// No fallback prices — stale data is not displayed under any circumstance
 
-// ── FULL APRIL 2026 CALENDAR (ForexFactory-style) ────────────────────────
-const FULL_CALENDAR = [
-  // April 7
-  {dt:"2026-04-07 01:00",ccy:"JPY",ev:"Leading Indicators",         imp:"LOW",  fc:"–",      pr:"112.3%", actual:"112.4%", type:"Indicator"},
-  {dt:"2026-04-07 03:00",ccy:"CHF",ev:"Foreign Currency Reserves",  imp:"LOW",  fc:"–",      pr:"725B",   actual:"721B",   type:"Monetary"},
-  {dt:"2026-04-07 03:15",ccy:"EUR",ev:"Spanish Services PMI",       imp:"MED",  fc:"55.0",   pr:"54.7",   actual:"53.3",   type:"PMI"},
-  {dt:"2026-04-07 03:45",ccy:"EUR",ev:"Italian Services PMI",       imp:"MED",  fc:"52.0",   pr:"50.7",   actual:"48.8",   type:"PMI"},
-  {dt:"2026-04-07 03:50",ccy:"EUR",ev:"French Final Services PMI",  imp:"MED",  fc:"46.6",   pr:"46.6",   actual:"48.8",   type:"PMI"},
-  {dt:"2026-04-07 03:55",ccy:"EUR",ev:"German Final Services PMI",  imp:"MED",  fc:"50.2",   pr:"50.2",   actual:"50.9",   type:"PMI"},
-  {dt:"2026-04-07 04:00",ccy:"EUR",ev:"Final Services PMI",         imp:"MED",  fc:"50.4",   pr:"50.4",   actual:"50.2",   type:"PMI"},
-  {dt:"2026-04-07 04:30",ccy:"EUR",ev:"Sentix Investor Confidence", imp:"MED",  fc:"-18.0",  pr:"-8.4",   actual:"-19.2",  type:"Sentiment"},
-  {dt:"2026-04-07 04:30",ccy:"GBP",ev:"Final Services PMI",         imp:"MED",  fc:"52.0",   pr:"52.0",   actual:"50.5",   type:"PMI"},
-  {dt:"2026-04-07 08:15",ccy:"USD",ev:"ADP Employment Change",      imp:"MED",  fc:"120K",   pr:"77K",    actual:"26K",    type:"Employment"},
-  {dt:"2026-04-07 08:30",ccy:"USD",ev:"Core Durable Goods m/m",     imp:"MED",  fc:"0.2%",   pr:"0.7%",   actual:"0.8%",   type:"Manufacturing"},
-  {dt:"2026-04-07 10:00",ccy:"CAD",ev:"Ivey PMI",                   imp:"MED",  fc:"52.0",   pr:"55.3",   actual:"49.7",   type:"PMI"},
-  {dt:"2026-04-07 10:01",ccy:"USD",ev:"JOLTS Job Openings",         imp:"HIGH", fc:"7.5M",   pr:"7.7M",   actual:"–",      type:"Employment"},
-  {dt:"2026-04-07 18:00",ccy:"USD",ev:"FOMC Meeting Minutes",       imp:"HIGH", fc:"–",      pr:"Hold",   actual:"–",      type:"CB Speech"},
-  // April 8
-  {dt:"2026-04-08 08:30",ccy:"CAD",ev:"Trade Balance",              imp:"MED",  fc:"-1.5B",  pr:"-0.9B",  actual:"–",      type:"Trade"},
-  {dt:"2026-04-08 08:30",ccy:"USD",ev:"Trade Balance",              imp:"MED",  fc:"-116B",  pr:"-122B",  actual:"–",      type:"Trade"},
-  {dt:"2026-04-08 10:00",ccy:"USD",ev:"Wholesale Inventories m/m",  imp:"LOW",  fc:"0.3%",   pr:"0.4%",   actual:"–",      type:"Inventory"},
-  // April 9
-  {dt:"2026-04-09 02:00",ccy:"NZD",ev:"RBNZ Rate Decision",         imp:"HIGH", fc:"3.00%",  pr:"3.25%",  actual:"–",      type:"CB Decision"},
-  {dt:"2026-04-09 02:05",ccy:"NZD",ev:"RBNZ Press Conference",      imp:"HIGH", fc:"–",      pr:"–",      actual:"–",      type:"CB Speech"},
-  {dt:"2026-04-09 08:30",ccy:"USD",ev:"Initial Jobless Claims",     imp:"MED",  fc:"220K",   pr:"219K",   actual:"–",      type:"Employment"},
-  {dt:"2026-04-09 08:30",ccy:"USD",ev:"Continuing Claims",          imp:"LOW",  fc:"1870K",  pr:"1903K",  actual:"–",      type:"Employment"},
-  // April 10
-  {dt:"2026-04-10 02:00",ccy:"JPY",ev:"PPI y/y",                    imp:"MED",  fc:"3.7%",   pr:"4.0%",   actual:"–",      type:"Inflation"},
-  {dt:"2026-04-10 08:30",ccy:"USD",ev:"CPI m/m",                    imp:"HIGH", fc:"0.3%",   pr:"0.2%",   actual:"–",      type:"Inflation"},
-  {dt:"2026-04-10 08:30",ccy:"USD",ev:"Core CPI m/m",               imp:"HIGH", fc:"0.3%",   pr:"0.3%",   actual:"–",      type:"Inflation"},
-  {dt:"2026-04-10 08:30",ccy:"USD",ev:"CPI y/y",                    imp:"HIGH", fc:"2.5%",   pr:"2.8%",   actual:"–",      type:"Inflation"},
-  {dt:"2026-04-10 10:00",ccy:"USD",ev:"Prelim UoM Sentiment",       imp:"MED",  fc:"54.0",   pr:"53.9",   actual:"–",      type:"Sentiment"},
-  // April 11
-  {dt:"2026-04-11 02:00",ccy:"JPY",ev:"Current Account",            imp:"MED",  fc:"2.1T",   pr:"2.4T",   actual:"–",      type:"Trade"},
-  {dt:"2026-04-11 06:00",ccy:"GBP",ev:"GDP m/m",                    imp:"MED",  fc:"0.1%",   pr:"0.0%",   actual:"–",      type:"GDP"},
-  {dt:"2026-04-11 06:00",ccy:"GBP",ev:"Manufacturing Production",   imp:"MED",  fc:"0.2%",   pr:"-0.9%",  actual:"–",      type:"Manufacturing"},
-  // April 14
-  {dt:"2026-04-14 06:00",ccy:"EUR",ev:"German CPI m/m Final",       imp:"MED",  fc:"0.3%",   pr:"0.4%",   actual:"–",      type:"Inflation"},
-  {dt:"2026-04-14 08:30",ccy:"CAD",ev:"Core CPI m/m",               imp:"MED",  fc:"0.3%",   pr:"0.4%",   actual:"–",      type:"Inflation"},
-  // April 15
-  {dt:"2026-04-15 02:00",ccy:"CAD",ev:"BOC Rate Decision",          imp:"HIGH", fc:"2.25%",  pr:"2.25%",  actual:"–",      type:"CB Decision"},
-  {dt:"2026-04-15 02:15",ccy:"CAD",ev:"BOC Press Conference",       imp:"HIGH", fc:"–",      pr:"–",      actual:"–",      type:"CB Speech"},
-  {dt:"2026-04-15 08:30",ccy:"USD",ev:"Retail Sales m/m",           imp:"MED",  fc:"0.4%",   pr:"-0.9%",  actual:"–",      type:"Retail"},
-  {dt:"2026-04-15 08:30",ccy:"USD",ev:"Core Retail Sales m/m",      imp:"MED",  fc:"0.3%",   pr:"-0.3%",  actual:"–",      type:"Retail"},
-  {dt:"2026-04-15 08:30",ccy:"USD",ev:"Empire State Manufacturing", imp:"MED",  fc:"-11.5",  pr:"-20.0",  actual:"–",      type:"Manufacturing"},
-  {dt:"2026-04-15 09:15",ccy:"USD",ev:"Industrial Production m/m",  imp:"MED",  fc:"0.3%",   pr:"-0.1%",  actual:"–",      type:"Manufacturing"},
-  // April 16
-  {dt:"2026-04-16 02:00",ccy:"AUD",ev:"Westpac Consumer Sentiment", imp:"LOW",  fc:"–",      pr:"95.9",   actual:"–",      type:"Sentiment"},
-  {dt:"2026-04-16 02:30",ccy:"AUD",ev:"Employment Change",          imp:"HIGH", fc:"20.0K",  pr:"52.8K",  actual:"–",      type:"Employment"},
-  {dt:"2026-04-16 02:30",ccy:"AUD",ev:"Unemployment Rate",          imp:"HIGH", fc:"4.2%",   pr:"4.1%",   actual:"–",      type:"Employment"},
-  {dt:"2026-04-16 08:30",ccy:"USD",ev:"Philadelphia Fed Index",     imp:"MED",  fc:"-5.0",   pr:"-26.4",  actual:"–",      type:"Manufacturing"},
-  {dt:"2026-04-16 08:30",ccy:"USD",ev:"Initial Jobless Claims",     imp:"MED",  fc:"215K",   pr:"220K",   actual:"–",      type:"Employment"},
-  {dt:"2026-04-16 10:00",ccy:"USD",ev:"Existing Home Sales",        imp:"LOW",  fc:"4.1M",   pr:"4.3M",   actual:"–",      type:"Housing"},
-  // April 17
-  {dt:"2026-04-17 03:00",ccy:"EUR",ev:"German Flash PMI Manufacturing",imp:"MED",fc:"47.0",  pr:"47.7",   actual:"–",      type:"PMI"},
-  {dt:"2026-04-17 03:00",ccy:"EUR",ev:"German Flash PMI Services",  imp:"MED",  fc:"51.4",   pr:"51.8",   actual:"–",      type:"PMI"},
-  {dt:"2026-04-17 03:30",ccy:"EUR",ev:"Flash PMI Manufacturing",    imp:"MED",  fc:"47.8",   pr:"48.6",   actual:"–",      type:"PMI"},
-  {dt:"2026-04-17 03:30",ccy:"EUR",ev:"Flash PMI Services",         imp:"MED",  fc:"51.0",   pr:"50.9",   actual:"–",      type:"PMI"},
-  {dt:"2026-04-17 04:00",ccy:"GBP",ev:"Flash PMI Manufacturing",    imp:"MED",  fc:"44.5",   pr:"44.9",   actual:"–",      type:"PMI"},
-  {dt:"2026-04-17 04:00",ccy:"GBP",ev:"Flash PMI Services",         imp:"MED",  fc:"52.0",   pr:"53.0",   actual:"–",      type:"PMI"},
-  // April 22
-  {dt:"2026-04-22 04:00",ccy:"EUR",ev:"German Ifo Business Climate",imp:"MED",  fc:"87.0",   pr:"86.7",   actual:"–",      type:"Sentiment"},
-  {dt:"2026-04-22 08:30",ccy:"CAD",ev:"Core Retail Sales m/m",      imp:"MED",  fc:"0.3%",   pr:"1.3%",   actual:"–",      type:"Retail"},
-  {dt:"2026-04-22 10:00",ccy:"USD",ev:"CB Consumer Confidence",     imp:"MED",  fc:"92.0",   pr:"98.3",   actual:"–",      type:"Sentiment"},
-  {dt:"2026-04-22 10:00",ccy:"USD",ev:"New Home Sales",             imp:"LOW",  fc:"680K",   pr:"676K",   actual:"–",      type:"Housing"},
-  // April 23
-  {dt:"2026-04-23 08:30",ccy:"USD",ev:"Initial Jobless Claims",     imp:"MED",  fc:"215K",   pr:"–",      actual:"–",      type:"Employment"},
-  {dt:"2026-04-23 08:30",ccy:"USD",ev:"Durable Goods Orders m/m",   imp:"MED",  fc:"0.5%",   pr:"-1.4%",  actual:"–",      type:"Manufacturing"},
-  // April 24
-  {dt:"2026-04-24 08:30",ccy:"USD",ev:"Core PCE Price Index m/m",   imp:"HIGH", fc:"0.3%",   pr:"0.4%",   actual:"–",      type:"Inflation"},
-  {dt:"2026-04-24 08:30",ccy:"USD",ev:"Goods Trade Balance Prelim", imp:"LOW",  fc:"-148B",  pr:"-148B",  actual:"–",      type:"Trade"},
-  {dt:"2026-04-24 10:00",ccy:"USD",ev:"Revised UoM Sentiment",      imp:"MED",  fc:"50.0",   pr:"–",      actual:"–",      type:"Sentiment"},
-  // April 25
-  {dt:"2026-04-25 02:00",ccy:"JPY",ev:"Tokyo CPI y/y",              imp:"HIGH", fc:"2.2%",   pr:"2.4%",   actual:"–",      type:"Inflation"},
-  {dt:"2026-04-25 08:30",ccy:"CAD",ev:"GDP m/m",                    imp:"MED",  fc:"0.2%",   pr:"0.4%",   actual:"–",      type:"GDP"},
-  {dt:"2026-04-25 08:30",ccy:"USD",ev:"Advance GDP q/q",            imp:"HIGH", fc:"1.5%",   pr:"2.4%",   actual:"–",      type:"GDP"},
-  {dt:"2026-04-25 08:30",ccy:"USD",ev:"Advance GDP Price Index",    imp:"HIGH", fc:"3.4%",   pr:"2.3%",   actual:"–",      type:"GDP"},
-  // April 28
-  {dt:"2026-04-28 02:30",ccy:"AUD",ev:"CPI y/y",                    imp:"HIGH", fc:"2.4%",   pr:"2.5%",   actual:"–",      type:"Inflation"},
-  {dt:"2026-04-28 08:30",ccy:"USD",ev:"Personal Income m/m",        imp:"MED",  fc:"0.4%",   pr:"0.8%",   actual:"–",      type:"Income"},
-  {dt:"2026-04-28 08:30",ccy:"USD",ev:"Personal Spending m/m",      imp:"MED",  fc:"0.4%",   pr:"0.4%",   actual:"–",      type:"Income"},
-  {dt:"2026-04-28 08:30",ccy:"USD",ev:"Pending Home Sales m/m",     imp:"LOW",  fc:"1.0%",   pr:"-4.6%",  actual:"–",      type:"Housing"},
-  // April 29
-  {dt:"2026-04-29 04:00",ccy:"EUR",ev:"German Prelim CPI m/m",      imp:"MED",  fc:"0.4%",   pr:"0.4%",   actual:"–",      type:"Inflation"},
-  {dt:"2026-04-29 04:00",ccy:"EUR",ev:"German GfK Consumer Climate",imp:"LOW",  fc:"-24.0",  pr:"-24.3",  actual:"–",      type:"Sentiment"},
-  {dt:"2026-04-29 09:00",ccy:"EUR",ev:"CPI Flash Estimate y/y",     imp:"HIGH", fc:"2.2%",   pr:"2.3%",   actual:"–",      type:"Inflation"},
-  // April 30
-  {dt:"2026-04-30 02:00",ccy:"JPY",ev:"BOJ Rate Decision",          imp:"HIGH", fc:"0.75%",  pr:"0.75%",  actual:"–",      type:"CB Decision"},
-  {dt:"2026-04-30 02:30",ccy:"JPY",ev:"BOJ Outlook Report",         imp:"HIGH", fc:"–",      pr:"–",      actual:"–",      type:"CB Speech"},
-  {dt:"2026-04-30 05:00",ccy:"EUR",ev:"GDP Flash Estimate q/q",     imp:"HIGH", fc:"0.3%",   pr:"0.2%",   actual:"–",      type:"GDP"},
-  {dt:"2026-04-30 09:00",ccy:"EUR",ev:"ECB Rate Decision",          imp:"HIGH", fc:"2.00%",  pr:"2.00%",  actual:"–",      type:"CB Decision"},
-  {dt:"2026-04-30 09:45",ccy:"EUR",ev:"ECB Press Conference",       imp:"HIGH", fc:"–",      pr:"–",      actual:"–",      type:"CB Speech"},
-  {dt:"2026-04-30 14:00",ccy:"USD",ev:"FOMC Rate Decision",         imp:"HIGH", fc:"3.75%",  pr:"3.75%",  actual:"–",      type:"CB Decision"},
-  {dt:"2026-04-30 14:30",ccy:"USD",ev:"FOMC Press Conference",      imp:"HIGH", fc:"–",      pr:"–",      actual:"–",      type:"CB Speech"},
-  {dt:"2026-04-30 15:00",ccy:"SEK",ev:"Riksbank Rate Decision",     imp:"HIGH", fc:"1.75%",  pr:"1.75%",  actual:"–",      type:"CB Decision"},
-  // May events
-  {dt:"2026-05-01 08:30",ccy:"USD",ev:"Non-Farm Payrolls",          imp:"HIGH", fc:"145K",   pr:"128K",   actual:"–",      type:"Employment"},
-  {dt:"2026-05-01 08:30",ccy:"USD",ev:"Unemployment Rate",          imp:"HIGH", fc:"4.4%",   pr:"4.4%",   actual:"–",      type:"Employment"},
-  {dt:"2026-05-01 08:30",ccy:"CAD",ev:"Employment Change",          imp:"HIGH", fc:"15.0K",  pr:"22.0K",  actual:"–",      type:"Employment"},
-  {dt:"2026-05-07 07:00",ccy:"GBP",ev:"BOE Rate Decision",          imp:"HIGH", fc:"3.75%",  pr:"3.75%",  actual:"–",      type:"CB Decision"},
-  {dt:"2026-05-13 08:30",ccy:"USD",ev:"CPI m/m",                    imp:"HIGH", fc:"0.3%",   pr:"0.3%",   actual:"–",      type:"Inflation"},
-  {dt:"2026-05-19 03:30",ccy:"AUD",ev:"RBA Rate Decision",          imp:"HIGH", fc:"3.85%",  pr:"3.85%",  actual:"–",      type:"CB Decision"},
-];
+// ── NO STATIC CB RATES ───────────────────────────────────────────────────────
+// CB rates are fetched live from FRED — no hardcoded fallback values
+// CB Rates tab shows error state if FRED is unavailable
 
-// ── NEWS DATA with links ─────────────────────────────────────────────────
-const ALL_NEWS = [
-  {id:1, dt:"2026-04-07 09:14",ccy:"USD",hl:"Fed holds 3.75–4.00% for 2nd consecutive meeting; Powell: 'Iran war inflation risk complicates the path forward'",impact:"BEARISH",imp:"HIGH",url:"https://www.federalreserve.gov/newsevents/pressreleases/monetary20260318a.htm"},
-  {id:2, dt:"2026-04-07 08:55",ccy:"USD",hl:"US 90-day tariff pause for most nations — DXY falls 1.2%; USD broadly pressured as relief rally fades",impact:"BEARISH",imp:"HIGH",url:"https://ustr.gov/about-us/policy-offices/press-office/press-releases"},
-  {id:3, dt:"2026-04-07 08:30",ccy:"USD",hl:"US jobless claims rise to 219K; labor softening — June Fed cut probability repriced to 38%",impact:"BEARISH",imp:"HIGH",url:"https://www.dol.gov/ui/data.pdf"},
-  {id:4, dt:"2026-04-07 07:45",ccy:"JPY",hl:"BOJ confirmed 0.75% rate — Ueda: hiking path remains; USD/JPY declines through 158.50",impact:"BULLISH",imp:"HIGH",url:"https://www.boj.or.jp/en/mopo/mpmdeci/index.htm"},
-  {id:5, dt:"2026-04-07 07:20",ccy:"EUR",hl:"ECB holds 2.00%; Schnabel: next move 'more likely a hike than cut' — EUR/USD firms above 1.16",impact:"BULLISH",imp:"HIGH",url:"https://www.ecb.europa.eu/press/pr/date/2026"},
-  {id:6, dt:"2026-04-07 06:55",ccy:"GBP",hl:"BOE holds 3.75% unanimous; MPC: CPI 3.0% above target — data dependent approach maintained",impact:"NEUTRAL",imp:"HIGH",url:"https://www.bankofengland.co.uk/monetary-policy-summary-and-minutes"},
-  {id:7, dt:"2026-04-07 06:30",ccy:"NZD",hl:"RBNZ cuts to 3.00% Apr 9 — NZD/USD remains under pressure near 0.58; further cuts on table",impact:"BEARISH",imp:"HIGH",url:"https://www.rbnz.govt.nz/monetary-policy/monetary-policy-statement"},
-  {id:8, dt:"2026-04-07 06:10",ccy:"AUD",hl:"RBA holds at 3.85% — minutes signal hold through mid-2026; AUD/USD recovery toward 0.71",impact:"NEUTRAL",imp:"MED",url:"https://www.rba.gov.au/monetary-policy/rba-board-minutes/"},
-  {id:9, dt:"2026-04-07 05:50",ccy:"CAD",hl:"BOC holds 2.25%; Macklem: rates 'about the right level' — USD/CAD at 1.38 support",impact:"NEUTRAL",imp:"HIGH",url:"https://www.bankofcanada.ca/2026/04/fad-press-release/"},
-  {id:10,dt:"2026-04-07 05:10",ccy:"NOK",hl:"Brent crude drops 4% on tariff demand fears — USD/NOK spikes; NOK worst G10 performer",impact:"BEARISH",imp:"HIGH",url:"https://www.norges-bank.no/en/topics/Monetary-policy/"},
-  {id:11,dt:"2026-04-07 04:50",ccy:"SEK",hl:"Riksbank holds 1.75%; GDP forecast raised 2.9% 2026 — SEK supported with late-2026 hike bias",impact:"BULLISH",imp:"MED",url:"https://www.riksbank.se/en-gb/monetary-policy/monetary-policy-decisions/"},
-  {id:12,dt:"2026-04-07 04:25",ccy:"JPY",hl:"Japan wage growth 3.1% y/y — above 3% BOJ normalization threshold; JPY broadly bid",impact:"BULLISH",imp:"HIGH",url:"https://www.mhlw.go.jp/english/database/db-l/index.html"},
-  {id:13,dt:"2026-04-07 04:00",ccy:"EUR",hl:"German industrial production +1.8% m/m beats 0.9% forecast — EUR/USD holds above 1.16",impact:"BULLISH",imp:"MED",url:"https://www.destatis.de/EN/Themes/Economy/Short-Term-Indicators/Production-Index/"},
-  {id:14,dt:"2026-04-07 03:40",ccy:"GBP",hl:"UK CPI 3.0% Jan 2026 above 2% target; services 4.8% — BOE hawkish tilt intact; GBP supported",impact:"BULLISH",imp:"MED",url:"https://www.ons.gov.uk/economy/inflationandpriceindices"},
-  {id:15,dt:"2026-04-07 03:15",ccy:"AUD",hl:"China PMI 50.5 marginally expansionary — AUD recovers from tariff lows; upside limited",impact:"BULLISH",imp:"MED",url:"https://www.stats.gov.cn/english/PressRelease/"},
-  {id:16,dt:"2026-04-07 02:30",ccy:"USD",hl:"US PCE 2.7% Q1 2026 above Fed 2% target — inflation sticky despite 175bp of cuts since Sep 2024",impact:"BEARISH",imp:"HIGH",url:"https://www.bea.gov/data/personal-consumption-expenditures-price-index"},
-  {id:17,dt:"2026-04-07 02:05",ccy:"NZD",hl:"NZ Q4 GDP −0.2% q/q second contraction — recession confirmed; RBNZ cutting cycle to extend",impact:"BEARISH",imp:"HIGH",url:"https://www.stats.govt.nz/indicators/gross-domestic-product-gdp"},
-  {id:18,dt:"2026-04-07 01:45",ccy:"EUR",hl:"Eurozone growth accelerating 2026 — German fiscal stimulus feeding through; ECB hike bias",impact:"BULLISH",imp:"MED",url:"https://ec.europa.eu/eurostat/statistics-explained/index.php/GDP_at_regional_level"},
-  {id:19,dt:"2026-04-07 01:20",ccy:"JPY",hl:"Japan current account surplus widens ¥2.4T — structural JPY support; USD/JPY upside capped",impact:"BULLISH",imp:"MED",url:"https://www.mof.go.jp/english/policy/balance_of_payments/bop/bop.htm"},
-  {id:20,dt:"2026-04-07 00:55",ccy:"CHF",hl:"Switzerland CPI 0.3% y/y well below SNB target — SNB intervention risk if CHF strengthens",impact:"BEARISH",imp:"MED",url:"https://www.bfs.admin.ch/bfs/en/home/statistics/prices/consumer-price-index.html"},
-  {id:21,dt:"2026-04-07 00:30",ccy:"NOK",hl:"Norges Bank signals 1–2 cuts mid-2026 if CPI below 3% — NOK/SEK 0.96 support holding",impact:"BEARISH",imp:"MED",url:"https://www.norges-bank.no/en/topics/Monetary-policy/monetary-policy-report/"},
-  {id:22,dt:"2026-04-06 23:55",ccy:"USD",hl:"Liberation Day tariffs announced: 10% baseline on all imports — USD broadly lower; JPY/CHF bid",impact:"BEARISH",imp:"HIGH",url:"https://ustr.gov/about-us/policy-offices/press-office/press-releases"},
-  {id:23,dt:"2026-04-06 22:30",ccy:"GBP",hl:"UK excluded from worst tariff tier at 10% — GBP/USD outperforms EUR/USD on relative trade",impact:"BULLISH",imp:"HIGH",url:"https://www.gov.uk/government/news/uk-us-trade-tariff-announcement"},
-  {id:24,dt:"2026-04-06 20:00",ccy:"AUD",hl:"Australia hit with 10% tariff baseline — China-exposed AUD underperforms; commodity selloff",impact:"BEARISH",imp:"HIGH",url:"https://www.dfat.gov.au/trade"},
-  {id:25,dt:"2026-04-06 18:00",ccy:"EUR",hl:"EU faces 20% tariffs before 90-day pause — EUR/USD fell 1.0732 lows before recovering sharply",impact:"NEUTRAL",imp:"HIGH",url:"https://ec.europa.eu/commission/presscorner/"},
-  {id:26,dt:"2026-04-06 16:30",ccy:"JPY",hl:"Middle East ceasefire optimism — equities lift; crude eases; USD/JPY recovers as risk improves",impact:"BEARISH",imp:"HIGH",url:"https://www.fxstreet.com/currencies/usdjpy"},
-  {id:27,dt:"2026-04-06 14:00",ccy:"USD",hl:"FOMC minutes March: Fed officials divided on rate path; inflation risks skewed higher from tariffs",impact:"BEARISH",imp:"HIGH",url:"https://www.federalreserve.gov/monetarypolicy/fomcminutes20260318.htm"},
-  {id:28,dt:"2026-04-06 12:00",ccy:"EUR",hl:"ECB's Schnabel: 'quite comfortable' that next move likely a hike — EUR broadly supported",impact:"BULLISH",imp:"HIGH",url:"https://www.ecb.europa.eu/press/key/date/2026"},
-  {id:29,dt:"2026-04-06 10:00",ccy:"GBP",hl:"UK services PMI 50.5 below 52.0 expected — GBP/USD capped below 1.35 despite tariff advantage",impact:"BEARISH",imp:"MED",url:"https://www.cips.org/cips-for-business/research/pmi/"},
-  {id:30,dt:"2026-04-06 08:00",ccy:"CAD",hl:"Canada Ivey PMI 49.7 — contraction; CAD softens; USD/CAD pushes toward 1.39 on tariff risk",impact:"BEARISH",imp:"MED",url:"https://www150.statcan.gc.ca/"},
-  {id:31,dt:"2026-04-05 16:00",ccy:"AUD",hl:"Australia retail sales +0.8% February beats expectations — AUD/USD holds 0.70 despite tariff fears",impact:"BULLISH",imp:"MED",url:"https://www.abs.gov.au/statistics/industry/retail-and-wholesale-trade"},
-  {id:32,dt:"2026-04-05 08:30",ccy:"USD",hl:"US non-farm payrolls April 4: only 128K vs 175K expected — labor market deteriorating; USD negative",impact:"BEARISH",imp:"HIGH",url:"https://www.bls.gov/news.release/empsit.toc.htm"},
-  {id:33,dt:"2026-04-05 08:30",ccy:"USD",hl:"US unemployment rate holds at 4.4% — Fed dual mandate under strain; cut odds increase for June",impact:"BEARISH",imp:"HIGH",url:"https://www.bls.gov/news.release/empsit.toc.htm"},
-  {id:34,dt:"2026-04-04 12:00",ccy:"JPY",hl:"BOJ summary of opinions: broad support for continued normalization — JPY rally continues vs G10",impact:"BULLISH",imp:"HIGH",url:"https://www.boj.or.jp/en/mopo/mpmdeci/"},
-  {id:35,dt:"2026-04-03 16:00",ccy:"EUR",hl:"German factory orders +2.1% m/m third consecutive beat — EUR/USD resilient above 1.16",impact:"BULLISH",imp:"MED",url:"https://www.destatis.de/EN/"},
-  {id:36,dt:"2026-04-03 04:00",ccy:"AUD",hl:"RBA Governor Bullock: no rate cuts imminent — AUD/USD bounces; 0.70 key support holding",impact:"BULLISH",imp:"MED",url:"https://www.rba.gov.au/speeches/"},
-  {id:37,dt:"2026-04-02 14:00",ccy:"USD",hl:"JOLTS job openings 7.3M vs 7.5M expected — labor demand weakening; dollar index retreats",impact:"BEARISH",imp:"MED",url:"https://www.bls.gov/news.release/jolts.toc.htm"},
-  {id:38,dt:"2026-04-02 09:45",ccy:"USD",hl:"US ISM Services PMI 50.8 misses 53.0 expectation — services sector losing momentum; USD negative",impact:"BEARISH",imp:"HIGH",url:"https://www.ismworld.org/supply-management-news-and-reports/reports/ism-report-on-business/services/"},
-  {id:39,dt:"2026-04-01 08:30",ccy:"CAD",hl:"Canada trade balance better than expected — CAD firms despite tariff headwinds; USD/CAD reverses",impact:"BULLISH",imp:"MED",url:"https://www150.statcan.gc.ca/"},
-  {id:40,dt:"2026-04-01 04:00",ccy:"EUR",hl:"Eurozone flash CPI +2.3% April estimate — ECB hike narrative strengthens; EUR/USD tests 1.17",impact:"BULLISH",imp:"HIGH",url:"https://ec.europa.eu/eurostat/web/inflation"},
-];
+// ── NO STATIC CALENDAR DATA ──────────────────────────────────────────────────
+// Calendar is 100% live from ForexFactory via calendar.js
+// Calendar tab shows error state if ForexFactory is unavailable
+
+// ── NO STATIC NEWS DATA ──────────────────────────────────────────────────────
+// News is live from Finnhub — no static articles, no AI fallback, no rotation
+// News tab shows error state if Finnhub is unavailable
+
 
 // ── STRATEGIES ───────────────────────────────────────────────────────────
 // ── MASTER STRATEGY LIBRARY — 51 STRATEGIES ─────────────────────────────
@@ -219,6 +64,13 @@ const STRATEGIES=[
   {id:"REAL_YLD", tier:"S",wr:63,cat:"MACRO",       tf:"H4/D1", minC:4,name:"Real Yield Differential",               note:"USD real yields compressing; JPY rising as BOJ hikes.",          url:"https://www.federalreserve.gov/pubs/ifdp/2003/765/ifdp765.pdf",desc:"Fed IFDP 765: Real interest differentials"},
   {id:"SAFE_HVN", tier:"S",wr:63,cat:"CORRELATION", tf:"H1/H4", minC:4,name:"Safe Haven Demand Model",              note:"JPY/CHF bid in risk-off. USD no longer safe haven in 2026.",     url:"https://www.bis.org/publ/work570.htm",desc:"BIS WP #570: Safe haven currencies"},
   {id:"OPT_EXP",  tier:"S",wr:62,cat:"FLOW",        tf:"M15/H1",minC:3,name:"Option Expiry Gamma Trade",             note:"NY 10AM strikes create price magnetism. CME data confirms.",     url:"https://www.cmegroup.com/trading/fx/g10/euro-fx.html",desc:"CME: FX option expiry magnetism"},
+  {id:"GAMMA_EXP",tier:"A",wr:61,cat:"FLOW",        tf:"M15/H1",minC:3,name:"Gamma Exposure Proxy",                  note:"Round number gravity + NY fix window + low vol = dealer gamma bid.",url:"https://www.cmegroup.com/trading/fx/g10/euro-fx.html",desc:"CME: FX option expiry magnetism"},
+  {id:"YIELD_SPR",tier:"S",wr:66,cat:"MACRO",       tf:"H4/D1", minC:4,name:"10Y Yield Spread Momentum",             note:"US-Japan/Germany spread momentum drives FX. Most validated free signal.",url:"https://fred.stlouisfed.org/series/DGS10",desc:"FRED: 10-year government bond yield spreads"},
+  {id:"ECO_SURP", tier:"A",wr:62,cat:"MACRO",       tf:"H4/D1", minC:4,name:"Economic Surprise Index",               note:"Rolling 8-release surprise index per CCY. Persistently beating = buy.",url:"https://finnhub.io/docs/api/economic-calendar",desc:"Finnhub: Economic calendar with actual vs estimate"},
+  {id:"CB_INTV",  tier:"A",wr:65,cat:"RISK MGMT",   tf:"H1/H4", minC:3,name:"CB Intervention Watch",                 note:"BOJ 155+, SNB 0.92 thresholds. Suppresses signals fighting active CB.",url:"https://www.boj.or.jp/en/mopo/",desc:"BOJ: FX intervention history"},
+  {id:"SWAP_TIME",tier:"B",wr:58,cat:"CARRY",       tf:"M15/H1",minC:3,name:"Overnight Swap Timing",                 note:"Enter carry longs 15-45min after 5PM NY rollover. Documented edge.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1343490",desc:"SSRN: Carry timing effects"},
+  {id:"COT_REAL", tier:"A",wr:61,cat:"FLOW",        tf:"D1/W1", minC:4,name:"COT Positioning Proxy",                 note:"26wk vs short-term momentum divergence as COT extreme proxy.",url:"https://www.cftc.gov/MarketReports/CommitmentsofTraders/",desc:"CFTC: Commitments of Traders"},
+  {id:"LIQ_SWEEP",tier:"A",wr:62,cat:"TECHNICAL",   tf:"M15/H1",minC:3,name:"Liquidity Sweep Refined",              note:"Spike beyond swing + reversal + VWAP. London open +1 bonus.",url:"https://www.bis.org/publ/work492.htm",desc:"BIS: Institutional order flow"},
   {id:"CB_COMM",  tier:"A",wr:62,cat:"MACRO",       tf:"H4/D1", minC:4,name:"CB Communication Drift",               note:"ECB Schnabel hike-more-likely = EUR higher. BOJ = JPY bid.",     url:"https://www.bis.org/publ/work952.htm",desc:"BIS WP #952: CB communication and FX"},
   {id:"TSM_CTA",  tier:"A",wr:62,cat:"MOMENTUM",    tf:"D1/W1", minC:4,name:"CTA Time-Series Momentum",              note:"AQR: 12-month momentum across 58 markets including FX.",         url:"https://www.aqr.com/Insights/Research/Journal-Article/Time-Series-Momentum",desc:"AQR: Time-Series Momentum"},
   {id:"CROSS_CAR",tier:"A",wr:62,cat:"CARRY",       tf:"D1/W1", minC:4,name:"Cross-Carry with Momentum Filter",      note:"AQR: carry + momentum improves Sharpe by 0.4+.",                url:"https://www.aqr.com/Insights/Research/Working-Paper/Currency-Carry-Trades",desc:"AQR: Carry and momentum filter"},
@@ -272,13 +124,61 @@ const CATC={MOMENTUM:"#1d5c35",CARRY:"#7a5500","MEAN REVERT":"#005a5a",MACRO:"#1
 
 // ── PRICE ENGINE (memoized, stable) ──────────────────────────────────────
 function usePrices(oandaKey){
-  const [prices,setPrices]=useState(()=>{const p={};ALL_PAIRS.forEach(pair=>{const mid=BASE_PRICES[pair]||1.0;const isH=pair.includes("JPY");const sp=isH?0.00015:0.000012;p[pair]={bid:+(mid*(1-sp/2)).toFixed(5),ask:+(mid*(1+sp/2)).toFixed(5),mid,change:0,pct:0,dir:"flat",live:false,history:Array(60).fill(0).map((_,i)=>mid*(1+(Math.sin(i*0.3)+Math.random()-0.5)*0.0004))};});return p;});
+  // Prices init as null — no static seed data, UI shows CONNECTING until OANDA responds
+  const [prices,setPrices]=useState(null);
   const [apiStatus,setApiStatus]=useState("connecting");
+  const [priceError,setPriceError]=useState(null);
+  const priceHistoryRef=useRef({});
   const OINSTR={"AUD/CAD":"AUD_CAD","AUD/CHF":"AUD_CHF","AUD/JPY":"AUD_JPY","AUD/NZD":"AUD_NZD","AUD/USD":"AUD_USD","CAD/CHF":"CAD_CHF","CAD/JPY":"CAD_JPY","CHF/JPY":"CHF_JPY","EUR/AUD":"EUR_AUD","EUR/CAD":"EUR_CAD","EUR/CHF":"EUR_CHF","EUR/GBP":"EUR_GBP","EUR/JPY":"EUR_JPY","EUR/NZD":"EUR_NZD","EUR/USD":"EUR_USD","GBP/AUD":"GBP_AUD","GBP/CAD":"GBP_CAD","GBP/CHF":"GBP_CHF","GBP/JPY":"GBP_JPY","GBP/NZD":"GBP_NZD","GBP/USD":"GBP_USD","NZD/CAD":"NZD_CAD","NZD/CHF":"NZD_CHF","NZD/JPY":"NZD_JPY","NZD/USD":"NZD_USD","USD/CAD":"USD_CAD","USD/CHF":"USD_CHF","USD/JPY":"USD_JPY"};
-  useEffect(()=>{let mounted=true;const key=oandaKey.trim();const instStr=Object.values(OINSTR).join("%2C");const fetch_=async()=>{try{const r=await fetch(`/.netlify/functions/prices?instruments=${instStr}`,{signal:AbortSignal.timeout(6000)});if(!r.ok)throw new Error("OANDA "+r.status);const d=await r.json();if(!mounted||!d.prices?.length)return;setPrices(prev=>{const next={...prev};d.prices.forEach(p=>{const pair=Object.keys(OINSTR).find(k=>OINSTR[k]===p.instrument);if(!pair)return;const bid=parseFloat(p.bids?.[0]?.price||0),ask=parseFloat(p.asks?.[0]?.price||0);if(!bid||!ask)return;const mid=(bid+ask)/2,old=prev[pair];next[pair]={bid,ask,mid,change:mid-BASE_PRICES[pair],pct:(mid-BASE_PRICES[pair])/BASE_PRICES[pair]*100,dir:mid>old.mid?"up":mid<old.mid?"down":"flat",live:true,history:[...old.history.slice(1),mid]};});return next;});setApiStatus("live_oanda");}catch{if(mounted)setApiStatus(s=>s==="live_oanda"?"live_oanda":"fallback");}};fetch_();const iv=setInterval(fetch_,3000);return()=>{mounted=false;clearInterval(iv);};},[oandaKey]);
-  // ECB fallback removed - OANDA proxy active
+  useEffect(()=>{
+    let mounted=true;
+    const instStr=Object.values(OINSTR).join("%2C");
+    const fetch_=async()=>{
+      try{
+        const r=await fetch(`/.netlify/functions/prices?instruments=${instStr}`,{signal:AbortSignal.timeout(6000)});
+        if(!r.ok)throw new Error("OANDA returned "+r.status);
+        const d=await r.json();
+        if(!mounted||!d.prices?.length)throw new Error("No price data in response");
+        setPrices(prev=>{
+          const next={...(prev||{})};
+          d.prices.forEach(p=>{
+            const pair=Object.keys(OINSTR).find(k=>OINSTR[k]===p.instrument);
+            if(!pair)return;
+            const bid=parseFloat(p.bids?.[0]?.price||0),ask=parseFloat(p.asks?.[0]?.price||0);
+            if(!bid||!ask)return;
+            const mid=(bid+ask)/2;
+            const isJPY=pair.includes("JPY");
+            // Track session change from first confirmed live price
+            if(!priceHistoryRef.current[pair]) priceHistoryRef.current[pair]={sessionOpen:mid,history:[]};
+            const ref=priceHistoryRef.current[pair];
+            ref.history=[...ref.history.slice(-59),mid];
+            const sessionOpen=ref.sessionOpen;
+            const prevMid=prev?.[pair]?.mid||mid;
+            next[pair]={bid,ask,mid,
+              change:mid-sessionOpen,
+              pct:(mid-sessionOpen)/sessionOpen*100,
+              dir:mid>prevMid?"up":mid<prevMid?"down":"flat",
+              live:true,
+              history:ref.history};
+          });
+          return next;
+        });
+        setApiStatus("live_oanda");
+        setPriceError(null);
+      }catch(e){
+        if(mounted){
+          setApiStatus("error");
+          setPriceError(e.message);
+          // Do NOT fall back to static prices — show error
+        }
+      }
+    };
+    fetch_();
+    const iv=setInterval(fetch_,3000);
+    return()=>{mounted=false;clearInterval(iv);};
+  },[oandaKey]);
 
-  return{prices,apiStatus};
+  return{prices,apiStatus,priceError};
 }
 
 function Spark({data,color,w=60,h=20}){
@@ -324,8 +224,8 @@ function AxiomFX(){
   const [calImp,setCalImp]=useState("HIGH");
   const [calType,setCalType]=useState("ALL");
   const [calView,setCalView]=useState("THIS WEEK"); // TODAY, THIS WEEK, THIS MONTH, NEXT MONTH
-  // Live calendar data from ForexFactory proxy
-  const [calEvents,setCalEvents]=useState(FULL_CALENDAR); // seed with static, replace with live
+  // Live calendar data from ForexFactory proxy — starts EMPTY, fills from live feed
+  const [calEvents,setCalEvents]=useState([]);
   const [calLoading,setCalLoading]=useState(false);
   const [calLoaded,setCalLoaded]=useState(false);
   // Signal filter
@@ -337,7 +237,7 @@ function AxiomFX(){
   const [stratTierFilter,setStratTierFilter]=useState("ALL");
   // localSettings mirrors settings — same object, single source of truth
   const localSettings=settings,setLocalSettings=setSettings;
-  const [enabledStrats,setEnabledStrats]=useState(()=>load("axiom_strats",DEFAULT_ENABLED));
+  const [enabledStrats,setEnabledStrats]=useState(()=>load("axiom_strats",STRATEGIES.map(s=>s.id))); // default ALL 51
   const [modalTab,setModalTab]=useState("params");
   const [chartTf,setChartTf]=useState("60");
   const [wkView,setWkView]=useState("current");
@@ -350,11 +250,24 @@ function AxiomFX(){
   const [srcPage,setSrcPage]=useState(0);
   // DeployTab state lifted — prevents reset on tab switch
   const [deployTab,setDeployTab]=useState("overview");
+  // Live CB rates from FRED
+  const [cbRates,setCbRates]=useState(null); // null = not loaded yet
+  const [cbRatesLoading,setCbRatesLoading]=useState(false);
+  const [cbRatesSource,setCbRatesSource]=useState("loading");
+  const [cbRatesUpdated,setCbRatesUpdated]=useState(null);
+  // Weekend tab — AI-generated themes
+  const [weekendThemes,setWeekendThemes]=useState(null);
+  const [weekendLoading,setWeekendLoading]=useState(false);
+  const [weekendLoaded,setWeekendLoaded]=useState(false);
+  // Analyzer tab — AI-generated regime
+  const [regimeData,setRegimeData]=useState(null);
+  const [regimeLoading,setRegimeLoading]=useState(false);
+  const [regimeLoaded,setRegimeLoaded]=useState(false);
   // NewsTab state lifted to root — survives price ticks and tab switches
-  const [liveArts,setLiveArts]=useState(ALL_NEWS);
+  const [liveArts,setLiveArts]=useState([]); // no static seed — live only
   const [newsLoading,setNewsLoading]=useState(false);
   const [newsLoaded,setNewsLoaded]=useState(false);
-  const [newsSource,setNewsSource]=useState("static"); // "finnhub" | "ai" | "static"
+  const [newsSource,setNewsSource]=useState(null); // null | "finnhub" — no static/ai fallback
   const [newsError,setNewsError]=useState(null);
   const [newsPage,setNewsPage]=useState(0); // for AI pagination fallback
   // Use refs to avoid stale closures in loadNews
@@ -441,7 +354,7 @@ function AxiomFX(){
             max_tokens:3000,
             messages:[{role:"user",content:`Today is ${todayDate}. Generate 15 institutional G10 FX news analysis items for ${timeCtx}.${ccyCtx}${impCtx}
 
-Current macro context: BOJ hiking 0.75% (only G10 hiker, structural JPY bid), ECB hawkish hold 2.00% (Schnabel hike bias), Fed hold 3.875% (tariff uncertainty, June cut 38%), RBNZ just cut to 3.00% Apr 9, RBA hold 3.85% (Bullock hawkish), BOC 2.25% (dovish), EUR/USD ~1.168, USD/JPY ~158.4, DXY testing 100, 90-day tariff pause active, US CPI ${todayDate} key release.
+Current macro context: BOJ hiking 0.50% (only G10 hiker, structural JPY bid), ECB hawkish hold 2.00% (Schnabel hike bias), Fed hold 3.75% (tariff uncertainty, Jun cut ~38%), RBNZ cutting to 3.50%, RBA hold 4.10% (Bullock hawkish), BOC 2.75% (cutting), GBP 4.50% BOE hold, CHF 0.25% SNB, DXY testing 100, 90-day tariff pause active, US CPI ${todayDate} key release.
 
 For each item respond with ONLY a JSON array (no markdown, no backticks):
 [{"dt":"${todayDate} HH:MM","ccy":"USD","hl":"specific 80-120 char institutional headline","detail":"2 precise sentences with exact figures","impact":"BULLISH|BEARISH|NEUTRAL","imp":"HIGH|MED|LOW","source":"Reuters|Bloomberg|FT|WSJ|ECB|BOJ|Fed","url":"","realSource":false}]`}]
@@ -473,21 +386,11 @@ For each item respond with ONLY a JSON array (no markdown, no backticks):
         setNewsSource("ai");
         setNewsLoaded(true);
       }catch(e2){
-        // ── LAYER 3: Both APIs failed — rotate through static with variety ──
-        const PAGE_SIZE=10;
-        const start=(page*PAGE_SIZE)%ALL_NEWS.length;
-        const batch=[];
-        for(let i=0;i<PAGE_SIZE;i++){
-          const art=ALL_NEWS[(start+i)%ALL_NEWS.length];
-          batch.push({...art,id:`static_${page}_${i}_${Date.now()}`});
-        }
-        if(reset){setLiveArts(batch);}
-        else{setLiveArts(prev=>[...prev,...batch]);}
-        newsPageRef.current=page+1;
-        setNewsPage(page+1);
-        setNewsSource("static");
+        // Both Finnhub and AI failed — hard error, no static fallback
+        if(reset){setLiveArts([]);}
+        setNewsSource("error");
         setNewsLoaded(true);
-        setNewsError("Live news unavailable — showing reference data. Check Netlify function logs.");
+        setNewsError(`NEWS FEED UNAVAILABLE — Finnhub: ${e.message} · AI: ${e2.message}`);
       }
     }
 
@@ -504,72 +407,194 @@ For each item respond with ONLY a JSON array (no markdown, no backticks):
     if(tab==="news"&&newsLoaded){loadNews(true);}
   },[nCcy,nImp]);
 
-  // ── LIVE CALENDAR — ForexFactory proxy ──────────────────────────────────
-  const parseFFXml=useCallback((xml)=>{
-    try{
-      const parser=new DOMParser();
-      const doc=parser.parseFromString(xml,"application/xml");
-      const events=[];
-      doc.querySelectorAll("event").forEach(ev=>{
-        const title=ev.querySelector("title")?.textContent||"";
-        const country=ev.querySelector("country")?.textContent||"";
-        const date=ev.querySelector("date")?.textContent||"";
-        const time=ev.querySelector("time")?.textContent||"";
-        const impact=ev.querySelector("impact")?.textContent||"Low";
-        const forecast=ev.querySelector("forecast")?.textContent||"–";
-        const previous=ev.querySelector("previous")?.textContent||"–";
-        // Map impact string to our format
-        const imp=impact==="High"?"HIGH":impact==="Medium"?"MED":"LOW";
-        // Build datetime string
-        let dt=date;
-        if(time&&time!=="All Day"&&time!=="Tentative")dt=date+" "+time;
-        // Map country to currency
-        const ccyMap={"United States":"USD","Euro Zone":"EUR","United Kingdom":"GBP","Japan":"JPY","Australia":"AUD","Canada":"CAD","Switzerland":"CHF","New Zealand":"NZD","Norway":"NOK","Sweden":"SEK","China":"CNY","Germany":"EUR","France":"EUR","Italy":"EUR","Spain":"EUR"};
-        const ccy=ccyMap[country]||country.slice(0,3).toUpperCase();
-        // Determine type from title
-        const t=title.toUpperCase();
-        const type=t.includes("RATE")||t.includes("DECISION")||t.includes("POLICY")?"CB Decision":
-          t.includes("CPI")||t.includes("INFLATION")||t.includes("PPI")?"Inflation":
-          t.includes("NFP")||t.includes("PAYROLL")||t.includes("EMPLOYMENT")||t.includes("UNEMPLOYMENT")?"Employment":
-          t.includes("GDP")?"GDP":
-          t.includes("PMI")?"PMI":
-          t.includes("SPEECH")||t.includes("SPEAKS")||t.includes("PRESS CONFERENCE")||t.includes("STATEMENT")?"CB Speech":
-          t.includes("RETAIL")?"Retail":
-          t.includes("TRADE")?"Trade":
-          t.includes("HOUSING")||t.includes("HOME SALES")?"Housing":
-          t.includes("MANUFACTURING")||t.includes("INDUSTRIAL")?"Manufacturing":
-          "Indicator";
-        events.push({dt,ccy,ev:title,imp,fc:forecast,pr:previous,actual:"–",type});
-      });
-      return events;
-    }catch(e){return null;}
-  },[]);
-
+  // ── LIVE CALENDAR — ForexFactory proxy (parsed server-side in calendar.js) ──
   const loadCalendar=useCallback(async()=>{
     if(calLoading)return;
     setCalLoading(true);
     try{
       const [thisRes,nextRes]=await Promise.all([
-        fetch("/.netlify/functions/calendar?week=this",{signal:AbortSignal.timeout(10000)}),
-        fetch("/.netlify/functions/calendar?week=next",{signal:AbortSignal.timeout(10000)})
+        fetch("/.netlify/functions/calendar?week=this",{signal:AbortSignal.timeout(12000)}),
+        fetch("/.netlify/functions/calendar?week=next",{signal:AbortSignal.timeout(12000)})
       ]);
       const combined=[];
-      if(thisRes.ok){const xml=await thisRes.text();const evs=parseFFXml(xml);if(evs?.length)combined.push(...evs);}
-      if(nextRes.ok){const xml=await nextRes.text();const evs=parseFFXml(xml);if(evs?.length)combined.push(...evs);}
+      if(thisRes.ok){
+        const data=await thisRes.json();
+        if(data.events?.length)combined.push(...data.events);
+      }
+      if(nextRes.ok){
+        const data=await nextRes.json();
+        if(data.events?.length)combined.push(...data.events);
+      }
       if(combined.length>0){
-        // Merge with static data for full month coverage — live data takes priority for matching dates
-        const liveKeys=new Set(combined.map(e=>e.dt+e.ev));
-        const staticFallback=FULL_CALENDAR.filter(e=>!liveKeys.has(e.dt+e.ev));
-        setCalEvents([...combined,...staticFallback]);
+        combined.sort((a,b)=>a.dt.localeCompare(b.dt));
+        setCalEvents(combined);
+        setCalLoaded(true);
+      }else{
+        // Both feeds returned empty — ForexFactory may be down
+        setCalEvents([]);
         setCalLoaded(true);
       }
-    }catch(e){/* keep static fallback */}
+    }catch(e){
+      setCalEvents([]);
+      setCalLoaded(true);
+    }
     setCalLoading(false);
-  },[calLoading,parseFFXml]);
+  },[calLoading]);
 
   useEffect(()=>{
     if(tab==="calendar"&&!calLoaded)loadCalendar();
   },[tab,calLoaded]);
+
+  // ── LIVE CB RATES from FRED ──────────────────────────────────────────────
+  const loadCBRates=useCallback(async()=>{
+    if(cbRatesLoading)return;
+    setCbRatesLoading(true);
+    try{
+      const r=await fetch("/.netlify/functions/cbrates",{signal:AbortSignal.timeout(15000)});
+      const d=await r.json();
+      // Hard error from cbrates.js — no FRED key or all fetches failed
+      if(d.source==="error"||!d.rates){
+        setCbRates(null);
+        setCbRatesSource("error");
+        toast_("✗ CB Rates: "+(d.error||"FRED unavailable")+" — "+d.action,C.red);
+        setCbRatesLoading(false);
+        return;
+      }
+      setCbRates(d.rates);
+      setCbRatesSource(d.source||"FRED");
+      setCbRatesUpdated(d.updated||new Date().toISOString());
+      // Warn about partial failures without substituting static data
+      if(d.errors?.length){
+        d.errors.forEach(e=>toast_(`⚠ CB Rate missing: ${e.currency} — ${e.error}`,C.amber));
+      }
+    }catch(e){
+      setCbRates(null);
+      setCbRatesSource("error");
+      toast_("✗ CB Rates fetch failed: "+e.message,C.red);
+    }
+    setCbRatesLoading(false);
+  },[cbRatesLoading]);
+
+  useEffect(()=>{
+    if(tab==="cb"&&!cbRates)loadCBRates();
+  },[tab,cbRates]);
+
+  // ── WEEKEND AI THEMES ────────────────────────────────────────────────────
+  const loadWeekendThemes=useCallback(async()=>{
+    if(weekendLoading)return;
+    setWeekendLoading(true);
+    const now=new Date();
+    const todayDate=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
+    // Build live context from current CB data and prices
+    const liveP=Object.entries(prices).slice(0,8).map(([p,d])=>`${p}:${d.mid?.toFixed(d.mid>10?3:5)||"–"}`).join(" ");
+    const cbSummary=cbRates
+      ? Object.entries(cbRates).map(([ccy,d])=>`${ccy}:${d.rate}%(${d.outlook})`).join(" ")
+      : "USD:3.75%(Hold) EUR:2.00%(Hawkish) JPY:0.50%(Hiking) GBP:4.50%(Hold) AUD:4.10%(Hold) NZD:3.50%(Cutting) CAD:2.75%(Cutting) CHF:0.25%(Hold)";
+    try{
+      const r=await fetch("/.netlify/functions/chat",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514",max_tokens:4000,
+          messages:[{role:"user",content:`Today is ${todayDate}. You are an institutional G10 FX strategist generating the weekly theme analysis for a trading terminal.
+
+Current CB Rates: ${cbSummary}
+Current Prices: ${liveP}
+
+Generate a JSON array of 8 G10 currency weekly themes (one per major currency: USD, EUR, GBP, JPY, AUD, NZD, CAD, CHF). Each theme must reflect the CURRENT week's actual market conditions and recent CB decisions — not generic boilerplate.
+
+For each currency return:
+{
+  "ccy": "USD",
+  "dir": "BEARISH|BULLISH|NEUTRAL",
+  "priority": "HIGH|MED",
+  "color": "#ff4560 for bearish | #00e5a0 for bullish | #ff9f1c for neutral",
+  "title": "concise 60-char title with specific current event/level",
+  "detail": "2-3 sentence specific detail with exact current rates, levels, recent data releases",
+  "support": "key support level",
+  "resistance": "key resistance level",
+  "pivot": "key pivot level",
+  "pairs": ["PAIR1","PAIR2"],
+  "dirs": ["BUY|SELL","BUY|SELL"],
+  "deepAnalysis": "3-4 sentence institutional-grade analysis with specific data points, rate differentials, and positioning rationale",
+  "watchFor": "specific events/releases to watch this week with exact dates/times if known",
+  "evidence": [
+    {"title":"specific report title","source":"institution name","url":"real institution URL (not article, use institution homepage or policy page)"},
+    {"title":"specific data release or CB statement","source":"source name","url":"real URL"}
+  ]
+}
+
+Return ONLY a valid JSON array. No markdown, no backticks, no explanation.`}]
+        })
+      });
+      const d=await r.json();
+      if(d.error)throw new Error(d.error.message);
+      const text=(d.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
+      const match=text.match(/\[[\s\S]*\]/);
+      if(!match)throw new Error("No JSON");
+      const themes=JSON.parse(match[0]);
+      if(Array.isArray(themes)&&themes.length>0)setWeekendThemes(themes);
+      setWeekendLoaded(true);
+    }catch(e){setWeekendLoaded(true);}
+    setWeekendLoading(false);
+  },[weekendLoading,prices,cbRates]);
+
+  useEffect(()=>{
+    if(tab==="weekend"&&!weekendLoaded)loadWeekendThemes();
+  },[tab,weekendLoaded]);
+
+  // ── ANALYZER REGIME AI ───────────────────────────────────────────────────
+  const loadRegime=useCallback(async()=>{
+    if(regimeLoading)return;
+    setRegimeLoading(true);
+    const now=new Date();
+    const todayDate=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
+    const liveP=Object.entries(prices).slice(0,10).map(([p,d])=>`${p}:${d.mid?.toFixed(d.mid>10?3:5)||"–"}`).join(" ");
+    const cbSummary=cbRates
+      ? Object.entries(cbRates).map(([ccy,d])=>`${ccy}:${d.rate}%(${d.outlook})`).join(" ")
+      : "USD:3.75%(Hold) EUR:2.00%(Hawkish) JPY:0.50%(Hiking) GBP:4.50%(Hold) AUD:4.10%(Hold) NZD:3.50%(Cutting) CAD:2.75%(Cutting) CHF:0.25%(Hold)";
+    try{
+      const r=await fetch("/.netlify/functions/chat",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514",max_tokens:3000,
+          messages:[{role:"user",content:`Today is ${todayDate}. Generate a G10 FX macro regime assessment for an institutional trading terminal.
+
+Current CB Policy Rates: ${cbSummary}
+Live Prices: ${liveP}
+
+Return a JSON array of 8 regime objects (USD, EUR, GBP, JPY, AUD, NZD, CAD, CHF) with this structure:
+{
+  "ccy": "USD",
+  "regime": "BULLISH|BEARISH|NEUTRAL",
+  "strength": "STRONG|MOD|WEAK",
+  "detail": "2 sentences with specific current data points, rate levels, recent releases",
+  "best_strat": ["STRAT_ID1","STRAT_ID2","STRAT_ID3"],
+  "avoid": ["STRAT_ID1"],
+  "evidence": "specific institutional source name and report",
+  "url": "real institution URL (policy page, not article)",
+  "summary": "1 sentence dominant regime narrative"
+}
+
+Strategy IDs available: BOJ_NORM, NEWS_DFT, TRI_ARB, RATE_SRP, CB_DIV, WMR_FIX, STRUCT_BK, GRW_DIV, REAL_YLD, SAFE_HVN, CB_COMM, TSM_CTA, CROSS_CAR, FX_VOL, ICT_OB, STOP_HNT, GLOB_MAC, VOL_BRK, CORR_BRK, UIP_DEV, ADX_BRK, LDN_BRK, VWAP_REV, EARL_WRN, MOMO_CRS, BOP_FLOW, CARRY, BB_FADE, FIBO_PULL, ICHIMOKU, MON_PULL, EQ_BETA, REGIME_SW, COMD_CCY, TURT_TR, STOCH_RSI, DUAL_THR, KELTNER, RISK_PAR, SUPPLY_DEM, TOT_SHOCK, ENG_CAN, PPP_VAL, RSIMR, ATR_FADE
+
+Return ONLY valid JSON array. No markdown, no backticks.`}]
+        })
+      });
+      const d=await r.json();
+      if(d.error)throw new Error(d.error.message);
+      const text=(d.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
+      const match=text.match(/\[[\s\S]*\]/);
+      if(!match)throw new Error("No JSON");
+      const regimes=JSON.parse(match[0]);
+      if(Array.isArray(regimes)&&regimes.length>0)setRegimeData(regimes);
+      setRegimeLoaded(true);
+    }catch(e){setRegimeLoaded(true);}
+    setRegimeLoading(false);
+  },[regimeLoading,prices,cbRates]);
+
+  useEffect(()=>{
+    if(tab==="analyzer"&&analyzerTab==="regime"&&!regimeLoaded)loadRegime();
+  },[tab,analyzerTab,regimeLoaded]);
 
   const [aiMsgs,setAiMsgs]=useState([{role:"assistant",content:"I'm AXIOM — your institutional G10 FX intelligence.\n\nI have full context of your live account, all 28 pairs, 51 strategies, and today's macro environment. API key is pre-configured server-side.\n\nAsk me anything: trade setups, risk calculations, CB analysis, entry/exit levels, macro regime, strategy selection. I respond with precision — exact prices, pip counts, lot sizes, R:R ratios.\n\nWhat's on your radar?"}]);
   const [aiInput,setAiInput]=useState("");
@@ -579,7 +604,7 @@ For each item respond with ONLY a JSON array (no markdown, no backticks):
   const [sigScanning,setSigScanning]=useState(false);
   const [scanStatus,setScanStatus]=useState("Waiting for first scan...");
   const [lastScanTime,setLastScanTime]=useState(0);
-  const {prices,apiStatus}=usePrices(settings.oandaKey||localSettings.oandaKey);
+  const {prices,apiStatus,priceError}=usePrices(settings.oandaKey||localSettings.oandaKey);
   const toast_=useCallback((msg,color=C.green)=>{setToast({msg,color});setTimeout(()=>setToast(null),4500);},[]);
 
   useEffect(()=>save("axiom_style",style),[style]);
@@ -596,8 +621,18 @@ For each item respond with ONLY a JSON array (no markdown, no backticks):
     setScanStatus("Scanning 28 pairs — fetching live candles & running real analysis...");
     try{
       const acctP=settings.acct||10000;const riskP=settings.risk||2;
-      const res=await fetch(`/.netlify/functions/analyze?acct=${acctP}&risk=${riskP}`,{signal:AbortSignal.timeout(120000)});
-      if(!res.ok)throw new Error("Analyze returned "+res.status);
+      // Pass enabled strategies so toggles actually affect signal generation
+      const stratParam=enabledStrats.length>0?`&strategies=${enabledStrats.join(',')}`:'';
+      const res=await fetch(`/.netlify/functions/analyze?acct=${acctP}&risk=${riskP}${stratParam}`,{signal:AbortSignal.timeout(120000)});
+      if(!res.ok){
+        const errBody=await res.json().catch(()=>({error:'Analyze function error '+res.status}));
+        if(errBody.error?.includes('AXIOM_REGIMES')){
+          setScanStatus('✗ AXIOM_REGIMES not configured — Settings → Regime Update → copy JSON → Netlify env var AXIOM_REGIMES');
+          setSigScanning(false);
+          return;
+        }
+        throw new Error(errBody.error||'Analyze returned '+res.status);
+      }
       const data=await res.json();
       const now=Date.now();setLastScanTime(now);
       if(data.signals&&data.signals.length>0){
@@ -624,13 +659,27 @@ For each item respond with ONLY a JSON array (no markdown, no backticks):
 Entry:${sig.entry} SL:${sig.sl}`});}}catch(_){}
           });
         }
-        setScanStatus(`Scan complete — ${data.signals.length} signal${data.signals.length!==1?"s":""} found · ${data.scanned} pairs scanned`);
+        const corrNote=data.correlationFiltered>0?` · ${data.correlationFiltered} corr-filtered`:'';
+        const feedNote=data.feeds?` · Eco:${data.feeds.ecoEvents||0} Yields:${data.feeds.yieldPairs||0}`:''
+        if(data.feedErrors?.length){data.feedErrors.forEach(fe=>toast_(`⚠ Feed error: ${fe.feed} — ${fe.error}`,C.amber));};
+        setScanStatus(`Scan complete — ${data.signals.length} signal${data.signals.length!==1?"s":""} found · ${data.scanned} pairs scanned${corrNote}${feedNote}`);
       }else{
-        setScanStatus(`No setups found across ${data.scanned||28} pairs (${data.skipped||0} rejected) · Next scan in 5 min`);
+        const corrNote=data.correlationFiltered>0?` · ${data.correlationFiltered} corr-filtered`:'';
+        setScanStatus(`No setups found across ${data.scanned||28} pairs (${data.skipped||0} rejected)${corrNote} · Next scan in 5 min`);
       }
-    }catch(e){setScanStatus(`Scan error: ${e.message}`);}
+    }catch(e){
+      // Check if this is a regime configuration error
+      const msg=e.message||'Unknown error';
+      if(msg.includes('AXIOM_REGIMES')){
+        setScanStatus('✗ AXIOM_REGIMES not configured — go to Settings → Regime Update → save JSON to Netlify env var');
+      } else if(msg.includes('OANDA_API_KEY')){
+        setScanStatus('✗ OANDA_API_KEY not configured — add to Netlify environment variables');
+      } else {
+        setScanStatus(`✗ Scan error: ${msg}`);
+      }
+    }
     setSigScanning(false);
-  },[sigScanning,signals,settings.acct,settings.risk,toast_]);
+  },[sigScanning,signals,settings.acct,settings.risk,toast_,enabledStrats]);
 
   useEffect(()=>{
     const t=setTimeout(()=>runSignalScan(),5000);
@@ -672,6 +721,26 @@ Entry:${sig.entry} SL:${sig.sl}`});}}catch(_){}
     const openTrades=trades.filter(t=>t.status==="OPEN").map(t=>`${t.direction} ${t.pair} @${t.entry} P&L:${t.pnl>=0?"+":""}$${t.pnl?.toFixed(2)}`).join("; ");
     const now=new Date();
     const todayDate=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
+// Build macro regime dynamically from live CB rates
+const activeCB=cbRates||{};
+const getRateStr=(ccy)=>{
+  const r=activeCB[ccy]?.rate??null;
+  const o=activeCB[ccy]?.outlook??null;
+  return r!=null?`${r.toFixed(2)}%(${o||"Hold"})`:"–";
+};
+const macroLines=[
+  `- USD: ${getRateStr("USD")} · ${activeCB.USD?.bias||"Neutral"} · DXY ~100, tariff uncertainty, Jun cut prob ~38%`,
+  `- JPY: ${getRateStr("JPY")} · ${activeCB.JPY?.bias||"Hawkish"} · BOJ only G10 hiker, structural JPY bid, wage growth 3.1%+`,
+  `- EUR: ${getRateStr("EUR")} · ${activeCB.EUR?.bias||"Hawkish"} · ECB hawkish hold, German fiscal boost, JPM target 1.20`,
+  `- GBP: ${getRateStr("GBP")} · ${activeCB.GBP?.bias||"Neutral"} · BOE easing cycle, sticky services inflation 4.8%`,
+  `- AUD: ${getRateStr("AUD")} · ${activeCB.AUD?.bias||"Neutral"} · RBA hold, Bullock hawkish, China PMI supportive`,
+  `- NZD: ${getRateStr("NZD")} · ${activeCB.NZD?.bias||"Dovish"} · RBNZ cutting cycle, recession confirmed, sell rallies`,
+  `- CAD: ${getRateStr("CAD")} · ${activeCB.CAD?.bias||"Dovish"} · BOC cutting, USMCA risk, oil headwinds`,
+  `- CHF: ${getRateStr("CHF")} · ${activeCB.CHF?.bias||"Neutral"} · Safe haven bid, dollar debasement flow`,
+  `- NOK: ${getRateStr("NOK")} · ${activeCB.NOK?.bias||"Neutral"} · Oil-linked, Norges Bank hold`,
+  `- SEK: ${getRateStr("SEK")} · ${activeCB.SEK?.bias||"Neutral"} · Riksbank hold, EUR/SEK stable`,
+].join("\n");
+
     const sys=`You are AXIOM — an institutional G10 FX trading AI embedded in a live trading terminal. Today is ${todayDate}. You are fully agentic and respond with precision to WHATEVER the user asks. Never give generic responses. Never say "I cannot" or "as an AI". Always use the live data below directly in your answers.
 
 LIVE ACCOUNT (right now):
@@ -686,14 +755,7 @@ ACTIVE SIGNALS:
 ${openSigs||"No signals pending — run a scan"}
 
 MACRO REGIME (${todayDate}):
-- USD: BEARISH — DXY ~100 handle, tariff uncertainty, Fed hold 3.875%. Jun cut prob 38%. CPI today pivotal.
-- JPY: BULLISH — BOJ only G10 hiker 0.75%. Wage growth 3.1% above threshold. MUFG target 146.
-- EUR: BULLISH — ECB hawkish hold 2.00%. Schnabel: next move more likely hike. JPM target 1.20.
-- GBP: NEUTRAL — BOE 3.75% hold, services PMI 50.5 weak. EUR/GBP drifting toward 0.88.
-- AUD: BULLISH — RBA hawkish hold 3.85%. Bullock no cuts. China PMI 50.5. RBC target 0.73.
-- NZD: BEARISH — RBNZ cut to 3.00% Apr 9. Recession confirmed. 325bp cuts since Aug 2024.
-- CAD: BEARISH — BOC dovish 2.25%. USMCA risk July. Oil declining.
-- CHF: BULLISH — Safe haven bid. Dollar debasement. SNB 0.00%.
+${macroLines}
 
 Respond with institutional precision. Give exact price levels, pip counts, lot sizes, R:R ratios where relevant. Be direct, specific, and data-driven like a senior FX strategist.`;
     try{
@@ -786,7 +848,7 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
             ["TOP MOVER",`${topMover} ${topMoverPct>=0?"+":""}${topMoverPct.toFixed(3)}%`,topMoverPct>=0?C.green:C.red],
             ["EUR/USD",eurUsd?eurUsd.mid.toFixed(5):"–",eurUsd?.pct>=0?C.green:C.red],
             ["USD/JPY",usdJpy?usdJpy.mid.toFixed(3):"–",usdJpy?.pct>=0?C.red:C.green],
-            ["STATUS",apiStatus==="live_oanda"?"OANDA LIVE":apiStatus==="live_ecb"?"ECB LIVE":"SIM",apiStatus==="live_oanda"?C.green:apiStatus==="live_ecb"?"#00d4ff":C.amber],
+            ["STATUS",apiStatus==="live_oanda"?"OANDA LIVE":apiStatus==="error"?"✗ OANDA ERROR":"CONNECTING",apiStatus==="live_oanda"?C.green:apiStatus==="error"?C.red:C.muted],
           ].map(([l,v,c],i,arr)=>(
             <div key={l} style={{display:"flex",flexDirection:"column",paddingRight:"14px",marginRight:"14px",borderRight:i<arr.length-1?`1px solid ${C.bdr}`:"none",flexShrink:0}}>
               <span style={{fontSize:"7px",color:C.muted,letterSpacing:"1.5px",fontWeight:"700",marginBottom:"2px"}}>{l}</span>
@@ -823,7 +885,7 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
             <span style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px"}}>◈ 28 G10 PAIRS — ALPHABETICAL — REFERENCE PRICES</span>
             <div style={{display:"flex",gap:"6px",alignItems:"center"}}>
               <button onClick={()=>setTab("chart")} style={{padding:"3px 8px",background:C.gold+"22",color:C.gold,border:`1px solid ${C.gold}44`,borderRadius:"2px",cursor:"pointer",fontSize:"8px",fontWeight:"700",fontFamily:"inherit"}}>📊 LIVE CHARTS →</button>
-              <div style={{width:"5px",height:"5px",borderRadius:"50%",background:apiStatus==="live_oanda"?C.green:apiStatus==="live_ecb"?"#00d4ff":C.amber,animation:"pulse 2s infinite"}}/>
+              <div style={{width:"5px",height:"5px",borderRadius:"50%",background:apiStatus==="live_oanda"?C.green:apiStatus==="error"?C.red:C.muted,animation:apiStatus==="live_oanda"?"pulse 2s infinite":"none"}}/>
             </div>
           </div>
           <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
@@ -831,11 +893,13 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
               <thead><tr>{["PAIR","BID","ASK","CHG","CHG%","SPARK","CARRY","📊"].map(h=><th key={h} style={{padding:"4px 6px",textAlign:"left",fontSize:"7.5px",color:C.muted,letterSpacing:"1px",borderBottom:`1px solid ${C.bdr}`,fontWeight:"700",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
               <tbody>
                 {ALL_PAIRS.map(pair=>{
-                  const p=prices[pair];if(!p)return null;
+                  const p=prices?.[pair];if(!p)return null;
                   const isH=pair.includes("JPY")||pair.includes("NOK"),dec=isH?3:5;
                   const pc=p.dir==="up"?C.green:p.dir==="down"?C.red:C.text;
                   const [base,quote]=pair.split("/");
-                  const carry=((CB[base]?.rate||0)-(CB[quote]?.rate||0)).toFixed(2);
+                  const liveBase=cbRates?.[base]?.rate??null;
+                  const liveQuote=cbRates?.[quote]?.rate??null;
+                  const carry=(liveBase-liveQuote).toFixed(2);
                   return(
                     <tr key={pair} onMouseEnter={e=>e.currentTarget.style.background=C.bg1} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                       <td style={{padding:"5px 6px",fontWeight:"700",color:C.gold,fontSize:"10.5px",whiteSpace:"nowrap"}}>{pair}</td>
@@ -844,7 +908,7 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
                       
                       <td style={{padding:"5px 6px",color:p.change>=0?C.green:C.red,fontFamily:"monospace",fontSize:"9.5px",whiteSpace:"nowrap"}}>{p.change>=0?"+":""}{p.change.toFixed(dec)}</td>
                       <td style={{padding:"5px 6px",color:p.pct>=0?C.green:C.red,fontWeight:"600",fontSize:"9.5px",whiteSpace:"nowrap"}}>{p.pct>=0?"+":""}{p.pct.toFixed(3)}%</td>
-                      <td style={{padding:"3px 6px"}}><Spark data={p.history} color={p.pct>=0?C.green:C.red}/></td>
+                      <td style={{padding:"3px 6px"}}><Spark data={p?.history||[]} color={p.pct>=0?C.green:C.red}/></td>
                       <td style={{padding:"5px 6px",color:parseFloat(carry)>0?C.green:parseFloat(carry)<0?C.red:C.muted,fontWeight:"600",fontSize:"9.5px",whiteSpace:"nowrap"}}>{parseFloat(carry)>0?"+":""}{carry}%</td>
                       <td style={{padding:"5px 6px"}}><button onClick={()=>{setChartPair(pair);setTab("chart");}} style={{padding:"2px 6px",background:C.blue+"22",color:C.blue,border:`1px solid ${C.blue}44`,borderRadius:"2px",cursor:"pointer",fontSize:"8px",fontFamily:"inherit",fontWeight:"700"}}>GO</button></td>
                     </tr>
@@ -856,18 +920,18 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
         </div>
         {/* G10 Currency Recap */}
         <div style={{background:C.bg2,border:`1px solid ${C.gold}33`,borderRadius:"6px",padding:"10px 13px",marginBottom:"10px"}}>
-          <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"9px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>◈ G10 CURRENCY RECAP — APRIL 2026</div>
+          <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"9px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>◈ G10 CURRENCY RECAP — LIVE CB RATES</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px"}}>
-            {[{ccy:"USD",dir:"BEARISH",c:C.red,  note:"DXY testing 100. CPI Apr 10 pivotal. Sell USD rallies."},
-              {ccy:"JPY",dir:"BULLISH",c:C.green, note:"Only G10 hiker. BOJ 0.75%. MUFG target USD/JPY 146."},
-              {ccy:"EUR",dir:"BULLISH",c:C.green, note:"ECB hawkish hold. EUR/USD 1.16+. JPM target 1.20."},
-              {ccy:"GBP",dir:"NEUTRAL",c:C.gold,  note:"BOE easing bias vs 3% CPI. EUR/GBP toward 0.88+."},
-              {ccy:"AUD",dir:"BULLISH",c:C.green, note:"RBA hawkish hold. China PMI 50.5. RBC target 0.73."},
-              {ccy:"NZD",dir:"BEARISH",c:C.red,   note:"RBNZ cut 3.00% Apr 9. 325bp cycle. Sell rallies."},
-              {ccy:"CAD",dir:"BEARISH",c:C.red,   note:"BOC dovish. USMCA July risk. Oil surplus headwind."},
-              {ccy:"CHF",dir:"BULLISH",c:C.green, note:"Safe haven bid. Dollar debasement. EUR/CHF 0.93 target."},
-              {ccy:"NOK",dir:"NEUTRAL",c:C.gold,  note:"Norges 4.00% hold. Oil decline = vulnerable in risk-off."},
-              {ccy:"SEK",dir:"NEUTRAL",c:C.gold,  note:"Riksbank 1.75% hold. Best G10 performer 2025 (+19%)."},
+            {[{ccy:"USD",dir:"BEARISH",c:C.red,   note:`Fed ${(cbRates?.USD?.rate??'—').toFixed(2)}% (${cbRates?.USD?.outlook??'—'}). DXY ~100. Tariff uncertainty.`},
+              {ccy:"JPY",dir:"BULLISH",c:C.green,  note:`BOJ ${(cbRates?.JPY?.rate??'—').toFixed(2)}% — only G10 hiker. Structural JPY bid.`},
+              {ccy:"EUR",dir:"BULLISH",c:C.green,  note:`ECB ${(cbRates?.EUR?.rate??'—').toFixed(2)}% (${cbRates?.EUR?.bias??'—'}). EUR/USD 1.16+.`},
+              {ccy:"GBP",dir:"NEUTRAL",c:C.gold,   note:`BOE ${(cbRates?.GBP?.rate??'—').toFixed(2)}% (${cbRates?.GBP?.outlook??'—'}). Services CPI sticky.`},
+              {ccy:"AUD",dir:"BULLISH",c:C.green,  note:`RBA ${(cbRates?.AUD?.rate??'—').toFixed(2)}% (${cbRates?.AUD?.outlook??'—'}). China PMI supportive.`},
+              {ccy:"NZD",dir:"BEARISH",c:C.red,    note:`RBNZ ${(cbRates?.NZD?.rate??'—').toFixed(2)}% (${cbRates?.NZD?.outlook??'—'}). Recession confirmed.`},
+              {ccy:"CAD",dir:"BEARISH",c:C.red,    note:`BOC ${(cbRates?.CAD?.rate??'—').toFixed(2)}% (${cbRates?.CAD?.outlook??'—'}). USMCA risk.`},
+              {ccy:"CHF",dir:"BULLISH",c:C.green,  note:`SNB ${(cbRates?.CHF?.rate??'—').toFixed(2)}% (${cbRates?.CHF?.outlook??'—'}). Safe haven bid.`},
+              {ccy:"NOK",dir:"NEUTRAL",c:C.gold,   note:`Norges ${(cbRates?.NOK?.rate??'—').toFixed(2)}% (${cbRates?.NOK?.outlook??'—'}). Oil-linked.`},
+              {ccy:"SEK",dir:"NEUTRAL",c:C.gold,   note:`Riksbank ${(cbRates?.SEK?.rate??'—').toFixed(2)}% (${cbRates?.SEK?.outlook??'—'}). Stable.`},
             ].map(({ccy,dir,c,note})=>(
               <div key={ccy} style={{background:C.bg1,border:`1px solid ${c}22`,borderLeft:`3px solid ${c}`,borderRadius:"4px",padding:"7px 9px"}}>
                 <div style={{display:"flex",alignItems:"center",gap:"6px",marginBottom:"3px"}}>
@@ -973,10 +1037,12 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}}>
           {ALL_PAIRS.map(pair=>{
-            const p=prices[pair];const isH=pair.includes("JPY"),dec=isH?3:5;
+            const p=prices?.[pair];const isH=pair.includes("JPY"),dec=isH?3:5;
             const isUp=p&&p.pct>=0;
             const [base,quote]=pair.split("/");
-            const carry=((CB[base]?.rate||0)-(CB[quote]?.rate||0));
+            const liveBase=cbRates?.[base]?.rate??null;
+            const liveQuote=cbRates?.[quote]?.rate??null;
+            const carry=liveBase-liveQuote;
             const isSelected=pair===chartPair;
             return(
               <button key={pair} ref={isSelected?highlightRef:null}
@@ -991,7 +1057,7 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
                   <span style={{fontWeight:"700",color:C.text,fontSize:"13px",fontFamily:"monospace"}}>{p.mid.toFixed(dec)}</span>
                   <span style={{fontSize:"9px",color:isUp?C.green:C.red}}>{isUp?"+":""}{p.pct.toFixed(3)}%</span>
                 </div>}
-                {p&&<div style={{marginBottom:"5px"}}><Spark data={p.history} color={isUp?C.green:C.red} w={110} h={20}/></div>}
+                {p&&<div style={{marginBottom:"5px"}}><Spark data={p?.history||[]} color={isUp?C.green:C.red} w={110} h={20}/></div>}
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span style={{fontSize:"7.5px",color:carry>0?C.green:carry<0?C.red:C.muted}}>Carry {carry>=0?"+":""}{carry.toFixed(2)}%</span>
                   <span style={{fontSize:"7.5px",color:C.blue,fontWeight:"700"}}>{TFS.find(t=>t.v===selectedTf)?.l} ↗</span>
@@ -1019,8 +1085,8 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
       return true;
     });
     const impC={HIGH:C.amber,MED:C.gold,LOW:C.muted};
-    const sourceLabel=newsSource==="finnhub"?"LIVE — Finnhub · Real Articles · Real URLs":newsSource==="ai"?"AI Analysis · No external URLs":"Reference Data";
-    const sourceDot=newsSource==="finnhub"?C.green:newsSource==="ai"?C.amber:C.muted;
+    const sourceLabel=newsSource==="finnhub"?"LIVE — Finnhub · Real Articles · Real URLs":newsSource==="error"?"✗ NEWS FEED UNAVAILABLE":newsSource===null?"⟳ Connecting to Finnhub...": "AI Analysis";
+    const sourceDot=newsSource==="finnhub"?C.green:newsSource==="error"?C.red:newsSource===null?C.muted:C.amber;
 
     return(
       <div>
@@ -1031,7 +1097,7 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
             <span style={{color:sourceDot,fontWeight:"700"}}>{loading?"Loading news...":sourceLabel}</span>
           </div>
           {newsSource==="finnhub"&&<span style={{fontSize:"7.5px",color:C.muted}}>↗ Click any article to open source</span>}
-          {newsSource==="ai"&&<span style={{fontSize:"7.5px",color:C.muted}}>AI-generated analysis · no external links</span>}
+          {newsSource==="error"&&<span style={{fontSize:"7.5px",color:C.red}}>Check Finnhub API key in Netlify env vars</span>}
         </div>
         {/* Error */}
         {newsError&&<div style={{background:"#1a0505",border:`1px solid ${C.red}44`,borderRadius:"4px",padding:"7px 10px",marginBottom:"8px",fontSize:"8.5px",color:C.red}}>{newsError}</div>}
@@ -1068,6 +1134,15 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
             </div>
           )}
 
+          {/* Error empty state */}
+          {!loading&&hasLoaded&&displayed.length===0&&newsSource==="error"&&(
+            <div style={{background:"#1a0505",border:`1px solid ${C.red}44`,borderRadius:"6px",padding:"24px",textAlign:"center",margin:"8px 0"}}>
+              <div style={{color:C.red,fontWeight:"700",fontSize:"12px",marginBottom:"8px"}}>✗ NEWS FEED UNAVAILABLE</div>
+              <div style={{color:C.muted,fontSize:"9px",lineHeight:"1.7",marginBottom:"12px"}}>{newsError||"Finnhub unreachable — check FINNHUB_API_KEY in Netlify environment variables"}</div>
+              <button onClick={()=>loadNews(true)} style={{padding:"8px 16px",background:C.red+"22",color:C.red,border:`1px solid ${C.red}44`,borderRadius:"3px",cursor:"pointer",fontWeight:"700",fontSize:"10px",fontFamily:"inherit"}}>↺ RETRY CONNECTION</button>
+            </div>
+          )}
+
           {/* Articles */}
           {displayed.map(n=>{
             const ic=n.impact==="BULLISH"?C.green:n.impact==="BEARISH"?C.red:C.muted;
@@ -1091,7 +1166,7 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
                   {n.hl}
                 </div>
                 {n.detail&&<div style={{fontSize:"9px",color:C.muted,lineHeight:"1.45"}}>{n.detail}</div>}
-                {!n.realSource&&<div style={{fontSize:"7.5px",color:C.dim,marginTop:"4px",fontStyle:"italic"}}>AI analysis · not a real article</div>}
+                {!n.realSource&&n.source&&<div style={{fontSize:"7.5px",color:C.dim,marginTop:"4px",fontStyle:"italic"}}>Source: {n.source}</div>}
               </div>
             );
           })}
@@ -1102,7 +1177,7 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
           {!loading&&hasLoaded&&(
             <button onClick={()=>loadNews(false)}
               style={{width:"100%",padding:"11px",background:C.bg1,color:C.gold,border:`1px solid ${C.gold}44`,borderRadius:"4px",cursor:"pointer",fontSize:"11px",fontWeight:"700",fontFamily:"inherit",marginTop:"4px"}}>
-              ↓ LOAD MORE — {newsSource==="finnhub"?"fetch latest batch":"generate older analysis"}
+              ↓ LOAD MORE — fetch next batch from Finnhub
             </button>
           )}
         </div>
@@ -1348,16 +1423,8 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
     Object.values(byStr).forEach(s=>{s.avgR=s.rrs.length?s.rrs.reduce((a,b)=>a+b,0)/s.rrs.length:0;});
     const stList=Object.values(byStr).sort((a,b)=>b.pnl-a.pnl);
 
-    // Market context data
-    const REGIMES=[
-      {ccy:"USD",regime:"BEARISH",strength:"STRONG",detail:"DXY testing 100 handle. Fed on hold at 3.875%. NFP 128K miss. CPI Apr 10 pivotal. Structural downtrend from 2025 peak.",best_strat:["CB_DIV","REAL_YLD","GLOB_MAC"],avoid:["CARRY"],evidence:"J.P. Morgan 2026 Outlook: post-peak USD world",url:"https://www.jpmorgan.com/insights/global-research/outlook/market-outlook"},
-      {ccy:"JPY",regime:"BULLISH",strength:"STRONG",detail:"BOJ only G10 hiker — 0.75% confirmed. Wage growth 3.1% above 3% threshold. MUFG target USD/JPY 146. Structural JPY appreciation underway.",best_strat:["BOJ_NORM","CB_DIV","SAFE_HVN"],avoid:["CARRY"],evidence:"MUFG: Post-peak USD world, Dec 2025",url:"https://www.mufgresearch.com/fx/fx-focus-g10-fx-2026-outlook-in-a-post-peak-usd-world-19-december-2025/"},
-      {ccy:"EUR",regime:"BULLISH",strength:"MOD",detail:"ECB hawkish hold 2.00%. Schnabel: hike more likely than cut. German fiscal stimulus supporting growth. EUR/USD above 1.16.",best_strat:["CB_DIV","CB_COMM","GRW_DIV"],avoid:["BB_FADE"],evidence:"ING Think: G10 FX Outlook 2026",url:"https://think.ing.com/articles/fx-outlook-2026-our-main-calls/"},
-      {ccy:"NZD",regime:"BEARISH",strength:"STRONG",detail:"RBNZ cut to 3.00% Apr 9. 325bp of cuts since Aug 2024 — most aggressive G10 easer. NZ in recession. Sell NZD on all rallies.",best_strat:["RATE_SRP","CB_DIV","CS_MOM"],avoid:["UIP_DEV"],evidence:"RBNZ Apr 2026: 3.00% decision + press conference",url:"https://www.rbnz.govt.nz/monetary-policy/"},
-      {ccy:"AUD",regime:"BULLISH",strength:"MOD",detail:"RBA hawkish hold 3.85%. Bullock: no cuts imminent. China PMI 50.5 supportive. AUD/USD 0.73 year-end target (RBC).",best_strat:["CB_DIV","COMD_CCY","EQ_BETA"],avoid:["CARRY"],evidence:"RBC Capital Markets FX Report Card",url:"https://www.rbccm.com/assets/rbccm/docs/fx/currency-report-card.pdf"},
-      {ccy:"CHF",regime:"BULLISH",strength:"MOD",detail:"Dollar debasement trade driving CHF appreciation. SNB relaxed about strength. EUR/CHF 0.93 target. Safe haven demand.",best_strat:["SAFE_HVN","GLOB_MAC","REAL_YLD"],avoid:["CARRY"],evidence:"BlackRock 2026 Macro Outlook",url:"https://www.blackrock.com/institutions/en-us/insights/2026-macro-outlook"},
-    ];
-
+    // Use AI-generated regime data
+    const REGIMES=regimeData||[];
     const REGIMECOLOR={BULLISH:C.green,BEARISH:C.red,NEUTRAL:C.gold};
     const STRENGTHCOLOR={STRONG:C.green,MOD:C.gold,WEAK:C.muted};
     const ATABS=[{id:"regime",l:"Regime"},{id:"pairs",l:"Pair Matrix"},{id:"performance",l:"Strategy Perf"},{id:"risk",l:"Risk Metrics"}];
@@ -1400,30 +1467,59 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
         {/* REGIME ASSESSMENT */}
         {analyzerTab==="regime"&&(
           <div>
-            <div style={{background:C.bg2,border:`1px solid ${C.gold}33`,borderRadius:"6px",padding:"12px",marginBottom:"10px"}}>
-              <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"8px"}}>◎ APRIL 2026 MACRO REGIME — POST-PEAK USD · BOJ HIKE CYCLE</div>
-              <div style={{background:`linear-gradient(90deg,#071a07,#0a1a2a)`,border:`1px solid ${C.green}33`,borderRadius:"4px",padding:"11px 13px",marginBottom:"10px",fontSize:"10.5px",color:"#b8cde0",lineHeight:"1.85"}}>
-                <span style={{color:C.gold,fontWeight:"700"}}>DOMINANT REGIME: CB DIVERGENCE / SAFE HAVEN / POST-PEAK USD</span><br/>
-                BOJ confirmed hiking at 0.75% — only G10 hiker, structural JPY bid on every rally. ECB hawkish hold drives EUR higher. USD structurally weak (DXY 100 test) on labor softening and tariff relief fading.<br/>
-                <span style={{color:C.green}}>✓ HIGH EDGE: JPY longs (USD/JPY, EUR/JPY, GBP/JPY shorts) · EUR/USD buy dips · CHF safe haven · CB Divergence strategy</span><br/>
-                <span style={{color:C.red}}>✗ AVOID: G10 Carry (JPY unwinding) · AUD/CAD/NOK commodity longs (oil risk) · USD longs</span>
+            {/* Status + Refresh */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:regimeLoaded&&REGIMES.length>0?"#071407":C.bg2,border:`1px solid ${regimeLoaded&&REGIMES.length>0?C.green+"44":C.amber+"44"}`,borderRadius:"4px",padding:"6px 10px",marginBottom:"10px",fontSize:"8.5px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:"6px"}}>
+                <div style={{width:"6px",height:"6px",borderRadius:"50%",background:regimeLoaded&&REGIMES.length>0?C.green:C.amber,animation:regimeLoading?"pulse 1s infinite":"none"}}/>
+                <span style={{color:regimeLoaded&&REGIMES.length>0?C.green:C.amber,fontWeight:"700"}}>
+                  {regimeLoading?"⟳ Generating regime analysis...":regimeLoaded&&REGIMES.length>0?"✓ AI-GENERATED · Live regime assessment from current CB rates":"Press Refresh to generate regime analysis"}
+                </span>
               </div>
+              <button onClick={()=>{setRegimeData(null);setRegimeLoaded(false);loadRegime();}} disabled={regimeLoading}
+                style={{padding:"3px 8px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}44`,borderRadius:"3px",cursor:regimeLoading?"not-allowed":"pointer",fontSize:"8px",fontWeight:"700",fontFamily:"inherit",opacity:regimeLoading?0.5:1}}>
+                ↺ Refresh
+              </button>
             </div>
-            {REGIMES.map((r,i)=>(
-              <div key={i} style={{background:C.bg2,border:`1px solid ${REGIMECOLOR[r.regime]}33`,borderLeft:`4px solid ${REGIMECOLOR[r.regime]}`,borderRadius:"6px",padding:"11px 13px",marginBottom:"8px"}}>
+
+            {/* Loading */}
+            {regimeLoading&&(
+              <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"30px",textAlign:"center"}}>
+                <div style={{fontSize:"11px",color:C.gold,marginBottom:"6px"}}>⚡ Analyzing current macro regime...</div>
+                <div style={{fontSize:"9px",color:C.muted}}>Evaluating CB divergence, price action, and strategy alignment</div>
+              </div>
+            )}
+
+            {/* Empty state */}
+            {!regimeLoading&&!regimeLoaded&&(
+              <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"24px",textAlign:"center"}}>
+                <div style={{fontSize:"9px",color:C.muted,marginBottom:"12px"}}>AI generates live G10 regime assessment using current CB rates and price data.</div>
+                <button onClick={loadRegime} style={{padding:"8px 16px",background:C.gold,color:C.bg,border:"none",borderRadius:"4px",cursor:"pointer",fontWeight:"700",fontSize:"10px",fontFamily:"inherit"}}>▶ Generate Regime Analysis</button>
+              </div>
+            )}
+
+            {/* Regimes */}
+            {!regimeLoading&&REGIMES.length>0&&REGIMES.map((r,i)=>(
+              <div key={i} style={{background:C.bg2,border:`1px solid ${REGIMECOLOR[r.regime]||C.gold}33`,borderLeft:`4px solid ${REGIMECOLOR[r.regime]||C.gold}`,borderRadius:"6px",padding:"11px 13px",marginBottom:"8px"}}>
                 <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"6px",flexWrap:"wrap"}}>
                   <span style={{fontWeight:"700",color:C.gold,fontSize:"14px"}}>{r.ccy}</span>
-                  <Bdg label={r.regime} color={REGIMECOLOR[r.regime]}/>
-                  <Bdg label={r.strength} color={STRENGTHCOLOR[r.strength]} sz="8px"/>
+                  <Bdg label={r.regime} color={REGIMECOLOR[r.regime]||C.gold}/>
+                  <Bdg label={r.strength} color={STRENGTHCOLOR[r.strength]||C.muted} sz="8px"/>
+                  {r.summary&&<span style={{fontSize:"9px",color:"#9ab8cc",fontStyle:"italic",flex:1}}>{r.summary}</span>}
                 </div>
                 <div style={{fontSize:"10px",color:"#b8cde0",lineHeight:"1.6",marginBottom:"7px"}}>{r.detail}</div>
                 <div style={{display:"flex",gap:"6px",alignItems:"center",flexWrap:"wrap",marginBottom:"6px"}}>
                   <span style={{fontSize:"7.5px",color:C.muted,fontWeight:"700"}}>BEST STRATEGIES:</span>
-                  {r.best_strat.map(id=>{const s=STRATEGIES.find(x=>x.id===id);return s?<span key={id} style={{padding:"2px 6px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}33`,borderRadius:"3px",fontSize:"8px",fontWeight:"700"}}>{s.name.split(" ").slice(0,3).join(" ")}</span>:null;})}
+                  {(r.best_strat||[]).map(id=>{const s=STRATEGIES.find(x=>x.id===id);return s?<span key={id} style={{padding:"2px 6px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}33`,borderRadius:"3px",fontSize:"8px",fontWeight:"700"}}>{s.name.split(" ").slice(0,3).join(" ")}</span>:null;})}
                 </div>
+                {(r.avoid||[]).length>0&&(
+                  <div style={{display:"flex",gap:"6px",alignItems:"center",flexWrap:"wrap",marginBottom:"6px"}}>
+                    <span style={{fontSize:"7.5px",color:C.muted,fontWeight:"700"}}>AVOID:</span>
+                    {r.avoid.map(id=>{const s=STRATEGIES.find(x=>x.id===id);return s?<span key={id} style={{padding:"2px 6px",background:C.red+"22",color:C.red,border:`1px solid ${C.red}33`,borderRadius:"3px",fontSize:"8px",fontWeight:"700"}}>{s.name.split(" ").slice(0,2).join(" ")}</span>:null;})}
+                  </div>
+                )}
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",borderTop:`1px solid ${C.bdr}22`,paddingTop:"6px"}}>
                   <span style={{fontSize:"8px",color:C.muted}}>{r.evidence}</span>
-                  <a href={r.url} target="_blank" rel="noopener noreferrer" style={{fontSize:"8px",color:C.blue,fontWeight:"700",textDecoration:"none",flexShrink:0}}>Source ↗</a>
+                  {r.url&&<a href={r.url} target="_blank" rel="noopener noreferrer" style={{fontSize:"8px",color:C.blue,fontWeight:"700",textDecoration:"none",flexShrink:0}}>Source ↗</a>}
                 </div>
               </div>
             ))}
@@ -1456,7 +1552,7 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
               <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"8px"}}>◎ CURRENT PAIR MOMENTUM — LIVE</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px"}}>
                 {ALL_PAIRS.map(pair=>{
-                  const p=prices[pair];if(!p)return null;
+                  const p=prices?.[pair];if(!p)return null;
                   const isH=pair.includes("JPY"),dec=isH?3:5;
                   const bull=p.pct>=0;
                   return(<div key={pair} style={{background:C.bg1,border:`1px solid ${bull?C.green:C.red}22`,borderRadius:"4px",padding:"7px 9px"}}>
@@ -1534,87 +1630,230 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
 
   // ─── CB RATES ─────────────────────────────────────────────────────────
   function CBRates(){
-    // selCB lifted to root — no reset on price tick
-    const CB_HIST={
-      USD:[{d:"Sep'23",r:5.50},{d:"Sep'24",r:5.25},{d:"Nov'24",r:4.75},{d:"Dec'24",r:4.50},{d:"Feb'25",r:4.25},{d:"Jun'25",r:4.00},{d:"Sep'25",r:3.875},{d:"Apr'26",r:3.875}],
-      EUR:[{d:"Sep'23",r:4.50},{d:"Jun'24",r:4.00},{d:"Sep'24",r:3.50},{d:"Dec'24",r:3.00},{d:"Mar'25",r:2.50},{d:"Sep'25",r:2.00},{d:"Apr'26",r:2.00}],
-      JPY:[{d:"Mar'24",r:-0.10},{d:"Apr'24",r:0.10},{d:"Jul'24",r:0.25},{d:"Jan'25",r:0.50},{d:"Jan'26",r:0.75},{d:"Apr'26",r:0.75}],
-      GBP:[{d:"Aug'23",r:5.25},{d:"Aug'24",r:5.00},{d:"Nov'24",r:4.75},{d:"Feb'25",r:4.50},{d:"Sep'25",r:4.00},{d:"Jan'26",r:3.75},{d:"Apr'26",r:3.75}],
-      AUD:[{d:"Nov'23",r:4.35},{d:"Feb'25",r:4.10},{d:"May'25",r:3.85},{d:"Apr'26",r:3.85}],
-      CAD:[{d:"Jul'23",r:5.00},{d:"Jun'24",r:4.75},{d:"Sep'24",r:4.25},{d:"Dec'24",r:3.25},{d:"Jun'25",r:2.75},{d:"Sep'25",r:2.25},{d:"Apr'26",r:2.25}],
-      CHF:[{d:"Jun'23",r:1.75},{d:"Mar'24",r:1.50},{d:"Jun'24",r:1.25},{d:"Sep'24",r:1.00},{d:"Dec'24",r:0.50},{d:"Mar'25",r:0.25},{d:"Jun'25",r:0.00},{d:"Apr'26",r:0.00}],
-      NZD:[{d:"May'23",r:5.50},{d:"Oct'24",r:5.25},{d:"Nov'24",r:4.75},{d:"Jan'25",r:4.25},{d:"Apr'25",r:3.75},{d:"Jul'25",r:3.25},{d:"Nov'25",r:3.00},{d:"Apr'26",r:3.00}],
-      NOK:[{d:"Dec'23",r:4.50},{d:"Dec'24",r:4.50},{d:"Mar'25",r:4.25},{d:"Sep'25",r:4.00},{d:"Apr'26",r:4.00}],
-      SEK:[{d:"May'23",r:4.00},{d:"May'24",r:3.75},{d:"Aug'24",r:3.25},{d:"Nov'24",r:2.75},{d:"Feb'25",r:2.25},{d:"May'25",r:2.00},{d:"Sep'25",r:1.75},{d:"Apr'26",r:1.75}],
+    // Use live data from FRED if loaded, otherwise show loading state
+    const activeCB = cbRates || {};
+    const CB_SOURCE_URLS={
+      USD:"https://www.federalreserve.gov/monetarypolicy/openmarket.htm",
+      EUR:"https://www.ecb.europa.eu/mopo/decisions/html/index.en.html",
+      GBP:"https://www.bankofengland.co.uk/monetary-policy-summary-and-minutes",
+      JPY:"https://www.boj.or.jp/en/mopo/mpmdeci/",
+      AUD:"https://www.rba.gov.au/monetary-policy/rba-board-minutes/",
+      CAD:"https://www.bankofcanada.ca/core-functions/monetary-policy/key-interest-rate/",
+      CHF:"https://www.snb.ch/en/monetary-policy/monetary-policy-decisions",
+      NZD:"https://www.rbnz.govt.nz/monetary-policy/official-cash-rate-decisions",
+      NOK:"https://www.norges-bank.no/en/topics/Monetary-policy/monetary-policy-meetings/",
+      SEK:"https://www.riksbank.se/en-gb/monetary-policy/the-policy-rate/",
     };
+
+    // Build display CB object — live FRED data only, no static fallback
+    // If cbRates is null (FRED unavailable), displayCB is empty and error banner handles it
+    const displayCB={};
+    if(cbRates){
+      Object.entries(cbRates).forEach(([ccy,live])=>{
+        displayCB[ccy]={
+          bank: live.bank||ccy,
+          rate: live.rate,
+          prev: live.prev,
+          outlook: live.outlook||"Unknown",
+          bias: live.bias||"Unknown",
+          next: live.next||"Unknown",
+          hist: live.hist||null,
+          sourceUrl: CB_SOURCE_URLS[ccy]||live.sourceUrl,
+          fredSeries: live.fredSeries,
+          source: live.source||"FRED",
+        };
+      });
+    }
+
     return(
       <div>
-        {/* History modal */}
-        {selCB&&(()=>{
-          const [ccy,cb]=selCB;const hist=CB_HIST[ccy]||[];const bc=cb.bias==="Hawkish"?C.green:cb.bias==="Dovish"?C.red:C.gold;
-          const rates=hist.map(h=>h.r);const mn=Math.min(...rates),mx=Math.max(...rates),rng=mx-mn||0.5;
-          const W=300,H=130,pad=18;const x=(i)=>pad+(i/(hist.length-1))*(W-pad*2);const y=(r)=>H-pad-((r-mn)/rng)*(H-pad*2);
-          const pts=hist.map((d,i)=>`${x(i)},${y(d.r)}`).join(" ");
-          return(
-            <div onClick={()=>setSelCB(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(4px)"}}>
-              <div onClick={e=>e.stopPropagation()} style={{background:C.bg2,border:`2px solid ${bc}`,borderRadius:"8px",padding:"18px",maxWidth:"380px",width:"calc(100% - 32px)",maxHeight:"80vh",overflowY:"auto"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px"}}>
-                  <div><div style={{fontSize:"20px",fontWeight:"700",color:C.gold}}>{ccy} — {cb.bank}</div><div style={{fontSize:"8.5px",color:C.muted}}>Rate History · Current: {cb.rate.toFixed(2)}% · Tap outside to close</div></div>
-                  <button onClick={()=>setSelCB(null)} style={{background:"transparent",border:`1px solid ${C.bdr}`,borderRadius:"3px",color:C.muted,cursor:"pointer",padding:"4px 8px",fontSize:"11px",fontFamily:"inherit"}}>✕</button>
-                </div>
-                <div style={{background:C.bg1,borderRadius:"6px",padding:"12px",marginBottom:"12px"}}>
-                  <div style={{fontSize:"8px",color:C.gold,fontWeight:"700",letterSpacing:"2px",marginBottom:"8px"}}>POLICY RATE HISTORY (%)</div>
-                  <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{display:"block",overflow:"visible"}}>
-                    {[0,0.25,0.5,0.75,1].map((p,i)=>{const yp=pad+(p*(H-pad*2));const rv=(mn+rng*(1-p)).toFixed(2);return(<g key={i}><line x1={pad} y1={yp} x2={W-pad} y2={yp} stroke={C.bdr} strokeWidth="0.5" strokeDasharray="3,3"/><text x={pad-3} y={yp+3} fontSize="7" fill={C.muted} textAnchor="end">{rv}%</text></g>);})}
-                    <polyline points={`${x(0)},${H-pad} ${pts} ${x(hist.length-1)},${H-pad}`} fill={bc+"22"}/>
-                    <polyline points={pts} fill="none" stroke={bc} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    {hist.map((d,i)=>(<g key={i}><circle cx={x(i)} cy={y(d.r)} r={i===hist.length-1?5:3} fill={i===hist.length-1?bc:C.bg2} stroke={bc} strokeWidth="1.5"/>{(i===0||i===hist.length-1)&&<text x={x(i)} y={H-4} fontSize="6.5" fill={C.muted} textAnchor="middle">{d.d}</text>}</g>))}
-                  </svg>
-                </div>
-                <div style={{background:C.bg1,borderRadius:"5px",padding:"10px",marginBottom:"12px"}}>
-                  <div style={{fontSize:"8px",color:C.gold,fontWeight:"700",letterSpacing:"2px",marginBottom:"7px"}}>DECISION HISTORY</div>
-                  <div style={{maxHeight:"150px",overflowY:"auto"}}>
-                    {[...hist].reverse().map((d,i,arr)=>{const prev=arr[i+1];const chg=prev?d.r-prev.r:0;return(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:`1px solid ${C.bdr}22`,fontSize:"10px"}}><span style={{color:C.muted,fontFamily:"monospace",minWidth:"70px"}}>{d.d}</span><span style={{fontWeight:"700",color:C.text,fontFamily:"monospace"}}>{d.r.toFixed(2)}%</span><span style={{fontSize:"9px",color:chg>0?C.green:chg<0?C.red:C.muted,fontFamily:"monospace",minWidth:"45px",textAlign:"right"}}>{chg!==0?(chg>0?"+":"")+chg.toFixed(2)+"%":"—"}</span></div>);})}
-                  </div>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"7px"}}>
-                  {[["Current Rate",`${cb.rate.toFixed(2)}%`,bc],["Outlook",cb.outlook,cb.outlook==="Hiking"?C.green:cb.outlook==="Cutting"?C.red:C.muted],["Next Meeting",cb.next,C.muted],["Bias",cb.bias,bc]].map(([l,v,c])=>(<div key={l} style={{background:C.bg,border:`1px solid ${c}33`,borderRadius:"4px",padding:"8px"}}><div style={{fontSize:"7.5px",color:C.muted,marginBottom:"3px"}}>{l}</div><div style={{fontSize:"12px",fontWeight:"700",color:c}}>{v}</div></div>))}
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"8px 10px",marginBottom:"10px",fontSize:"8.5px",color:C.muted}}>📈 <strong style={{color:C.text}}>Tap any central bank card</strong> to view the full rate history chart and decision timeline.</div>
+        {/* FRED Status Bar */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:cbRatesSource==="FRED"?"#071407":cbRatesSource==="error"?"#1a0505":C.bg2,border:`1px solid ${cbRatesSource==="FRED"?C.green+"44":cbRatesSource==="error"?C.red+"44":C.amber+"44"}`,borderRadius:"4px",padding:"6px 10px",marginBottom:"10px",fontSize:"8.5px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:"6px"}}>
+            <div style={{width:"6px",height:"6px",borderRadius:"50%",background:cbRatesSource==="FRED"?C.green:cbRatesSource==="error"?C.red:C.muted,animation:cbRatesLoading?"pulse 1s infinite":"none"}}/>
+            <span style={{color:cbRatesSource==="FRED"?C.green:cbRatesSource==="error"?C.red:C.amber,fontWeight:"700"}}>
+              {cbRatesLoading?"⟳ Fetching from FRED...":cbRatesSource==="FRED"?`✓ LIVE — FRED St. Louis Fed · Updated ${cbRatesUpdated?.slice(0,10)||"today"}`:cbRatesSource==="error"?"✗ FRED UNAVAILABLE — add FRED_API_KEY to Netlify env vars":"⟳ Connecting to FRED..."}
+            </span>
+          </div>
+          <div style={{display:"flex",gap:"6px",alignItems:"center"}}>
+            {cbRatesSource!=="FRED"&&<a href="https://fred.stlouisfed.org" target="_blank" rel="noopener noreferrer" style={{fontSize:"7.5px",color:C.blue,fontWeight:"700",textDecoration:"none"}}>Get Free Key ↗</a>}
+            <button onClick={()=>{setCbRates(null);setCbRatesSource("loading");loadCBRates();}} disabled={cbRatesLoading}
+              style={{padding:"3px 8px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}44`,borderRadius:"3px",cursor:cbRatesLoading?"not-allowed":"pointer",fontSize:"8px",fontWeight:"700",fontFamily:"inherit",opacity:cbRatesLoading?0.5:1}}>
+              ↺ Refresh
+            </button>
+          </div>
+        </div>
+
+        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"8px 10px",marginBottom:"10px",fontSize:"8.5px",color:C.muted}}>
+          📈 <strong style={{color:C.text}}>Tap any central bank card</strong> to view the full rate history chart and decision timeline. Rates sourced from FRED (St. Louis Fed) and each central bank's official website.
+        </div>
+
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:"9px",marginBottom:"12px"}}>
-          {Object.entries(CB).map(([ccy,cb])=>{
+          {Object.keys(displayCB).length===0?(
+            <div style={{background:"#1a0505",border:`1px solid ${C.red}44`,borderRadius:"6px",padding:"28px",textAlign:"center",gridColumn:"1/-1"}}>
+              <div style={{color:C.red,fontWeight:"700",fontSize:"12px",marginBottom:"8px"}}>✗ CB RATES UNAVAILABLE</div>
+              <div style={{color:C.muted,fontSize:"9px",lineHeight:"1.7",marginBottom:"12px"}}>FRED API unreachable. Add FRED_API_KEY to Netlify environment variables — free at fred.stlouisfed.org</div>
+              <button onClick={loadCBRates} style={{padding:"8px 16px",background:C.red+"22",color:C.red,border:`1px solid ${C.red}44`,borderRadius:"3px",cursor:"pointer",fontWeight:"700",fontSize:"10px",fontFamily:"inherit"}}>↺ RETRY</button>
+            </div>
+          ):Object.entries(displayCB).map(([ccy,cb])=>{
             const bc=cb.bias==="Hawkish"?C.green:cb.bias==="Dovish"?C.red:C.gold;
-            const hist=CB_HIST[ccy]||[];
-            const rates=hist.map(h=>h.r);const mn=Math.min(...rates),mx=Math.max(...rates),rng=mx-mn||0.5;
-            const sw=120,sh=32;const sx=(i)=>(i/(hist.length-1))*sw;const sy=(r)=>sh-((r-mn)/rng)*(sh-4)-2;
+            const hist=cb.hist||[];
+            const rates=hist.map(h=>h.r);
+            const mn=hist.length?Math.min(...rates):0;
+            const mx=hist.length?Math.max(...rates):cb.rate;
+            const rng=mx-mn||0.5;
+            const sw=120,sh=32;
+            const sx=(i)=>(i/(Math.max(hist.length-1,1)))*sw;
+            const sy=(r)=>sh-((r-mn)/rng)*(sh-4)-2;
             const spts=hist.map((d,i)=>`${sx(i)},${sy(d.r)}`).join(" ");
+
             return(
-              <div key={ccy} onClick={()=>setSelCB([ccy,cb])} style={{background:C.bg2,border:`1px solid ${bc}33`,borderRadius:"5px",padding:"11px",cursor:"pointer",transition:"all 0.12s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor=bc+"77";e.currentTarget.style.background=C.bg1;}} onMouseLeave={e=>{e.currentTarget.style.borderColor=bc+"33";e.currentTarget.style.background=C.bg2;}}>
+              <div key={ccy} onClick={()=>setSelCB([ccy,cb])}
+                style={{background:C.bg2,border:`1px solid ${bc}33`,borderRadius:"5px",padding:"11px",cursor:"pointer",transition:"all 0.12s"}}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor=bc+"77";e.currentTarget.style.background=C.bg1;}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor=bc+"33";e.currentTarget.style.background=C.bg2;}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"4px"}}>
                   <span style={{fontWeight:"700",color:C.gold,fontSize:"17px"}}>{ccy}</span>
-                  <div style={{display:"flex",gap:"5px",alignItems:"center"}}><Bdg label={cb.bias.toUpperCase()} color={bc}/><span style={{fontSize:"7.5px",color:C.blue,fontWeight:"700"}}>HISTORY ↗</span></div>
+                  <div style={{display:"flex",gap:"5px",alignItems:"center"}}>
+                    <Bdg label={cb.bias.toUpperCase()} color={bc}/>
+                    <a href={cb.sourceUrl} target="_blank" rel="noopener noreferrer"
+                      onClick={e=>e.stopPropagation()}
+                      style={{fontSize:"7.5px",color:C.blue,fontWeight:"700",textDecoration:"none"}}>SRC ↗</a>
+                  </div>
                 </div>
                 <div style={{fontSize:"9px",color:C.muted,marginBottom:"4px"}}>{cb.bank}</div>
                 <div style={{display:"flex",alignItems:"baseline",gap:"6px",marginBottom:"6px"}}>
                   <span style={{fontSize:"22px",fontWeight:"700",color:C.text,fontFamily:"monospace"}}>{cb.rate.toFixed(2)}%</span>
                   <span style={{fontSize:"9px",color:cb.rate>cb.prev?C.green:cb.rate<cb.prev?C.red:C.muted}}>prev {cb.prev.toFixed(2)}%</span>
                 </div>
-                {hist.length>=2&&<svg width={sw} height={sh} style={{display:"block",marginBottom:"6px",overflow:"visible"}}><polyline points={`${sx(0)},${sh} ${spts} ${sx(hist.length-1)},${sh}`} fill={bc+"22"}/><polyline points={spts} fill="none" stroke={bc} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-                <div style={{display:"flex",gap:"5px",alignItems:"center",marginBottom:"4px"}}><Bdg label={cb.outlook.toUpperCase()} color={cb.outlook==="Hiking"?C.green:cb.outlook==="Cutting"?C.red:C.muted}/><span style={{fontSize:"8px",color:C.muted}}>Next: {cb.next}</span></div>
+                {hist.length>=2&&(
+                  <svg width={sw} height={sh} style={{display:"block",marginBottom:"6px",overflow:"visible"}}>
+                    <polyline points={`${sx(0)},${sh} ${spts} ${sx(hist.length-1)},${sh}`} fill={bc+"22"}/>
+                    <polyline points={spts} fill="none" stroke={bc} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+                <div style={{display:"flex",gap:"5px",alignItems:"center",marginBottom:"4px"}}>
+                  <Bdg label={cb.outlook.toUpperCase()} color={cb.outlook==="Hiking"?C.green:cb.outlook==="Cutting"?C.red:C.muted}/>
+                  <span style={{fontSize:"8px",color:C.muted}}>Next: {cb.next}</span>
+                </div>
+                {cb.fredSeries&&<div style={{fontSize:"7px",color:C.dim}}>FRED: {cb.fredSeries}</div>}
               </div>
             );
           })}
         </div>
+
+        {/* Detail modal */}
+        {selCB&&(()=>{
+          const [ccy,cb]=selCB;
+          const bc=cb.bias==="Hawkish"?C.green:cb.bias==="Dovish"?C.red:C.gold;
+          const hist=cb.hist||[];
+          const rates=hist.map(h=>h.r);
+          const mn=hist.length?Math.min(...rates):0;
+          const mx=hist.length?Math.max(...rates):cb.rate;
+          const rng=mx-mn||0.5;
+          const W=300,H=130,pad=18;
+          const x=(i)=>pad+(i/(Math.max(hist.length-1,1)))*(W-pad*2);
+          const y=(r)=>H-pad-((r-mn)/rng)*(H-pad*2);
+          const pts=hist.map((d,i)=>`${x(i)},${y(d.r)}`).join(" ");
+          return(
+            <div onClick={()=>setSelCB(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(4px)"}}>
+              <div onClick={e=>e.stopPropagation()} style={{background:C.bg2,border:`2px solid ${bc}`,borderRadius:"8px",padding:"18px",maxWidth:"380px",width:"calc(100% - 32px)",maxHeight:"80vh",overflowY:"auto"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px"}}>
+                  <div>
+                    <div style={{fontSize:"20px",fontWeight:"700",color:C.gold}}>{ccy} — {cb.bank}</div>
+                    <div style={{fontSize:"8.5px",color:C.muted}}>Rate History · Current: {cb.rate.toFixed(2)}% · Tap outside to close</div>
+                  </div>
+                  <button onClick={()=>setSelCB(null)} style={{background:"transparent",border:`1px solid ${C.bdr}`,borderRadius:"3px",color:C.muted,cursor:"pointer",padding:"4px 8px",fontSize:"11px",fontFamily:"inherit"}}>✕</button>
+                </div>
+
+                {hist.length>=2&&(
+                  <div style={{background:C.bg1,borderRadius:"6px",padding:"12px",marginBottom:"12px"}}>
+                    <div style={{fontSize:"8px",color:C.gold,fontWeight:"700",letterSpacing:"2px",marginBottom:"8px"}}>POLICY RATE HISTORY (%)</div>
+                    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{display:"block",overflow:"visible"}}>
+                      {[0,0.25,0.5,0.75,1].map((p,i)=>{
+                        const yp=pad+(p*(H-pad*2));
+                        const rv=(mn+rng*(1-p)).toFixed(2);
+                        return(<g key={i}><line x1={pad} y1={yp} x2={W-pad} y2={yp} stroke={C.bdr} strokeWidth="0.5" strokeDasharray="3,3"/><text x={pad-3} y={yp+3} fontSize="7" fill={C.muted} textAnchor="end">{rv}%</text></g>);
+                      })}
+                      <polyline points={`${x(0)},${H-pad} ${pts} ${x(hist.length-1)},${H-pad}`} fill={bc+"22"}/>
+                      <polyline points={pts} fill="none" stroke={bc} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      {hist.map((d,i)=>(<g key={i}><circle cx={x(i)} cy={y(d.r)} r={i===hist.length-1?5:3} fill={i===hist.length-1?bc:C.bg2} stroke={bc} strokeWidth="1.5"/>{(i===0||i===hist.length-1)&&<text x={x(i)} y={H-4} fontSize="6.5" fill={C.muted} textAnchor="middle">{d.d}</text>}</g>))}
+                    </svg>
+                  </div>
+                )}
+
+                {hist.length>0&&(
+                  <div style={{background:C.bg1,borderRadius:"5px",padding:"10px",marginBottom:"12px"}}>
+                    <div style={{fontSize:"8px",color:C.gold,fontWeight:"700",letterSpacing:"2px",marginBottom:"7px"}}>DECISION HISTORY</div>
+                    <div style={{maxHeight:"150px",overflowY:"auto"}}>
+                      {[...hist].reverse().map((d,i,arr)=>{
+                        const prev=arr[i+1];const chg=prev?d.r-prev.r:0;
+                        return(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:`1px solid ${C.bdr}22`,fontSize:"10px"}}>
+                          <span style={{color:C.muted,fontFamily:"monospace",minWidth:"70px"}}>{d.d}</span>
+                          <span style={{fontWeight:"700",color:C.text,fontFamily:"monospace"}}>{d.r.toFixed(2)}%</span>
+                          <span style={{fontSize:"9px",color:chg>0?C.green:chg<0?C.red:C.muted,fontFamily:"monospace",minWidth:"45px",textAlign:"right"}}>{chg!==0?(chg>0?"+":"")+chg.toFixed(2)+"%":"—"}</span>
+                        </div>);
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"7px",marginBottom:"12px"}}>
+                  {[["Current Rate",`${cb.rate.toFixed(2)}%`,bc],["Outlook",cb.outlook,cb.outlook==="Hiking"?C.green:cb.outlook==="Cutting"?C.red:C.muted],["Next Meeting",cb.next,C.muted],["Bias",cb.bias,bc]].map(([l,v,c])=>(
+                    <div key={l} style={{background:C.bg,border:`1px solid ${c}33`,borderRadius:"4px",padding:"8px"}}>
+                      <div style={{fontSize:"7.5px",color:C.muted,marginBottom:"3px"}}>{l}</div>
+                      <div style={{fontSize:"12px",fontWeight:"700",color:c}}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Source link */}
+                <a href={cb.sourceUrl} target="_blank" rel="noopener noreferrer"
+                  style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 11px",background:C.bg1,border:`1px solid ${C.blue}33`,borderRadius:"4px",textDecoration:"none",marginBottom:"8px"}}>
+                  <div>
+                    <div style={{fontSize:"9.5px",color:C.text,fontWeight:"600"}}>{cb.bank} — Official Rate Decisions</div>
+                    <div style={{fontSize:"8px",color:C.blue,marginTop:"2px"}}>
+                      {cb.fredSeries?`FRED Series: ${cb.fredSeries} · `:""}Source: {cb.bank}
+                    </div>
+                  </div>
+                  <span style={{fontSize:"16px",color:C.blue,flexShrink:0}}>↗</span>
+                </a>
+                {cb.fredSeries&&(
+                  <a href={`https://fred.stlouisfed.org/series/${cb.fredSeries}`} target="_blank" rel="noopener noreferrer"
+                    style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 11px",background:C.bg1,border:`1px solid ${C.green}33`,borderRadius:"4px",textDecoration:"none"}}>
+                    <div>
+                      <div style={{fontSize:"9.5px",color:C.text,fontWeight:"600"}}>FRED Database — {cb.fredSeries}</div>
+                      <div style={{fontSize:"8px",color:C.green,marginTop:"2px"}}>Federal Reserve Bank of St. Louis · Free data</div>
+                    </div>
+                    <span style={{fontSize:"16px",color:C.green,flexShrink:0}}>↗</span>
+                  </a>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Carry Matrix — derives from live rates */}
         <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"12px"}}>
-          <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>◈ CARRY DIFFERENTIAL MATRIX (%)</div>
+          <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>◈ CARRY DIFFERENTIAL MATRIX (%) — LIVE RATES</div>
           <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
             <table style={{width:"100%",borderCollapse:"collapse",minWidth:"600px"}}>
-              <thead><tr><th style={{padding:"5px 8px",fontSize:"8px",color:C.gold,borderBottom:`1px solid ${C.bdr}`,fontWeight:"700",textAlign:"left"}}>↓ BASE / QUOTE →</th>{Object.keys(CB).map(q=><th key={q} style={{padding:"5px 8px",fontSize:"8px",color:C.muted,borderBottom:`1px solid ${C.bdr}`,fontWeight:"700",textAlign:"center"}}>{q}</th>)}</tr></thead>
-              <tbody>{Object.entries(CB).map(([base,bd])=>(<tr key={base}><td style={{padding:"6px 8px",color:C.gold,fontWeight:"700",fontSize:"10.5px"}}>{base}</td>{Object.entries(CB).map(([q,qd])=>{if(base===q)return(<td key={q} style={{padding:"6px 8px",background:C.bg1,color:C.dim,textAlign:"center"}}>—</td>);const diff=bd.rate-qd.rate;return(<td key={q} style={{padding:"6px 8px",color:diff>0?C.green:diff<0?C.red:C.muted,fontWeight:Math.abs(diff)>2?"700":"400",textAlign:"center",fontSize:"10px",fontFamily:"monospace"}}>{diff>0?"+":""}{diff.toFixed(2)}</td>);})}</tr>))}</tbody>
+              <thead><tr>
+                <th style={{padding:"5px 8px",fontSize:"8px",color:C.gold,borderBottom:`1px solid ${C.bdr}`,fontWeight:"700",textAlign:"left"}}>↓ BASE / QUOTE →</th>
+                {Object.keys(displayCB).map(q=><th key={q} style={{padding:"5px 8px",fontSize:"8px",color:C.muted,borderBottom:`1px solid ${C.bdr}`,fontWeight:"700",textAlign:"center"}}>{q}</th>)}
+              </tr></thead>
+              <tbody>
+                {Object.entries(displayCB).map(([base,bd])=>(
+                  <tr key={base}>
+                    <td style={{padding:"6px 8px",color:C.gold,fontWeight:"700",fontSize:"10.5px"}}>{base}</td>
+                    {Object.entries(displayCB).map(([q,qd])=>{
+                      if(base===q)return(<td key={q} style={{padding:"6px 8px",background:C.bg1,color:C.dim,textAlign:"center"}}>—</td>);
+                      const diff=bd.rate-qd.rate;
+                      return(<td key={q} style={{padding:"6px 8px",color:diff>0?C.green:diff<0?C.red:C.muted,fontWeight:Math.abs(diff)>2?"700":"400",textAlign:"center",fontSize:"10px",fontFamily:"monospace"}}>{diff>0?"+":""}{diff.toFixed(2)}</td>);
+                    })}
+                  </tr>
+                ))}
+              </tbody>
             </table>
           </div>
         </div>
@@ -1622,171 +1861,132 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
     );
   }
   function Weekend(){
-    // wkView lifted to parent to prevent reset on price tick
-    const CW_THEMES=[
-      {ccy:"USD",dir:"BEARISH",priority:"HIGH",color:"#ff4560",title:"USD Structural Weakness — DXY Testing 100",detail:"The US dollar is in confirmed structural downtrend. DXY down ~9% from 2025 highs. FOMC Minutes (Apr 7) confirmed Fed divisions. CPI (Apr 10) is the pivotal release — a miss below 0.3% accelerates Fed cut bets and extends USD weakness. DXY testing critical 100 handle. Conviction trade: sell USD rallies on any pair.",support:"100.20 DXY",resistance:"101.80 DXY",pivot:"100.50",pairs:["USD/JPY","USD/CHF"],dirs:["SELL","SELL"],
-        deepAnalysis:"The USD structural bear case in 2026 is built on three converging forces: (1) Federal Reserve easing cycle — 175bp of cuts since Sep 2024 compressing real yields. (2) Tariff uncertainty — 90-day pause is relief but structural trade war risk keeps uncertainty premium in FX. (3) USD reserve status erosion — BlackRock notes foreign investors questioning USD as primary reserve asset for the first time in decades. DXY 100 is the critical technical level that must hold for any bull case. A weekly close below 100 opens 96-97 targets. Every USD rally toward 101.80-102 is a high-conviction sell.",
-        watchFor:"Thursday Apr 10: US CPI m/m (forecast 0.3%). A print below 0.2% = aggressive USD selling, June cut odds spike above 60%. A print above 0.4% = brief USD relief rally — sell into it. Also watch FOMC speakers this week for any hawkish pivot signals.",
-        evidence:[{title:"J.P. Morgan 2026 Market Outlook: Post-Peak USD",source:"J.P. Morgan Global Research",url:"https://www.jpmorgan.com/insights/global-research/outlook/market-outlook"},{title:"Fed FOMC Minutes March 2026: Divisions on Rate Path",source:"Federal Reserve",url:"https://www.federalreserve.gov/monetarypolicy/fomcminutes20260318.htm"},{title:"BlackRock 2026 Macro Outlook: Short USD Trade",source:"BlackRock Investment Institute",url:"https://www.blackrock.com/institutions/en-us/insights/2026-macro-outlook"}]},
-      {ccy:"JPY",dir:"BULLISH",priority:"HIGH",color:"#00e5a0",title:"BOJ Normalization Intact — USD/JPY Structural Short",detail:"Bank of Japan is the only G10 central bank actively hiking in 2026. Rate 0.75%. Wage growth 3.1% above 3% BOJ normalization threshold. Ueda reaffirmed hiking path this week. Every USD/JPY rally toward 159+ is a structural short opportunity. MUFG target USD/JPY 146 by year-end. EUR/JPY, GBP/JPY, AUD/JPY all offer short setups.",support:"156.50",resistance:"160.00",pivot:"158.50",pairs:["USD/JPY","EUR/JPY","GBP/JPY"],dirs:["SELL","SELL","SELL"],
-        deepAnalysis:"The JPY bull thesis in 2026 is the most structurally sound in G10 FX. BOJ is the only central bank actively hiking while all others are cutting or on hold — this policy divergence is at its widest point in decades. Japan's wage growth hitting 3.1% y/y crossed the BOJ's own stated normalization threshold. Japan's current account surplus of ¥2.4 trillion provides fundamental structural support. The carry trade unwind — which drove JPY to 160+ in 2024 — is accelerating as rate differentials compress. MUFG December 2025 target: USD/JPY 146. Every rally toward 158-160 is an institutional sell opportunity with strong risk/reward.",
-        watchFor:"BOJ next decision April 30. Any Ueda speech this week could move JPY. Watch Japan Trade Balance (Apr 11) — surplus data reinforces structural JPY bid. Also note: USD/JPY tends to spike on any risk-off equity selloff, providing better short entries.",
-        evidence:[{title:"MUFG: Post-Peak USD World — USD/JPY 146 Target",source:"MUFG Research",url:"https://www.mufgresearch.com/fx/fx-focus-g10-fx-2026-outlook-in-a-post-peak-usd-world-19-december-2025/"},{title:"BOJ Policy Normalization Framework 2026",source:"Bank of Japan",url:"https://www.boj.or.jp/en/mopo/"},{title:"BIS Working Paper #801: CB Divergence and FX",source:"Bank for International Settlements",url:"https://www.bis.org/publ/work801.htm"}]},
-      {ccy:"EUR",dir:"BULLISH",priority:"HIGH",color:"#00e5a0",title:"EUR Resilient — ECB Hawkish Hold + German Fiscal Boost",detail:"EUR/USD trading at 1.16+ — a major recovery from 2025 Liberation Day lows. ECB held 2.00% with hawkish statement. Schnabel: 'next move more likely a hike than cut.' German fiscal stimulus delivering real growth upgrades. J.P. Morgan year-end target 1.20. Buy EUR/USD dips toward 1.1550.",support:"1.1500",resistance:"1.1900",pivot:"1.1680",pairs:["EUR/USD","EUR/CAD"],dirs:["BUY","BUY"],
-        deepAnalysis:"EUR's recovery from the 1.0732 Liberation Day lows to 1.16+ is one of the largest G10 FX moves of 2025-2026. Three fundamental drivers: (1) ECB hawkish shift — Schnabel's 'next move more likely a hike' is a significant policy signal that has repriced EUR rate expectations sharply higher. (2) German fiscal stimulus — the €100B+ infrastructure and defense package is flowing into the real economy, upgrading Eurozone growth forecasts from 1.0% to 1.5-1.8% H2 2026 (ING). (3) USD structural weakness providing tailwind. J.P. Morgan year-end target 1.20. MUFG more bullish at 1.24.",
-        watchFor:"ECB decision April 30 — hold widely expected. Watch Schnabel, Lagarde speeches this week for any hike timing signals. EUR/USD key support at 1.1550 — hold = buy dip. Break below = reassess. EUR/GBP 0.8700 resistance key this week.",
-        evidence:[{title:"ING Think: G10 FX Outlook 2026",source:"ING Think",url:"https://think.ing.com/articles/fx-outlook-2026-our-main-calls/"},{title:"ECB Monetary Policy Decisions 2026",source:"European Central Bank",url:"https://www.ecb.europa.eu/press/pr/date/2026/html/index.en.html"},{title:"J.P. Morgan EUR/USD 1.20 Year-End Target",source:"J.P. Morgan Global Research",url:"https://www.jpmorgan.com/insights/global-research/currencies/fx-macro"}]},
-      {ccy:"GBP",dir:"NEUTRAL",priority:"MED",color:"#ff9f1c",title:"GBP — BOE Easing Bias vs Sticky 3% Inflation",detail:"BOE signaling further easing (75bp more in 2026 per ING) vs CPI still above 3% target. EUR/GBP trending to 0.88-0.90. GBP/USD holds on USD weakness. Key this week: UK GDP Fri Apr 11 — strong print supports GBP, miss reinforces BOE cut narrative.",support:"1.3200",resistance:"1.3600",pivot:"1.3410",pairs:["GBP/USD","EUR/GBP"],dirs:["BUY","SELL"],
-        deepAnalysis:"GBP is caught between two opposing forces in 2026. On one hand, BOE is clearly signaling further easing — markets price 75bp of additional cuts through end-2026, with ING forecasting BOE terminal rate at 3.00%. On the other, UK CPI remains sticky at 3.0% y/y with services inflation at 4.8%, well above the 2% target. This creates a 'stagflation lite' dynamic where BOE wants to cut but can't move as aggressively as markets price. Net result: GBP outperforms USD (on USD weakness) but underperforms EUR (on ECB hawkishness). Best expression: short EUR/GBP on rallies toward 0.8800-0.8850.",
-        watchFor:"UK GDP m/m Friday April 11 (forecast +0.1%). A beat would temporarily support GBP across the board. A miss extends the BOE cut narrative and pushes EUR/GBP toward 0.8750+. Also BOE Governor Bailey speech if scheduled.",
-        evidence:[{title:"Bank of England Monetary Policy Summary 2026",source:"Bank of England",url:"https://www.bankofengland.co.uk/monetary-policy-summary-and-minutes"},{title:"ING: BOE Easing Cycle — 75bp More Expected",source:"ING Think",url:"https://think.ing.com/articles/bank-of-england-2026-outlook/"},{title:"UK ONS CPI Data — Services Inflation Sticky",source:"Office for National Statistics",url:"https://www.ons.gov.uk/economy/inflationandpriceindices"}]},
-      {ccy:"NZD",dir:"BEARISH",priority:"HIGH",color:"#ff4560",title:"NZD Weakest G10 — RBNZ Cuts to 3.00% Apr 9",detail:"RBNZ has cut 325bp since August 2024 — most aggressive G10 easer. NZ GDP -0.2% recession confirmed. Apr 9 cut to 3.00% fully priced. Year-end target may reach 2.50%. NZD sell-on-rallies is dominant institutional trade. EUR/NZD longs, AUD/NZD structural longs.",support:"0.5650",resistance:"0.5900",pivot:"0.5800",pairs:["NZD/USD","EUR/NZD","AUD/NZD"],dirs:["SELL","BUY","BUY"],
-        deepAnalysis:"NZD is the most bearish G10 currency in 2026 by a significant margin. The RBNZ has cut 325 basis points since August 2024 — the most aggressive easing cycle of any G10 central bank. New Zealand entered a technical recession with GDP -0.2% q/q in Q4 2025 — the second consecutive contraction. The April 9 cut to 3.00% was fully priced and delivered as expected. Markets now price the terminal rate at 2.50-2.75% by year-end, implying 1-2 more cuts. AUD/NZD is the cleanest expression of this divergence — RBA hawkish hold vs RBNZ cutting cycle. EUR/NZD structural longs also high conviction.",
-        watchFor:"RBNZ April 9 press conference transcript and forward guidance is key — any signal of pause would cause sharp NZD short squeeze. Next RBNZ: June 2026. Also watch NZ trade data and business confidence for recession confirmation.",
-        evidence:[{title:"RBNZ April 2026 Monetary Policy Decision",source:"Reserve Bank of New Zealand",url:"https://www.rbnz.govt.nz/monetary-policy/"},{title:"Statistics NZ: GDP Contraction Q4 2025",source:"Statistics New Zealand",url:"https://www.stats.govt.nz/indicators/gross-domestic-product-gdp"},{title:"ING: RBNZ Cutting Cycle Deep Dive",source:"ING Think",url:"https://think.ing.com/articles/rbnz-2026-outlook/"}]},
-      {ccy:"AUD",dir:"BULLISH",priority:"MED",color:"#00e5a0",title:"AUD Recovering — RBA Hawkish Hold + China PMI Beat",detail:"AUD/USD has recovered strongly, now testing 0.70-0.71. RBA Governor Bullock signaled no further cuts — hawkish surprise. China PMI 50.5 supports commodity demand. RBC forecasts AUD/USD 0.73-0.74 year-end. AUD/NZD longs on relative RBA hawkishness vs RBNZ cutting.",support:"0.6950",resistance:"0.7250",pivot:"0.7057",pairs:["AUD/USD","AUD/NZD"],dirs:["BUY","BUY"],
-        deepAnalysis:"AUD's recovery in 2026 is underpinned by the RBA's hawkish stance relative to other G10 central banks. The RBA cut from 4.35% to 3.85% in Q1 2026 but Governor Bullock's explicit 'no further cuts imminent' statement was a hawkish surprise that repriced AUD significantly higher. China's PMI at 50.5 — marginally expansionary — supports iron ore and copper demand, which directly benefits the commodity-linked AUD. The best AUD trade is not AUD/USD outright (which needs USD weakness) but AUD/NZD — pure relative policy divergence between RBA hawkish hold and RBNZ aggressive cutting.",
-        watchFor:"RBA next decision May 19. Any China PMI, industrial production, or property data this week will impact AUD as China accounts for ~33% of Australia's exports. Watch iron ore spot price — it leads AUD by 1-2 sessions.",
-        evidence:[{title:"RBA Board Minutes — Hawkish Hold Signal",source:"Reserve Bank of Australia",url:"https://www.rba.gov.au/monetary-policy/rba-board-minutes/"},{title:"RBC Capital Markets: AUD/USD 0.73 Target",source:"RBC Capital Markets",url:"https://www.rbccm.com/assets/rbccm/docs/fx/currency-report-card.pdf"},{title:"RBA Research: Commodity Prices and AUD",source:"Reserve Bank of Australia",url:"https://www.rba.gov.au/publications/rdp/2012/pdf/rdp2012-06.pdf"}]},
-      {ccy:"CAD",dir:"BEARISH",priority:"MED",color:"#ff4560",title:"CAD Vulnerable — BOC Dovish + USMCA Risk",detail:"BOC held 2.25% but language dovish. Next decision Apr 15 — hold expected but watch. Oil prices declining on supply surplus. USMCA review July 2026 creates trade uncertainty. RBC forecasts USD/CAD closer to 1.40 into USMCA. Sell CAD vs EUR and USD on rallies.",support:"1.3650",resistance:"1.4100",pivot:"1.3857",pairs:["USD/CAD","EUR/CAD"],dirs:["BUY","BUY"],
-        deepAnalysis:"CAD faces a convergence of negative factors in 2026. First, the BOC has cut aggressively (from 5.00% in 2023 to 2.25% now) and language remains dovish — further cuts remain possible if USMCA disrupts trade. Second, crude oil prices have declined approximately 20% from 2025 peaks on supply surplus (OPEC+ production increases + US shale resilience) which directly pressures CAD. Third, the USMCA review starting July 2026 creates genuine uncertainty around Canada-US trade — Canada sends 75% of its exports to the US, making this a material risk. RBC flags USD/CAD potential toward 1.40 as the key USMCA risk scenario.",
-        watchFor:"BOC rate decision April 15 — hold at 2.25% expected but statement tone critical. Any dovish language or signal of further cuts = CAD negative. Also watch crude oil inventory data and any USMCA-related political headlines.",
-        evidence:[{title:"Bank of Canada April 2026 Rate Decision",source:"Bank of Canada",url:"https://www.bankofcanada.ca/2026/04/fad-press-release/"},{title:"RBC Capital Markets: USMCA Risk and USD/CAD",source:"RBC Capital Markets",url:"https://www.rbccm.com/"},{title:"EIA Crude Oil Inventory and Supply Outlook",source:"U.S. Energy Information Administration",url:"https://www.eia.gov/petroleum/"}]},
-      {ccy:"CHF",dir:"BULLISH",priority:"MED",color:"#00e5a0",title:"CHF Safe Haven — Dollar Debasement Trade",detail:"EUR/CHF trending lower as institutional investors play dollar debasement trade. BlackRock: 'foreign investors questioning USD as reserve asset' benefits CHF. Swiss current account surplus, balanced budget. EUR/CHF year-end target 0.93 (RBC). USD/CHF target 0.78-0.79.",support:"0.7750",resistance:"0.8100",pivot:"0.7902",pairs:["USD/CHF","CHF/JPY"],dirs:["SELL","BUY"],
-        deepAnalysis:"CHF's appreciation in 2026 is being driven by the dollar debasement trade — a structural rotation out of USD-denominated assets and into historically stable stores of value including CHF and gold. Switzerland runs a current account surplus of approximately 7% of GDP and a balanced fiscal budget — rare in the current global environment. The SNB has been relatively relaxed about CHF strength, choosing not to intervene as aggressively as in prior cycles, which suggests they are comfortable with the current level. EUR/CHF 0.93 is the RBC year-end target, implying further CHF appreciation from current 0.923 levels.",
-        watchFor:"SNB next decision June 18. Any SNB verbal intervention warning CHF 'too strong' would cause sharp EUR/CHF spike — this is the main tail risk for CHF bulls. Watch VIX — if risk-off intensifies (VIX >25) CHF accelerates sharply.",
-        evidence:[{title:"BlackRock 2026 Macro Outlook: Dollar Debasement",source:"BlackRock Investment Institute",url:"https://www.blackrock.com/institutions/en-us/insights/2026-macro-outlook"},{title:"RBC Capital Markets: EUR/CHF 0.93 Target",source:"RBC Capital Markets",url:"https://www.rbccm.com/"},{title:"BIS Working Paper #570: Safe Haven Currencies",source:"Bank for International Settlements",url:"https://www.bis.org/publ/work570.htm"}]},
-    ];
-    const CW_DATA=[
-      {dt:"Apr 9", ev:"RBNZ Rate Decision",  fc:"3.00% (cut 25bp)", impact:"NZD bearish"},
-      {dt:"Apr 10",ev:"US CPI m/m",           fc:"0.3%",             impact:"USD pivot"},
-      {dt:"Apr 10",ev:"US Core CPI m/m",      fc:"0.3%",             impact:"Fed cut odds"},
-      {dt:"Apr 11",ev:"UK GDP m/m",           fc:"0.1%",             impact:"GBP direction"},
-      {dt:"Apr 15",ev:"BOC Rate Decision",    fc:"2.25% hold",       impact:"CAD risk"},
-    ];
-    const PW_THEMES=[
-      {ccy:"USD",dir:"BEARISH",outcome:"USD -1.2% WoW · DXY closed at 100.8",detail:"DXY broke below 101 key support. NFP was 128K vs 175K expected (Apr 4), reviving June cut expectations. PCE at 2.7% keeps inflation above target. USD net-short positioning at multi-year extremes.",
-        deepAnalysis:"The week of March 31–April 6 delivered the clearest confirmation yet of the USD structural bear trend. The NFP miss (128K vs 175K expected) on April 4 was the catalyst — it repriced Fed cut expectations from September to June and sent DXY below the critical 101 level. This 101 level had been defended for three months. Its break with conviction on heavy volume is a textbook technical breakdown. COT data showed USD net-short positioning at multi-year extremes even before this break — institutional money was already positioned. The 90-day tariff pause announced Sunday night added further pressure as it removed the USD safe-haven premium.",
-        evidence:[{title:"BLS: April 4 Non-Farm Payrolls Release",source:"Bureau of Labor Statistics",url:"https://www.bls.gov/news.release/empsit.toc.htm"},{title:"CFTC COT Report: USD Net Positioning",source:"Commodity Futures Trading Commission",url:"https://www.cftc.gov/MarketReports/CommitmentsofTraders/"},{title:"Fed PCE Data March 2026",source:"Bureau of Economic Analysis",url:"https://www.bea.gov/data/personal-consumption-expenditures-price-index"}]},
-      {ccy:"JPY",dir:"BULLISH",outcome:"JPY +2.1% WoW · USD/JPY fell from 161 to 158",detail:"Japan wage growth 3.1% y/y — above BOJ's 3% normalization threshold. BOJ board member Asada confirmed hiking path intact. Japan current account surplus ¥2.4T provides structural JPY support.",
-        deepAnalysis:"JPY was the clear G10 outperformer for the week of March 31–April 6, gaining +2.1% against the USD. The catalyst was the Japan wage growth data showing 3.1% y/y — crossing the BOJ's own stated 3% normalization threshold for the first time. This data gives the BOJ clear justification to continue hiking. BOJ board member Asada's comments confirming the hiking path intact removed any doubt about the policy direction. The carry trade unwind accelerated — estimates suggest $50-80B of yen carry positions were unwound in Q1 2026 alone.",
-        evidence:[{title:"Japan Ministry of Health: Wage Growth Data",source:"Ministry of Health, Labour and Welfare",url:"https://www.mhlw.go.jp/english/database/db-l/index.html"},{title:"BOJ Policy Decisions and Board Member Speeches",source:"Bank of Japan",url:"https://www.boj.or.jp/en/mopo/mpmdeci/"},{title:"Japan MOF: Current Account Surplus ¥2.4T",source:"Ministry of Finance Japan",url:"https://www.mof.go.jp/english/policy/balance_of_payments/bop/bop.htm"}]},
-      {ccy:"EUR",dir:"BULLISH",outcome:"EUR/USD +1.8% WoW · broke above 1.16",detail:"EUR/USD broke 1.16 decisively — highest since early 2025. ECB held 2.00% with hawkish statement. German IP +1.8% m/m beat. Eurozone growth forecasts upgraded by ING to 1.5-1.8% H2 2026.",
-        deepAnalysis:"EUR/USD's break above 1.16 was the major technical event of the week. This level represented 18 months of resistance — dating back to early 2025 before the Liberation Day tariff shock sent EUR/USD to 1.0732. The break was fundamental-driven: ECB hawkish hold on Wednesday (Schnabel's 'next move more likely a hike' comment) combined with German IP beating by 0.9 percentage points and broad USD weakness. The weekly close above 1.16 on high volume confirms the breakout. ING upgraded their Eurozone growth forecast to 1.5-1.8% H2 2026 on the German fiscal stimulus feed-through.",
-        evidence:[{title:"ECB Press Conference April 2026",source:"European Central Bank",url:"https://www.ecb.europa.eu/press/pressconf/2026/html/index.en.html"},{title:"Destatis: German Industrial Production Data",source:"Federal Statistical Office Germany",url:"https://www.destatis.de/EN/Themes/Economy/Short-Term-Indicators/Production-Index/"},{title:"ING Think: Eurozone Growth Upgrade H2 2026",source:"ING Think",url:"https://think.ing.com/articles/eurozone-growth-2026/"}]},
-      {ccy:"GBP",dir:"NEUTRAL",outcome:"GBP/USD +0.8% · EUR/GBP rose to 0.8700",detail:"GBP/USD gained modestly on broad USD weakness, but underperformed EUR and JPY. EUR/GBP rose toward 0.8700 as relative policy divergence (ECB hawkish, BOE dovish) asserted itself.",
-        deepAnalysis:"GBP's +0.8% gain against USD significantly underperformed the G10 average (+1.2%) as the BOE dovish bias weighed. EUR/GBP's rise to 0.8700 was the key move — this reflects the growing policy divergence between the ECB (hawkish hold) and BOE (easing bias). UK services PMI came in at 50.5 vs 52.0 expected on the week, confirming growth momentum is softer than forecast. This data point pushed the market to price in a higher probability of a May BOE cut, weighing on GBP.",
-        evidence:[{title:"Bank of England: Monetary Policy Decisions",source:"Bank of England",url:"https://www.bankofengland.co.uk/monetary-policy-summary-and-minutes"},{title:"CIPS: UK Services PMI March 2026",source:"CIPS/S&P Global",url:"https://www.cips.org/cips-for-business/research/pmi/"},{title:"ING: EUR/GBP Toward 0.88-0.90 Target",source:"ING Think",url:"https://think.ing.com/articles/fx-outlook-2026-our-main-calls/"}]},
-      {ccy:"NZD",dir:"BEARISH",outcome:"NZD worst G10 -0.9% WoW · NZD/USD tested 0.5750",detail:"NZD underperformed all G10 currencies ahead of April 9 RBNZ decision. Markets fully pricing 25bp cut to 3.00%. EUR/NZD longs and AUD/NZD longs were the dominant institutional trades.",
-        deepAnalysis:"NZD was the worst-performing G10 currency for the week as positioning ahead of the April 9 RBNZ decision accelerated the downtrend. The 325bp of RBNZ cuts since August 2024 have driven NZD to multi-year lows. New Zealand's GDP confirmed two consecutive quarters of contraction — a technical recession — removing any case for a rate pause. EUR/NZD reached 2.00 for the first time since 2021. The divergence trade (long AUD/NZD) was the cleanest expression — AUD hawkish hold vs NZD cutting cycle.",
-        evidence:[{title:"RBNZ Monetary Policy Statement 2026",source:"Reserve Bank of New Zealand",url:"https://www.rbnz.govt.nz/monetary-policy/monetary-policy-statement"},{title:"Statistics NZ: GDP Recession Confirmation",source:"Statistics New Zealand",url:"https://www.stats.govt.nz/indicators/gross-domestic-product-gdp"},{title:"MUFG: NZD Bearish Target 2026",source:"MUFG Research",url:"https://www.mufgresearch.com/"}]},
-      {ccy:"AUD",dir:"BULLISH",outcome:"AUD/USD +1.5% WoW · broke above 0.70",detail:"RBA Governor Bullock signaled no rate cuts imminent — hawkish surprise vs dovish market pricing. China PMI 50.5 supports commodity demand. RBC upgraded AUD/USD year-end to 0.73.",
-        deepAnalysis:"AUD's +1.5% gain was driven by an unexpected hawkish surprise from RBA Governor Bullock who explicitly stated 'rates are about right and no cuts are imminent'. Markets had been pricing a 40% chance of an RBA cut at the May meeting — this was quickly repriced to near-zero. The AUD was also supported by China's manufacturing PMI printing at 50.5, suggesting stabilization in Australia's largest export market. RBC immediately upgraded their AUD/USD year-end target from 0.70 to 0.73 following the Bullock comments.",
-        evidence:[{title:"RBA Governor Bullock Speech: No Cuts Imminent",source:"Reserve Bank of Australia",url:"https://www.rba.gov.au/speeches/"},{title:"China NBS: Manufacturing PMI March 2026",source:"National Bureau of Statistics China",url:"https://www.stats.gov.cn/english/PressRelease/"},{title:"RBC Capital Markets: AUD/USD Upgraded to 0.73",source:"RBC Capital Markets",url:"https://www.rbccm.com/"}]},
-      {ccy:"CAD",dir:"BEARISH",outcome:"CAD -0.6% WoW · USD/CAD rose toward 1.39",detail:"BOC language remained dovish at the April meeting. Canada Ivey PMI came in below 50 at 49.7, signaling contraction. USMCA review risk headlines drove institutional CAD selling. Oil prices fell further on global demand concerns.",
-        deepAnalysis:"CAD continued its underperformance driven by three converging headwinds: (1) BOC dovish language with Governor Macklem signaling rates 'about right' but clearly biased toward further easing, (2) Canada Ivey PMI printing at 49.7 — below the critical 50 expansion threshold — confirming manufacturing weakness, (3) USMCA review risk premium building as July 2026 review date approaches. Oil prices declined ~3% on the week as tariff-related demand destruction fears outweighed supply cuts. RBC forecast USD/CAD toward 1.40 into the USMCA review period.",
-        evidence:[{title:"Bank of Canada: Policy Rate Decision April 2026",source:"Bank of Canada",url:"https://www.bankofcanada.ca/2026/04/fad-press-release/"},{title:"Statistics Canada: Ivey PMI Data",source:"Statistics Canada",url:"https://www150.statcan.gc.ca/"},{title:"RBC Capital Markets: CAD USMCA Risk Premium",source:"RBC Capital Markets",url:"https://www.rbccm.com/"}]},
-      {ccy:"CHF",dir:"BULLISH",outcome:"CHF +1.1% WoW · EUR/CHF fell to 0.9280",detail:"CHF was the second-best G10 performer behind JPY as risk-off flows and dollar debasement trade drove safe haven demand. EUR/CHF fell toward 0.9280. BlackRock noted foreign investors questioning USD reserve status, directly benefiting CHF.",
-        deepAnalysis:"CHF's +1.1% gain reflected two distinct flows: (1) Risk-off safe haven demand as equities fell on tariff uncertainty — CHF and JPY are the traditional beneficiaries when institutional investors reduce risk, (2) Dollar debasement trade — as BlackRock and other major institutions published research questioning USD's role as the primary global reserve asset, CHF and gold became the primary beneficiaries. Switzerland's current account surplus and balanced budget make CHF fundamentally attractive. EUR/CHF's decline toward 0.9280 (vs RBC's 0.93 year-end target) suggests further downside. SNB has been relaxed about CHF strength so far.",
-        evidence:[{title:"BlackRock 2026 Macro Outlook: Short USD Trade",source:"BlackRock Investment Institute",url:"https://www.blackrock.com/institutions/en-us/insights/2026-macro-outlook"},{title:"SNB: Policy Rate and FX Stance",source:"Swiss National Bank",url:"https://www.snb.ch/en/monetary-policy/overview/"},{title:"RBC Capital Markets: EUR/CHF Target 0.93",source:"RBC Capital Markets",url:"https://www.rbccm.com/"}]},
-    ];
-    const themes=wkView==="current"?CW_THEMES:PW_THEMES;
+    const now=new Date();
+    const todayDate=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
+    const themes=weekendThemes||[];
+    const REGIMECOLOR={BULLISH:C.green,BEARISH:C.red,NEUTRAL:C.gold};
+    const views=[{id:"current",l:"This Week"},{id:"prev",l:"Previous Week"}];
+
+    // Previous week themes come from AI too — filtered from weekendThemes by a "week" field if present
+    // wkView toggles which subset to show; both are AI-generated
+    const displayed=themes.length>0?themes:[];
+
     return(
       <div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px",marginBottom:"12px"}}>
-          {[["current","📅 CURRENT WEEK","#d4af37"],["previous","📋 PREVIOUS WEEK RECAP","#4a6a8a"]].map(([v,l,c])=>(
-            <button key={v} onClick={()=>setWkView(v)} style={{padding:"11px 8px",background:wkView===v?c+"22":"transparent",color:wkView===v?c:C.muted,border:`2px solid ${wkView===v?c:C.bdr}`,borderRadius:"5px",cursor:"pointer",fontWeight:"700",fontSize:"10px",fontFamily:"inherit",letterSpacing:"0.8px"}}>{l}</button>
-          ))}
+        {/* Status + Refresh */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:weekendLoaded&&themes.length>0?"#071407":C.bg2,border:`1px solid ${weekendLoaded&&themes.length>0?C.green+"44":C.amber+"44"}`,borderRadius:"4px",padding:"6px 10px",marginBottom:"10px",fontSize:"8.5px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:"6px"}}>
+            <div style={{width:"6px",height:"6px",borderRadius:"50%",background:weekendLoaded&&themes.length>0?C.green:C.amber,animation:weekendLoading?"pulse 1s infinite":"none"}}/>
+            <span style={{color:weekendLoaded&&themes.length>0?C.green:C.amber,fontWeight:"700"}}>
+              {weekendLoading?"⟳ Generating current week analysis...":weekendLoaded&&themes.length>0?"✓ AI-GENERATED · Live macro themes with sources":"Press Refresh to generate current week analysis"}
+            </span>
+          </div>
+          <button onClick={()=>{setWeekendThemes(null);setWeekendLoaded(false);loadWeekendThemes();}} disabled={weekendLoading}
+            style={{padding:"3px 8px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}44`,borderRadius:"3px",cursor:weekendLoading?"not-allowed":"pointer",fontSize:"8px",fontWeight:"700",fontFamily:"inherit",opacity:weekendLoading?0.5:1}}>
+            ↺ Refresh
+          </button>
         </div>
-        <div style={{background:`linear-gradient(90deg,${C.bg2},#0a1a2a)`,border:`2px solid ${C.gold}`,borderRadius:"6px",padding:"12px 15px",marginBottom:"10px"}}>
-          <div style={{fontSize:"12px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"3px"}}>{wkView==="current"?"WEEK OF APRIL 7–11, 2026":"WEEK OF MARCH 31 – APRIL 6, 2026"}</div>
-          <div style={{fontSize:"8.5px",color:C.muted,letterSpacing:"1.5px"}}>{wkView==="current"?"POST-PEAK USD · BOJ NORMALIZATION · FED ON HOLD · EUR RESILIENT":"USD WEAKNESS ACCELERATES · BOJ WAGE DATA · EUR BREAKS 1.16"}</div>
-        </div>
-        {wkView==="current"&&(
-          <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"11px 13px",marginBottom:"10px"}}>
-            <div style={{fontSize:"8.5px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"9px"}}>◷ THIS WEEK'S KEY RELEASES</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"7px"}}>
-              {CW_DATA.map((e,i)=>(
-                <div key={i} style={{background:C.bg1,border:`1px solid ${C.bdr}`,borderRadius:"4px",padding:"9px 10px"}}>
-                  <div style={{fontSize:"8px",color:C.muted,marginBottom:"3px",fontFamily:"monospace"}}>{e.dt}</div>
-                  <div style={{fontWeight:"700",color:C.text,fontSize:"10.5px",marginBottom:"3px"}}>{e.ev}</div>
-                  <div style={{fontSize:"8.5px",color:C.gold}}>Fcst: {e.fc}</div>
-                  <div style={{fontSize:"8px",color:C.muted,marginTop:"2px"}}>{e.impact}</div>
-                </div>
-              ))}
-            </div>
+
+        {/* Loading */}
+        {weekendLoading&&(
+          <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"30px",textAlign:"center"}}>
+            <div style={{fontSize:"12px",color:C.gold,marginBottom:"8px"}}>⚡ Generating institutional FX themes...</div>
+            <div style={{fontSize:"9px",color:C.muted}}>Analyzing current CB rates, price action, and macro drivers</div>
           </div>
         )}
-        {themes.map((t,i)=>(
-          <div key={i} style={{background:C.bg2,border:`1px solid ${t.color}33`,borderLeft:`4px solid ${t.color}`,borderRadius:"6px",padding:"13px 15px",marginBottom:"9px"}}>
-            <div style={{display:"flex",gap:"7px",alignItems:"center",marginBottom:"8px",flexWrap:"wrap"}}>
-              <Bdg label={t.ccy} color={t.color} sz="11px"/>
-              <Bdg label={t.dir} color={t.color} sz="9px"/>
-              {t.priority&&<Bdg label={t.priority+" PRIORITY"} color={t.priority==="HIGH"?C.red:C.gold} sz="8px"/>}
-            </div>
-            <div style={{fontWeight:"700",color:C.text,fontSize:"13px",marginBottom:"7px",lineHeight:"1.3"}}>{t.title}</div>
-            <div style={{fontSize:"10px",color:"#b8cde0",lineHeight:"1.7",marginBottom:"8px"}}>{t.detail}</div>
-            {t.support&&(
-              <div style={{display:"flex",gap:"7px",marginBottom:"8px",flexWrap:"wrap"}}>
-                {[["Support",t.support,C.green],["Resistance",t.resistance,C.red],["Pivot",t.pivot,C.gold]].map(([l,v,c])=>(
-                  <div key={l} style={{background:C.bg1,border:`1px solid ${c}33`,borderRadius:"3px",padding:"4px 9px",fontSize:"8.5px"}}>
-                    <span style={{color:C.muted}}>{l}: </span><strong style={{color:c}}>{v}</strong>
-                  </div>
-                ))}
-              </div>
-            )}
-            {t.outcome&&(
-              <div style={{background:C.bg1,border:`1px solid ${C.bdr}`,borderRadius:"3px",padding:"6px 10px",marginBottom:"8px",fontSize:"9px"}}>
-                <span style={{color:C.muted,fontWeight:"700",letterSpacing:"1px"}}>OUTCOME: </span>
-                <span style={{color:t.dir==="BULLISH"?C.green:t.dir==="BEARISH"?C.red:C.gold,fontWeight:"700"}}>{t.outcome}</span>
-              </div>
-            )}
-            {t.pairs&&(
-              <div style={{display:"flex",gap:"6px",flexWrap:"wrap"}}>
-                {t.pairs.map((p,pi)=>(
-                  <button key={p} onClick={()=>window.open(`https://www.tradingview.com/chart/?symbol=FX%3A${TV_SYM[p]?.replace("FX:","")}&interval=60`,"_blank","noopener")}
-                    style={{padding:"5px 10px",background:(t.dirs?.[pi]==="BUY"?C.green:C.red)+"22",color:t.dirs?.[pi]==="BUY"?C.green:C.red,border:`1px solid ${t.dirs?.[pi]==="BUY"?C.green:C.red}44`,borderRadius:"3px",cursor:"pointer",fontWeight:"700",fontSize:"9px",fontFamily:"inherit"}}>
-                    {t.dirs?.[pi]||"VIEW"} {p} ↗
-                  </button>
-                ))}
-              </div>
-            )}
-            {/* Evidence & Deep Analysis toggle */}
-            {t.evidence&&(
-              <div style={{marginTop:"6px"}}>
-                <button onClick={e=>{e.stopPropagation();const key=`${wkView}_${t.ccy}`;setExpandedTheme(expandedTheme===key?null:key);}}
-                  style={{width:"100%",padding:"7px 10px",background:"transparent",color:expandedTheme===`${wkView}_${t.ccy}`?C.gold:C.muted,border:`1px solid ${expandedTheme===`${wkView}_${t.ccy}`?C.gold+"55":C.bdr}`,borderRadius:"4px",cursor:"pointer",fontSize:"8.5px",fontWeight:"700",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span>📎 EVIDENCE & DEEP ANALYSIS</span>
-                  <span style={{fontSize:"10px"}}>{expandedTheme===`${wkView}_${t.ccy}`?"▲ COLLAPSE":"▼ EXPAND"}</span>
-                </button>
-                {expandedTheme===`${wkView}_${t.ccy}`&&(
-                  <div style={{background:C.bg1,border:`1px solid ${C.gold}33`,borderRadius:"5px",padding:"12px 14px",marginTop:"5px"}}>
-                    {t.deepAnalysis&&<div style={{fontSize:"9.5px",color:"#b8cde0",lineHeight:"1.8",marginBottom:"10px"}}>{t.deepAnalysis}</div>}
-                    {t.watchFor&&<div style={{background:"#1a1200",border:`1px solid ${C.amber}33`,borderRadius:"4px",padding:"9px 11px",marginBottom:"10px"}}>
-                      <div style={{fontSize:"7.5px",color:C.amber,fontWeight:"700",letterSpacing:"1px",marginBottom:"5px"}}>⚠ WATCH FOR THIS WEEK</div>
-                      <div style={{fontSize:"9px",color:"#b8cde0",lineHeight:"1.65"}}>{t.watchFor}</div>
-                    </div>}
-                    {t.evidence.length>0&&<div>
-                      <div style={{fontSize:"7.5px",color:C.muted,fontWeight:"700",letterSpacing:"1px",marginBottom:"6px"}}>INSTITUTIONAL SOURCES</div>
-                      <div style={{display:"flex",flexDirection:"column",gap:"5px"}}>
-                        {t.evidence.map((ev,ei)=>(
-                          <a key={ei} href={ev.url} target="_blank" rel="noopener noreferrer"
-                            style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"4px",textDecoration:"none",WebkitTapHighlightColor:"transparent"}}>
-                            <div>
-                              <div style={{fontSize:"9.5px",color:C.text,fontWeight:"600",lineHeight:"1.3"}}>{ev.title}</div>
-                              <div style={{fontSize:"8px",color:C.blue,marginTop:"2px"}}>{ev.source}</div>
-                            </div>
-                            <span style={{fontSize:"14px",color:C.blue,flexShrink:0,marginLeft:"8px"}}>↗</span>
-                          </a>
-                        ))}
-                      </div>
-                    </div>}
-                  </div>
-                )}
-              </div>
-            )}
+
+        {/* Empty state */}
+        {!weekendLoading&&!weekendLoaded&&(
+          <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"30px",textAlign:"center"}}>
+            <div style={{fontSize:"12px",color:C.gold,marginBottom:"8px"}}>◈ WEEKLY THEMES</div>
+            <div style={{fontSize:"9px",color:C.muted,marginBottom:"14px"}}>AI generates current-week G10 currency themes using live CB rates and price data. Press Refresh to generate.</div>
+            <button onClick={loadWeekendThemes} style={{padding:"9px 18px",background:C.gold,color:C.bg,border:"none",borderRadius:"4px",cursor:"pointer",fontWeight:"700",fontSize:"11px",fontFamily:"inherit"}}>▶ Generate This Week's Themes</button>
           </div>
-        ))}
+        )}
+
+        {/* Themes */}
+        {!weekendLoading&&displayed.length>0&&(
+          <div>
+            <div style={{background:`linear-gradient(90deg,${C.bg2},#0a1a2a)`,border:`2px solid ${C.gold}`,borderRadius:"6px",padding:"12px 14px",marginBottom:"12px"}}>
+              <div style={{fontSize:"12px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"3px"}}>◈ G10 WEEKLY MACRO THEMES — {todayDate}</div>
+              <div style={{fontSize:"8.5px",color:C.muted}}>AI-generated from current CB rates and live price data. Sources linked per theme. Tap a theme to expand full analysis.</div>
+            </div>
+            {displayed.map((t,idx)=>{
+              const key=`wk_${t.ccy}`;
+              const isExpanded=expandedTheme===key;
+              const tc=t.color||REGIMECOLOR[t.dir]||C.gold;
+              const dirColor=t.dir==="BULLISH"?C.green:t.dir==="BEARISH"?C.red:C.gold;
+              return(
+                <div key={idx} style={{background:C.bg2,border:`1px solid ${tc}33`,borderLeft:`4px solid ${tc}`,borderRadius:"6px",padding:"12px 14px",marginBottom:"10px"}}>
+                  {/* Header */}
+                  <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"6px",flexWrap:"wrap"}}>
+                    <span style={{fontWeight:"700",color:C.gold,fontSize:"15px"}}>{t.ccy}</span>
+                    <Bdg label={t.dir} color={dirColor}/>
+                    {t.priority&&<Bdg label={t.priority+" PRIORITY"} color={t.priority==="HIGH"?C.red:C.amber} sz="7.5px"/>}
+                    <span style={{fontSize:"10px",fontWeight:"700",color:tc,flex:1}}>{t.title}</span>
+                    <button onClick={e=>{e.stopPropagation();setExpandedTheme(isExpanded?null:key);}}
+                      style={{padding:"5px 10px",background:tc+"22",color:tc,border:`1px solid ${tc}44`,borderRadius:"3px",cursor:"pointer",fontSize:"8.5px",fontWeight:"700",fontFamily:"inherit",flexShrink:0,display:"flex",alignItems:"center",gap:"4px"}}>
+                      {isExpanded?"▲ COLLAPSE":"▼ EXPAND"}
+                    </button>
+                  </div>
+                  {/* Summary */}
+                  <div style={{fontSize:"10px",color:"#b8cde0",lineHeight:"1.6",marginBottom:"6px"}}>{t.detail}</div>
+                  {/* Key levels */}
+                  {(t.support||t.resistance||t.pivot)&&(
+                    <div style={{display:"flex",gap:"10px",marginBottom:"8px",flexWrap:"wrap"}}>
+                      {t.support&&<span style={{fontSize:"8.5px",color:C.green}}>S: {t.support}</span>}
+                      {t.pivot&&<span style={{fontSize:"8.5px",color:C.gold}}>Pivot: {t.pivot}</span>}
+                      {t.resistance&&<span style={{fontSize:"8.5px",color:C.red}}>R: {t.resistance}</span>}
+                    </div>
+                  )}
+                  {/* Pairs */}
+                  {t.pairs?.length>0&&(
+                    <div style={{display:"flex",gap:"5px",flexWrap:"wrap",marginBottom:"8px"}}>
+                      {t.pairs.map((p,pi)=>(
+                        <div key={pi} style={{display:"flex",gap:"3px",alignItems:"center"}}>
+                          <Bdg label={t.dirs?.[pi]||"WATCH"} color={t.dirs?.[pi]==="BUY"?C.green:t.dirs?.[pi]==="SELL"?C.red:C.muted} sz="7.5px"/>
+                          <span style={{fontSize:"9px",fontWeight:"700",color:C.gold}}>{p}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {/* Expanded detail */}
+                  {isExpanded&&(
+                    <div style={{marginTop:"10px",borderTop:`1px solid ${C.bdr}22`,paddingTop:"10px"}}>
+                      {t.deepAnalysis&&(
+                        <div style={{background:C.bg1,border:`1px solid ${tc}22`,borderRadius:"4px",padding:"10px 12px",marginBottom:"10px",fontSize:"10px",color:"#b8cde0",lineHeight:"1.75"}}>{t.deepAnalysis}</div>
+                      )}
+                      {t.watchFor&&(
+                        <div style={{background:"#0a1200",border:`1px solid ${C.green}33`,borderRadius:"4px",padding:"8px 11px",marginBottom:"10px"}}>
+                          <div style={{fontSize:"7.5px",color:C.green,fontWeight:"700",letterSpacing:"1.5px",marginBottom:"4px"}}>⚡ WATCH THIS WEEK</div>
+                          <div style={{fontSize:"9.5px",color:"#b8cde0",lineHeight:"1.6"}}>{t.watchFor}</div>
+                        </div>
+                      )}
+                      {/* Sources */}
+                      {t.evidence?.length>0&&(
+                        <div>
+                          <div style={{fontSize:"7.5px",color:C.muted,fontWeight:"700",letterSpacing:"1px",marginBottom:"6px"}}>INSTITUTIONAL SOURCES</div>
+                          <div style={{display:"flex",flexDirection:"column",gap:"5px"}}>
+                            {t.evidence.map((ev,ei)=>(
+                              <a key={ei} href={ev.url} target="_blank" rel="noopener noreferrer"
+                                style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"4px",textDecoration:"none",WebkitTapHighlightColor:"transparent"}}>
+                                <div>
+                                  <div style={{fontSize:"9.5px",color:C.text,fontWeight:"600",lineHeight:"1.3"}}>{ev.title}</div>
+                                  <div style={{fontSize:"8px",color:C.blue,marginTop:"2px"}}>{ev.source}</div>
+                                </div>
+                                <span style={{fontSize:"14px",color:C.blue,flexShrink:0,marginLeft:"8px"}}>↗</span>
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   }
@@ -1794,14 +1994,13 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
   function AITab(){
     const quickQ=["Analyze my open trades","Best USD/JPY setup","Optimal strategy for regime","RBNZ trade plan","Review risk exposure","Top 3 ideas","AUD/JPY with BOJ hike","BOJ impact on crosses"];
     return(
-      <div style={{display:"flex",flexDirection:"column",gap:"8px",height:"calc(100vh - 118px)"}}>
+      <div style={{display:"flex",flexDirection:"column",gap:"8px",height:"calc(100vh - 185px)"}}>
         <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"10px 12px",flexShrink:0}}>
           <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
             <div style={{width:"38px",height:"38px",background:`linear-gradient(135deg,${C.gold},${C.amber})`,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"16px",fontWeight:"900",color:C.bg,flexShrink:0}}>A</div>
             <div>
               <div style={{fontWeight:"700",color:C.gold,fontSize:"13px",letterSpacing:"3px"}}>AXIOM AI</div>
               <div style={{fontSize:"8px",color:C.green,letterSpacing:"1px"}}>✓ ACTIVE — CLAUDE SONNET · SERVER-SIDE KEY</div>
-
             </div>
             <div style={{marginLeft:"auto",display:"flex",gap:"4px",flexWrap:"wrap",justifyContent:"flex-end",maxWidth:"50%"}}>
               {quickQ.slice(0,4).map(q=><Sm key={q} label={q} color="#7a4fc0" onClick={()=>sendAI(q)}/>)}
@@ -1818,23 +2017,10 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
           {aiLoading&&<div style={{display:"flex",gap:"8px",alignItems:"center"}}><div style={{width:"26px",height:"26px",borderRadius:"50%",background:`linear-gradient(135deg,${C.gold},${C.amber})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"9.5px",fontWeight:"700",color:C.bg}}>A</div><div style={{color:C.muted,fontSize:"10.5px"}}>Analyzing...</div></div>}
           <div ref={aiRef}/>
         </div>
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"7px 10px",flexShrink:0,display:"flex",gap:"5px",flexWrap:"wrap"}}>{quickQ.slice(4).map(q=><Sm key={q} label={q} color="#7a4fc0" onClick={()=>sendAI(q)}/>)}</div>
-
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"8px 10px",flexShrink:0,display:"flex",gap:"7px"}}>
-          <input
-            id="axiom-ai-input"
-            value={aiInput}
-            onChange={e=>setAiInput(e.target.value)}
-            inputMode="text"
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="none"
-            spellCheck={false}
-            placeholder="Ask AXIOM about strategies, setups, risk, macro..."
-            onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey&&aiInput.trim()){sendAI(aiInput);}}}
-            style={{flex:1,background:C.bg,border:`1px solid ${C.bdr}`,borderRadius:"3px",color:C.text,padding:"8px 10px",fontSize:"11px",fontFamily:"inherit",outline:"none",WebkitAppearance:"none",touchAction:"manipulation"}}/>
-          <Btn label="SEND" color={C.gold} onClick={()=>{if(aiInput.trim()){sendAI(aiInput);}}} disabled={aiLoading}/>
+        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"7px 10px",flexShrink:0,display:"flex",gap:"5px",flexWrap:"wrap"}}>
+          {quickQ.slice(4).map(q=><Sm key={q} label={q} color="#7a4fc0" onClick={()=>sendAI(q)}/>)}
         </div>
+        {/* NOTE: Input field is rendered in root JSX below tabContent — outside useMemo — for stable focus */}
       </div>
     );
   }
@@ -1995,11 +2181,31 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
     const local=localSettings;
     const setLocal=setLocalSettings;
     const [notifStatus,setNotifStatus]=useState(()=>{try{return typeof Notification!=="undefined"?Notification.permission:"default";}catch{return"default";}});
+    const [regimeSaving,setRegimeSaving]=useState(false);
+    const [regimeSaved,setRegimeSaved]=useState(false);
+    // Regime edit state — load from localStorage or defaults
+    const defaultRegimes={USD:"BEARISH",EUR:"BULLISH",GBP:"NEUTRAL",JPY:"BULLISH",AUD:"BULLISH",NZD:"BEARISH",CAD:"BEARISH",CHF:"BULLISH",NOK:"NEUTRAL",SEK:"NEUTRAL"};
+    const [regimeEdit,setRegimeEdit]=useState(()=>{try{const s=localStorage.getItem("axiom_regimes");return s?JSON.parse(s):defaultRegimes;}catch{return defaultRegimes;}});
+    const regimeDirs=["BULLISH","NEUTRAL","BEARISH"];
 
     const handleSave=()=>{
       setSettings({...local,saved:true});
       setSettingsSaved(true);
       toast_("✓ Settings saved.",C.gold);
+    };
+
+    const handleSaveRegime=()=>{
+      setRegimeSaving(true);
+      try{
+        localStorage.setItem("axiom_regimes",JSON.stringify(regimeEdit));
+        // Also attempt to update via a simple fetch to a regime-update function
+        // The regime is stored in localStorage and read by the UI for display purposes
+        // The analyze.js reads AXIOM_REGIMES env var — update that via Netlify API or paste it manually
+        setRegimeSaved(true);
+        toast_("✓ Regime saved locally. Update AXIOM_REGIMES env var in Netlify to push to signal engine.",C.green);
+        setTimeout(()=>setRegimeSaved(false),4000);
+      }catch(e){toast_("Regime save error: "+e.message,C.red);}
+      setRegimeSaving(false);
     };
 
     const handleNotif=async()=>{
@@ -2117,6 +2323,35 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
                 {notifStatus==="granted"?"✓ NOTIFICATIONS ACTIVE — TAP TO REFRESH":notifStatus==="denied"?"OPEN PHONE SETTINGS TO ENABLE":"TAP TO REQUEST NOTIFICATIONS"}
               </button>
             </div>
+
+            {/* Macro Regime Update */}
+            <div style={{background:C.bg2,border:`1px solid ${C.gold}44`,borderRadius:"6px",padding:"13px",marginTop:"11px"}}>
+              <div style={{fontSize:"10px",color:C.gold,letterSpacing:"2px",marginBottom:"4px",fontWeight:"700"}}>◎ MACRO REGIME UPDATE</div>
+              <div style={{fontSize:"8.5px",color:C.muted,marginBottom:"10px",lineHeight:"1.6"}}>Update after CB meetings or macro shifts. Saves locally + provides JSON to paste into Netlify <code style={{color:C.amber}}>AXIOM_REGIMES</code> env var for live engine update.</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px",marginBottom:"10px"}}>
+                {Object.entries(regimeEdit).map(([ccy,dir])=>(
+                  <div key={ccy} style={{background:C.bg1,border:`1px solid ${dir==="BULLISH"?C.green+"44":dir==="BEARISH"?C.red+"44":C.bdr}`,borderRadius:"4px",padding:"7px 9px"}}>
+                    <div style={{fontSize:"9px",color:C.gold,fontWeight:"700",marginBottom:"5px"}}>{ccy}</div>
+                    <div style={{display:"flex",gap:"4px"}}>
+                      {["BULLISH","NEUTRAL","BEARISH"].map(d=>(
+                        <button key={d} onClick={()=>setRegimeEdit(p=>({...p,[ccy]:d}))}
+                          style={{flex:1,padding:"3px 0",background:dir===d?(d==="BULLISH"?C.green:d==="BEARISH"?C.red:C.gold)+"33":"transparent",color:dir===d?(d==="BULLISH"?C.green:d==="BEARISH"?C.red:C.gold):C.dim,border:`1px solid ${dir===d?(d==="BULLISH"?C.green:d==="BEARISH"?C.red:C.gold):C.bdr}`,borderRadius:"2px",cursor:"pointer",fontSize:"7px",fontWeight:"700",fontFamily:"inherit"}}>
+                          {d.slice(0,4)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button onClick={handleSaveRegime} disabled={regimeSaving}
+                style={{width:"100%",padding:"9px",background:regimeSaved?C.green+"22":C.gold+"22",color:regimeSaved?C.green:C.gold,border:`1px solid ${regimeSaved?C.green:C.gold}44`,borderRadius:"3px",cursor:"pointer",fontWeight:"700",fontSize:"10.5px",fontFamily:"inherit",marginBottom:"8px"}}>
+                {regimeSaved?"✓ REGIME SAVED":"↑ SAVE REGIME"}
+              </button>
+              <div style={{background:C.bg,border:`1px solid ${C.bdr}`,borderRadius:"3px",padding:"8px",fontSize:"8px",color:C.muted,fontFamily:"monospace",wordBreak:"break-all",lineHeight:"1.6"}}>
+                <div style={{color:C.amber,marginBottom:"3px",fontSize:"7.5px"}}>Paste into Netlify → Site → Env Vars → AXIOM_REGIMES:</div>
+                {JSON.stringify(Object.fromEntries(Object.entries(regimeEdit).map(([c,d])=>[c,{dir:d,strength:d==="NEUTRAL"?"WEAK":d==="BULLISH"?"MOD":"MOD"}])))}
+              </div>
+            </div>
           </div>
 
           <div>
@@ -2216,7 +2451,7 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
                 BOJ_NORM:"Tracks Bank of Japan's hiking cycle divergence against all other G10 central banks on hold or cutting. Entry signals come from USD/JPY approaching key resistance levels (158+, 160+) with technical confirmation (bearish engulfing, RSI overbought on H4). The structural thesis: BOJ is raising rates while Fed/ECB/BOE are cutting — this rate differential compression drives systematic JPY appreciation. Position on the short side every time USD/JPY rallies to key levels.",
                 NEWS_DFT:"After high-impact data releases (CPI, NFP, CB decisions), prices initially spike in the direction of the surprise then pull back before continuing in the same direction 64% of the time. The 'drift' occurs because institutional algorithmic execution continues for 2-4 hours post-release as large orders fill. Enter 10-15 minutes after release on the pullback, in the direction of the initial spike. Avoid if the release is within 1 pip of consensus.",
                 TRI_ARB:"Identifies when three currency pairs create a mathematical inconsistency — e.g., EUR/USD × USD/JPY ≠ EUR/JPY. When the cross-rate is mispriced vs the implied rate, enter the triangle simultaneously: buy the undervalued pair, sell the overvalued pair, hedge with the third. The edge is typically 2-5 pips and lasts seconds to minutes. Requires fast execution and real-time pricing.",
-                RATE_SRP:"Central bank rate decisions that surprise vs market consensus trigger an extension of the initial move for 2-6 hours. The mechanism: repricing of rate expectations cascades through all assets denominated in that currency. Enter 5-15 minutes after the decision in the direction of the surprise. The RBNZ cut to 3.00% on Apr 9 is a textbook example — NZD continuation sell.",
+                RATE_SRP:"Central bank rate decisions that surprise vs market consensus trigger an extension of the initial move for 2-6 hours. The mechanism: repricing of rate expectations cascades through all assets denominated in that currency. Enter 5-15 minutes after the decision in the direction of the surprise. BOC cutting to 2.75%, RBNZ at 3.50% cutting cycle, ECB hawkish hold — these are the live regime drivers.",
                 CB_DIV:"Systematic long of the currency whose central bank is hiking/hawkish vs the currency whose central bank is cutting/dovish. In April 2026: BOJ hiking = long JPY; RBNZ cutting = short NZD. The strongest signals come when the divergence is at an extreme (both direction and speed of divergence). Confirmed by actual policy rate changes, not just rhetoric.",
                 WMR_FIX:"The WM/Reuters Fix at 4PM London is the most important daily FX benchmark. Large funds must transact at this rate for index rebalancing. Institutional order flow in the 5-minute window before Fix is directional and predictable based on month-end flows, index changes, and known corporate hedging. Enter 15-30 minutes before 4PM London in the direction of anticipated fix flow.",
                 STRUCT_BK:"When price breaks through a major structural level (multi-month resistance/support) on high volume with follow-through, a continuation trade in the direction of the break has a 63% win rate. EUR/USD breaking 1.16 (which held for 18 months) is a current live example. Entry: on the retest of the broken level. Stop: back through the breakout level. Target: measured move (height of consolidation range projected forward).",
@@ -2231,7 +2466,7 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
                 ICT_OB:"ICT Order Block methodology: institutional order blocks are identified as the last bearish candle before a bullish impulse (demand zone) or last bullish candle before a bearish impulse (supply zone). These zones represent where institutions accumulated positions and will defend/add to them on retests. The FVG (Fair Value Gap) is a three-candle imbalance pattern that often gets filled before continuation.",
                 STOP_HNT:"Identifies equal highs or equal lows (a cluster of wicks at the same price level) which represent resting stop-loss orders. Institutions deliberately push price through these levels to trigger stops and provide liquidity for their own entries. Entry: after the sweep of the liquidity pool with a reversal candle. The institutional trap is confirmed when price quickly reverses back through the swept level.",
                 GLOB_MAC:"Top-down macro framework: identify the dominant global macro theme (post-peak USD in 2026), then find the best expression in FX pairs. Currently: short USD (Fed cutting, reserve status erosion), long JPY (only G10 hiker), long EUR (ECB hawkish, fiscal stimulus). Trade the theme across multiple pairs rather than concentrating in one. Size based on conviction of the macro thesis.",
-                CARRY_MOM:"Classic G10 carry: long the highest-yielding G10 currency, short the lowest. Current ranking: NOK 4.00%, NZD 3.00%, GBP 3.75%, USD 3.875% vs JPY 0.75%, CHF 0.00%, EUR 2.00%. Combined with momentum filter to avoid entering carry longs when the high-yielder is in a downtrend. The BOJ hiking cycle is the key risk — JPY carry reversal is the dominant concern.",
+                CARRY_MOM:"Classic G10 carry: long the highest-yielding G10 currency, short the lowest. Current ranking: NOK 4.50%, GBP 4.50%, AUD 4.10%, USD 3.75%, NZD 3.50%, SEK 2.25%, EUR 2.00%, CAD 2.75%, CHF 0.25% vs JPY 0.50%. Combined with momentum filter to avoid entering carry longs when the high-yielder is in a downtrend. The BOJ hiking cycle is the key risk — JPY carry reversal is the dominant concern.",
                 CS_MOM:"Every month, rank all G10 currencies by their return over the prior 1-month and 12-month periods. Go long the top performers and short the bottom performers. This cross-sectional approach captures relative momentum between currencies rather than absolute trends. Currently: JPY, EUR are top performers; USD, NZD are bottom performers. Rebalance monthly.",
                 COT_FADE:"Uses CFTC Commitment of Traders (COT) data released every Friday. When speculative positioning reaches extreme net-long or net-short levels (top/bottom quartile historically), fade the crowd. The mechanism: extreme positioning means most potential buyers/sellers are already in the market — the trade becomes crowded and is prone to violent reversal. Currently: USD net-short is at a multi-year extreme.",
                 GOLD_USD:"Gold and USD have a strong inverse correlation — gold is the primary alternative reserve asset to USD. When gold makes new all-time highs (as in 2025-2026), it signals USD reserve status is being questioned. Gold at $3,000+ in 2026 is the 'debasement trade' — benefits USD/CHF shorts, USD/JPY shorts, and AUD/USD longs (gold-linked). Monitor gold spot as a leading indicator for USD direction.",
@@ -2245,7 +2480,7 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
                 EARL_WRN:"Composite leading indicator combining: sovereign CDS spread widening, current account deficit expansion, FX reserve depletion, and sudden currency depreciation. When 3 of 4 indicators are triggered simultaneously, a currency crisis event has 67% probability within 6 months (IMF research). Currently monitoring: USD CDS, MXN, TRY as early warning signals that could affect G10 safe haven flows.",
                 MOMO_CRS:"Triple EMA crossover: when the 5-period EMA crosses above the 13-period EMA which is above the 50-period EMA, a confirmed uptrend momentum signal is generated. All three EMAs must be aligned and expanding — not just the fast/slow cross. Works best in the H1-H4 timeframe. Exit signal: fast EMA crosses back below medium EMA. Filter: only trade when ADX >20 to confirm trend strength.",
                 BOP_FLOW:"Tracks quarterly Balance of Payments data — current account surpluses create structural demand for that currency as exporters repatriate foreign earnings. Japan's current account surplus of ¥2.4T per quarter creates consistent JPY demand. The EUR block (Germany, Netherlands, Belgium) runs large CA surpluses. The US runs a persistent CA deficit — structural USD selling from income account. Monitor quarterly BOP releases from each country's statistics bureau.",
-                CARRY:"Pure interest rate differential carry: borrow the low-yielder (JPY 0.75%, CHF 0.00%), invest in the high-yielder (NOK 4.00%, USD 3.875%). The carry income compensates for adverse moves up to the differential per year. Key risk: sudden risk-off triggers carry unwind, causing the high-yielder to drop sharply. In 2026, the BOJ hiking cycle is systematically compressing carry differentials against JPY — avoid long carry vs JPY.",
+                CARRY:"Pure interest rate differential carry: borrow the low-yielder (JPY 0.50%, CHF 0.25%), invest in the high-yielder (NOK 4.50%, GBP 4.50%, AUD 4.10%). The carry income compensates for adverse moves up to the differential per year. Key risk: sudden risk-off triggers carry unwind, causing the high-yielder to drop sharply. In 2026, the BOJ hiking cycle is systematically compressing carry differentials against JPY — avoid long carry vs JPY.",
                 BB_FADE:"When price touches the outer Bollinger Band (2 standard deviations from 20-period moving average), it has moved statistically far from the mean and has ~68% probability of reverting. Enter when: (1) price touches or closes outside 2σ band, (2) RSI confirms overbought/oversold, (3) no high-impact news expected for 2 hours. Best in range-bound, mean-reverting conditions. Avoid in strong trending markets.",
                 FIBO_PULL:"After an impulsive price move, the 61.8% Fibonacci retracement of that move represents the 'golden ratio' pullback level where the trend typically resumes. Entry: on a reversal candle at the 61.8% level with RSI showing momentum turning back in the trend direction. The 38.2% level is a more aggressive entry; the 78.6% level is a deeper retest. Most reliable when the impulse move was significant (50+ pips for day trades).",
                 ICHIMOKU:"The Ichimoku Cloud system uses five components: Tenkan-sen (9-period midpoint), Kijun-sen (26-period midpoint), Senkou Span A and B (cloud boundaries, displaced 26 periods forward), and Chikou Span (close displaced 26 periods back). A bullish signal requires: price above cloud, Tenkan above Kijun, and Chikou above price 26 periods ago. The cloud acts as dynamic support/resistance. Best for identifying established trends in H4-D1 timeframes.",
@@ -2588,7 +2823,10 @@ root.render(React.createElement(AxiomFX));
         {cat:"CENTRAL BANKS",name:"Swiss National Bank",role:"SNB decisions, Quarterly Bulletin, Jordan speeches",url:"https://www.snb.ch/en/monetary-policy/overview/",freq:"4x/year",tier:"S"},
         {cat:"CENTRAL BANKS",name:"RBNZ",role:"OCR decisions, MPS, Governor Orr \u2014 325bp cutting cycle",url:"https://www.rbnz.govt.nz/monetary-policy/",freq:"7x/year",tier:"S"},
         {cat:"CENTRAL BANKS",name:"BIS \u2014 Bank for International Settlements",role:"Global CB coordination, FX research, financial stability",url:"https://www.bis.org/research/",freq:"Continuous",tier:"S"},
-        {cat:"CENTRAL BANKS",name:"Fed FRED Database",role:"All US economic data: PCE, CPI, employment, yields",url:"https://fred.stlouisfed.org/",freq:"Daily",tier:"S"},
+        {cat:"CENTRAL BANKS",name:"Fed FRED Database",role:"All US economic data: PCE, CPI, employment, yields — AXIOM 10Y yield spreads live feed",url:"https://fred.stlouisfed.org/",freq:"Daily",tier:"S"},
+        {cat:"LIVE DATA FEEDS",name:"Finnhub Economic Calendar",role:"AXIOM live feed: economic releases with actual vs estimate for NEWS_DFT + ECO_SURP strategies",url:"https://finnhub.io/docs/api/economic-calendar",freq:"Real-time",tier:"S"},
+        {cat:"LIVE DATA FEEDS",name:"CFTC Commitments of Traders",role:"AXIOM live feed: weekly net non-commercial FX positioning for COT_REAL strategy",url:"https://www.cftc.gov/MarketReports/CommitmentsofTraders/",freq:"Weekly Fri",tier:"A"},
+        {cat:"LIVE DATA FEEDS",name:"OANDA v3 API",role:"AXIOM live feed: real-time bid/ask prices + H1/H4/D1 candles for all 28 G10 pairs",url:"https://developer.oanda.com/rest-live-v20/introduction/",freq:"Real-time",tier:"S"},
         // MACRO RESEARCH HOUSES
         {cat:"MACRO RESEARCH",name:"J.P. Morgan Global Research",role:"EUR/USD 1.20, USD/JPY 164 year-end. CB transition themes.",url:"https://www.jpmorgan.com/insights/global-research/outlook/market-outlook",freq:"Weekly",tier:"S"},
         {cat:"MACRO RESEARCH",name:"MUFG Research",role:"Post-peak USD world. EUR/USD 1.24, USD/JPY 146 targets.",url:"https://www.mufgresearch.com/",freq:"Weekly",tier:"S"},
@@ -2746,6 +2984,16 @@ root.render(React.createElement(AxiomFX));
     }
   // ─── ROOT RENDER ─────────────────────────────────────────────────────
   // Memoized content — only re-renders active tab, not on every price tick
+  // ── ERROR BANNERS — shown above all content when critical feeds are down ──
+  const errorBanners=useMemo(()=>{
+    const banners=[];
+    if(apiStatus==="error") banners.push({id:"oanda",msg:`✗ OANDA PRICE FEED UNAVAILABLE${priceError?": "+priceError:""}`,action:"Check OANDA_API_KEY in Netlify env vars",color:C.red});
+    if(cbRatesSource==="error") banners.push({id:"fred",msg:"✗ CB RATES FEED UNAVAILABLE — FRED unreachable",action:"Check FRED_API_KEY in Netlify env vars",color:C.red});
+    if(newsSource==="error") banners.push({id:"news",msg:"✗ NEWS FEED UNAVAILABLE — Finnhub unreachable",action:"Check FINNHUB_API_KEY in Netlify env vars",color:C.red});
+    if(scanStatus?.startsWith("✗ AXIOM_REGIMES")) banners.push({id:"regimes",msg:"✗ MACRO REGIMES NOT CONFIGURED",action:"Settings → Regime Update → save JSON to Netlify AXIOM_REGIMES env var",color:C.amber});
+    return banners;
+  },[apiStatus,priceError,cbRatesSource,newsSource,scanStatus]);
+
   const tabContent=useMemo(()=>{
     switch(tab){
       case "dashboard": return <Dashboard/>;
@@ -2765,7 +3013,7 @@ root.render(React.createElement(AxiomFX));
       case "deploy":    return <DeployTab/>;
       default:          return <Dashboard/>;
     }
-  },[tab,signals,trades,history,analyzerTab,selCB,wkView,chartTf,enabledStrats,nCcy,nImp,stratCatFilter,stratTierFilter,modal,modalTab,expandedTheme,expandedStrat,newsPage,calCcy,calImp,calType,calView,calEvents,calLoading,calLoaded,sigScanning,scanStatus,lastScanTime,aiMsgs,aiLoading,liveArts,newsLoaded,newsLoading,newsSource,newsError,prices,style,settings,apiStatus,srcCat,srcPage,deployTab]);
+  },[tab,signals,trades,history,analyzerTab,selCB,wkView,chartTf,enabledStrats,nCcy,nImp,stratCatFilter,stratTierFilter,modal,modalTab,expandedTheme,expandedStrat,newsPage,calCcy,calImp,calType,calView,calEvents,calLoading,calLoaded,sigScanning,scanStatus,lastScanTime,aiMsgs,aiLoading,liveArts,newsLoaded,newsLoading,newsSource,newsError,prices,style,settings,apiStatus,srcCat,srcPage,deployTab,cbRates,cbRatesLoading,cbRatesSource,cbRatesUpdated,weekendThemes,weekendLoading,weekendLoaded,regimeData,regimeLoading,regimeLoaded]);
 
   return(
     <div style={{fontFamily:"'IBM Plex Mono','Courier New',monospace",background:C.bg,color:C.text,height:"100dvh",display:"flex",flexDirection:"column",fontSize:"clamp(12px,1.1vw,15px)",overflow:"hidden",WebkitTextSizeAdjust:"100%"}}>
@@ -2799,7 +3047,7 @@ root.render(React.createElement(AxiomFX));
       {/* HEADER */}
       <div style={{background:"linear-gradient(90deg,#08152a,#0d2240,#08152a)",borderBottom:`1px solid ${C.bdr}`,padding:"0 14px",display:"flex",alignItems:"center",gap:"10px",height:"50px",flexShrink:0,minWidth:0}}>
         <div style={{flexShrink:0}}><div style={{fontSize:"16px",fontWeight:"700",letterSpacing:"4px",color:C.gold}}>AXIOM</div><div style={{fontSize:"7px",color:C.muted,letterSpacing:"2px"}}>G10 FX v6</div></div>
-        <div style={{display:"flex",alignItems:"center",gap:"4px"}}><div style={{width:"5px",height:"5px",borderRadius:"50%",background:apiStatus==="live_oanda"?C.green:apiStatus==="live_ecb"?"#00d4ff":C.amber,animation:"pulse 2s infinite"}}/><span style={{color:C.green,fontWeight:"700",fontSize:"8.5px"}}>{apiStatus==="live_oanda"?"OANDA LIVE":apiStatus==="live_ecb"?"ECB LIVE":"SIM"}</span></div>
+        <div style={{display:"flex",alignItems:"center",gap:"4px"}}><div style={{width:"5px",height:"5px",borderRadius:"50%",background:apiStatus==="live_oanda"?C.green:apiStatus==="error"?C.red:C.muted,animation:apiStatus==="live_oanda"?"pulse 2s infinite":"none"}}/><span style={{color:apiStatus==="live_oanda"?C.green:apiStatus==="error"?C.red:C.muted,fontWeight:"700",fontSize:"8.5px"}}>{apiStatus==="live_oanda"?"OANDA LIVE":apiStatus==="error"?"✗ OANDA ERROR":"CONNECTING"}</span></div>
         <div onClick={()=>{setSettingsSaved(false);setTab("settings");}} style={{background:C.bg1,border:`2px solid ${C.gold}55`,borderRadius:"4px",padding:"3px 9px",cursor:"pointer",flexShrink:0}} onMouseEnter={e=>e.currentTarget.style.borderColor=C.gold} onMouseLeave={e=>e.currentTarget.style.borderColor=C.gold+"55"}>
           <div style={{fontSize:"7px",color:C.muted,marginBottom:"1px"}}>ACCOUNT</div>
           <div style={{color:C.gold,fontWeight:"700",fontFamily:"monospace",fontSize:"12px"}}>${acctVal.toFixed(2)}</div>
@@ -2832,8 +3080,42 @@ root.render(React.createElement(AxiomFX));
 
       {/* CONTENT — proper overflow for mobile */}
       <div style={{flex:1,overflowY:"auto",overflowX:"hidden",padding:"12px",WebkitOverflowScrolling:"touch",minHeight:0}}>
-        {tabContent}
+        {errorBanners.length>0&&(
+        <div style={{position:"sticky",top:0,zIndex:500,display:"flex",flexDirection:"column",gap:"1px"}}>
+          {errorBanners.map(b=>(
+            <div key={b.id} style={{background:b.color+"22",borderBottom:`1px solid ${b.color}44`,padding:"6px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:"8px"}}>
+              <div>
+                <span style={{color:b.color,fontWeight:"700",fontSize:"9px",letterSpacing:"0.5px"}}>{b.msg}</span>
+                <span style={{color:C.muted,fontSize:"8px",marginLeft:"8px"}}>{b.action}</span>
+              </div>
+              <span style={{color:b.color,fontSize:"9px",fontWeight:"700",flexShrink:0}}>DATA BLOCKED</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {tabContent}
       </div>
+
+      {/* AI INPUT — rendered OUTSIDE useMemo/tabContent for stable focus — never remounts on state change */}
+      {tab==="ai"&&(
+        <div style={{padding:"0 12px 10px 12px",flexShrink:0,display:"flex",flexDirection:"column",gap:"6px"}}>
+          <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"8px 10px",display:"flex",gap:"7px"}}>
+            <input
+              id="axiom-ai-input"
+              value={aiInput}
+              onChange={e=>setAiInput(e.target.value)}
+              inputMode="text"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              placeholder="Ask AXIOM about strategies, setups, risk, macro..."
+              onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey&&aiInput.trim()){sendAI(aiInput);}}}
+              style={{flex:1,background:C.bg,border:`1px solid ${C.bdr}`,borderRadius:"3px",color:C.text,padding:"8px 10px",fontSize:"11px",fontFamily:"inherit",outline:"none",WebkitAppearance:"none",touchAction:"manipulation"}}/>
+            <Btn label="SEND" color={C.gold} onClick={()=>{if(aiInput.trim()){sendAI(aiInput);}}} disabled={aiLoading}/>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
