@@ -255,6 +255,7 @@ function AxiomFX(){
   const [cbRatesLoading,setCbRatesLoading]=useState(false);
   const [cbRatesSource,setCbRatesSource]=useState("loading");
   const [cbRatesUpdated,setCbRatesUpdated]=useState(null);
+  const {prices,apiStatus,priceError}=usePrices(settings.oandaKey||localSettings.oandaKey);
   // Weekend tab — AI-generated themes
   const [weekendThemes,setWeekendThemes]=useState(null);
   const [weekendLoading,setWeekendLoading]=useState(false);
@@ -604,7 +605,6 @@ Return ONLY valid JSON array. No markdown, no backticks.`}]
   const [sigScanning,setSigScanning]=useState(false);
   const [scanStatus,setScanStatus]=useState("Waiting for first scan...");
   const [lastScanTime,setLastScanTime]=useState(0);
-  const {prices,apiStatus,priceError}=usePrices(settings.oandaKey||localSettings.oandaKey);
   const toast_=useCallback((msg,color=C.green)=>{setToast({msg,color});setTimeout(()=>setToast(null),4500);},[]);
 
   useEffect(()=>save("axiom_style",style),[style]);
