@@ -692,7 +692,7 @@ Entry:${sig.entry} SL:${sig.sl}`});}}catch(_){}
     if(!trades.length)return;
     const iv=setInterval(()=>{
       setTrades(prev=>prev.map(t=>{
-        const p=prices[t.pair];if(!p)return t;
+        const p=prices?.[t.pair];if(!p)return t;
         const cp=t.direction==="BUY"?p.bid:p.ask;
         const isH=t.pair.includes("JPY")||t.pair.includes("NOK");
         const pips=(t.direction==="BUY"?cp-t.entry:t.entry-cp)*(isH?100:10000);
@@ -831,13 +831,13 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
   // ─── DASHBOARD ────────────────────────────────────────────────────────
   function Dashboard(){
     // Market Pulse — derive from live prices
-    const usdJpy=prices["USD/JPY"];
-    const eurUsd=prices["EUR/USD"];
+    const usdJpy=prices?.["USD/JPY"];
+    const eurUsd=prices?.["EUR/USD"];
     const dxyDir=usdJpy&&usdJpy.pct>0.05?"RISING ↑":usdJpy&&usdJpy.pct<-0.05?"FALLING ↓":"FLAT →";
     const dxyColor=usdJpy&&usdJpy.pct>0.05?C.red:usdJpy&&usdJpy.pct<-0.05?C.green:C.muted; // DXY falls when USD/JPY falls
     const vixRegime="RISK-OFF"; // April 2026 tariff environment
-    const topMover=ALL_PAIRS.reduce((best,p)=>Math.abs((prices[p]?.pct||0))>Math.abs((prices[best]?.pct||0))?p:best,"EUR/USD");
-    const topMoverPct=prices[topMover]?.pct||0;
+    const topMover=prices?ALL_PAIRS.reduce((best,p)=>Math.abs((prices?.[p]?.pct||0))>Math.abs((prices?.[best]?.pct||0))?p:best,"EUR/USD"):"EUR/USD";
+    const topMoverPct=prices?.[topMover]?.pct||0;
     return(
       <div style={{minWidth:0}}>
         {/* Market Pulse Bar */}
@@ -899,7 +899,7 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
                   const [base,quote]=pair.split("/");
                   const liveBase=cbRates?.[base]?.rate??null;
                   const liveQuote=cbRates?.[quote]?.rate??null;
-                  const carry=(liveBase-liveQuote).toFixed(2);
+                  const carry=(liveBase!=null&&liveQuote!=null)?(liveBase-liveQuote).toFixed(2):'—';
                   return(
                     <tr key={pair} onMouseEnter={e=>e.currentTarget.style.background=C.bg1} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                       <td style={{padding:"5px 6px",fontWeight:"700",color:C.gold,fontSize:"10.5px",whiteSpace:"nowrap"}}>{pair}</td>
@@ -922,16 +922,16 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
         <div style={{background:C.bg2,border:`1px solid ${C.gold}33`,borderRadius:"6px",padding:"10px 13px",marginBottom:"10px"}}>
           <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"9px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>◈ G10 CURRENCY RECAP — LIVE CB RATES</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px"}}>
-            {[{ccy:"USD",dir:"BEARISH",c:C.red,   note:`Fed ${(cbRates?.USD?.rate??'—').toFixed(2)}% (${cbRates?.USD?.outlook??'—'}). DXY ~100. Tariff uncertainty.`},
-              {ccy:"JPY",dir:"BULLISH",c:C.green,  note:`BOJ ${(cbRates?.JPY?.rate??'—').toFixed(2)}% — only G10 hiker. Structural JPY bid.`},
-              {ccy:"EUR",dir:"BULLISH",c:C.green,  note:`ECB ${(cbRates?.EUR?.rate??'—').toFixed(2)}% (${cbRates?.EUR?.bias??'—'}). EUR/USD 1.16+.`},
-              {ccy:"GBP",dir:"NEUTRAL",c:C.gold,   note:`BOE ${(cbRates?.GBP?.rate??'—').toFixed(2)}% (${cbRates?.GBP?.outlook??'—'}). Services CPI sticky.`},
-              {ccy:"AUD",dir:"BULLISH",c:C.green,  note:`RBA ${(cbRates?.AUD?.rate??'—').toFixed(2)}% (${cbRates?.AUD?.outlook??'—'}). China PMI supportive.`},
-              {ccy:"NZD",dir:"BEARISH",c:C.red,    note:`RBNZ ${(cbRates?.NZD?.rate??'—').toFixed(2)}% (${cbRates?.NZD?.outlook??'—'}). Recession confirmed.`},
-              {ccy:"CAD",dir:"BEARISH",c:C.red,    note:`BOC ${(cbRates?.CAD?.rate??'—').toFixed(2)}% (${cbRates?.CAD?.outlook??'—'}). USMCA risk.`},
-              {ccy:"CHF",dir:"BULLISH",c:C.green,  note:`SNB ${(cbRates?.CHF?.rate??'—').toFixed(2)}% (${cbRates?.CHF?.outlook??'—'}). Safe haven bid.`},
-              {ccy:"NOK",dir:"NEUTRAL",c:C.gold,   note:`Norges ${(cbRates?.NOK?.rate??'—').toFixed(2)}% (${cbRates?.NOK?.outlook??'—'}). Oil-linked.`},
-              {ccy:"SEK",dir:"NEUTRAL",c:C.gold,   note:`Riksbank ${(cbRates?.SEK?.rate??'—').toFixed(2)}% (${cbRates?.SEK?.outlook??'—'}). Stable.`},
+            {[{ccy:"USD",dir:"BEARISH",c:C.red,   note:`Fed ${(cbRates?.USD?.rate!=null?cbRates.USD.rate.toFixed(2):'—')}% (${cbRates?.USD?.outlook??'—'}). DXY ~100. Tariff uncertainty.`},
+              {ccy:"JPY",dir:"BULLISH",c:C.green,  note:`BOJ ${(cbRates?.JPY?.rate!=null?cbRates.JPY.rate.toFixed(2):'—')}% — only G10 hiker. Structural JPY bid.`},
+              {ccy:"EUR",dir:"BULLISH",c:C.green,  note:`ECB ${(cbRates?.EUR?.rate!=null?cbRates.EUR.rate.toFixed(2):'—')}% (${cbRates?.EUR?.bias??'—'}). EUR/USD 1.16+.`},
+              {ccy:"GBP",dir:"NEUTRAL",c:C.gold,   note:`BOE ${(cbRates?.GBP?.rate!=null?cbRates.GBP.rate.toFixed(2):'—')}% (${cbRates?.GBP?.outlook??'—'}). Services CPI sticky.`},
+              {ccy:"AUD",dir:"BULLISH",c:C.green,  note:`RBA ${(cbRates?.AUD?.rate!=null?cbRates.AUD.rate.toFixed(2):'—')}% (${cbRates?.AUD?.outlook??'—'}). China PMI supportive.`},
+              {ccy:"NZD",dir:"BEARISH",c:C.red,    note:`RBNZ ${(cbRates?.NZD?.rate!=null?cbRates.NZD.rate.toFixed(2):'—')}% (${cbRates?.NZD?.outlook??'—'}). Recession confirmed.`},
+              {ccy:"CAD",dir:"BEARISH",c:C.red,    note:`BOC ${(cbRates?.CAD?.rate!=null?cbRates.CAD.rate.toFixed(2):'—')}% (${cbRates?.CAD?.outlook??'—'}). USMCA risk.`},
+              {ccy:"CHF",dir:"BULLISH",c:C.green,  note:`SNB ${(cbRates?.CHF?.rate!=null?cbRates.CHF.rate.toFixed(2):'—')}% (${cbRates?.CHF?.outlook??'—'}). Safe haven bid.`},
+              {ccy:"NOK",dir:"NEUTRAL",c:C.gold,   note:`Norges ${(cbRates?.NOK?.rate!=null?cbRates.NOK.rate.toFixed(2):'—')}% (${cbRates?.NOK?.outlook??'—'}). Oil-linked.`},
+              {ccy:"SEK",dir:"NEUTRAL",c:C.gold,   note:`Riksbank ${(cbRates?.SEK?.rate!=null?cbRates.SEK.rate.toFixed(2):'—')}% (${cbRates?.SEK?.outlook??'—'}). Stable.`},
             ].map(({ccy,dir,c,note})=>(
               <div key={ccy} style={{background:C.bg1,border:`1px solid ${c}22`,borderLeft:`3px solid ${c}`,borderRadius:"4px",padding:"7px 9px"}}>
                 <div style={{display:"flex",alignItems:"center",gap:"6px",marginBottom:"3px"}}>
