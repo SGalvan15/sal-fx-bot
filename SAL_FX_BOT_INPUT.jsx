@@ -628,6 +628,7 @@ Return ONLY valid JSON array. No markdown, no backticks.`}]
   const [settingsSaved,setSettingsSaved]=useState(()=>load("axiom_settings",{saved:false}).saved||false);
   const aiRef=useRef(null);
   const aiScrollRef=useRef(null);
+  const [sigScanning,setSigScanning]=useState(false);
   // Scroll chat to bottom when new messages arrive — use container scrollTop, not scrollIntoView
   // scrollIntoView can hijack the outer page scroll causing the viewport to jump up
   useEffect(()=>{
