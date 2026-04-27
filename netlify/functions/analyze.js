@@ -416,8 +416,8 @@ async function analyzeSignal(pair, enabledStratIds, ecoData, yields, REGIMES) {
   const buyC=[ae200h4,ae200h1,mbull,abm4,e20ae50h4,!rsob4,avw,atSup];
   const selC=[!ae200h4,!ae200h1,mbear,!abm4,!e20ae50h4,!rso4,bvw,atRes];
   const buyScore=buyC.filter(Boolean).length,selScore=selC.filter(Boolean).length;
-  if (isBuy&&buyScore<5) return {signal:null,reason:`${pair}: Buy tech score ${buyScore}/8`};
-  if (!isBuy&&selScore<5) return {signal:null,reason:`${pair}: Sell tech score ${selScore}/8`};
+  if (isBuy&&buyScore<4) return {signal:null,reason:`${pair}: Buy tech score ${buyScore}/8`};
+  if (!isBuy&&selScore<4) return {signal:null,reason:`${pair}: Sell tech score ${selScore}/8`};
 
   // Eco data for this pair
   const bSurp=ecoData.surprises?.[base]||[],qSurp=ecoData.surprises?.[quote]||[];
@@ -537,12 +537,17 @@ async function analyzeSignal(pair, enabledStratIds, ecoData, yields, REGIMES) {
   triggered.sort((a,b)=>b.score-a.score);
 
   // Layered confluence gate: requires BOTH macro AND technical
-  const minScore=isStrong?7:9;
-  if (triggered.length<4)   return {signal:null,reason:`${pair}: ${triggered.length}/4 strategies triggered`};
-  if (total<minScore)       return {signal:null,reason:`${pair}: Score ${total}/${minScore}`};
-  if (macroT<1)             return {signal:null,reason:`${pair}: No macro confirmation`};
-  if (techT<2)              return {signal:null,reason:`${pair}: Insufficient technical (${techT}/2)`};
-  if (!sessOk)              return {signal:null,reason:`${pair}: Wrong session (${active.join(',')})`};
+  // STRONG_BUY/SELL: high-conviction regime divergence — accept slightly lower score threshold
+  // MILD_BUY/SELL: lower-conviction regime — require more technical confirmation
+  const minScore = isStrong ? 6 : 8;
+  const minStrats = isStrong ? 4 : 4;
+  if (triggered.length < minStrats) return {signal:null,reason:`${pair}: ${triggered.length}/${minStrats} strategies triggered`};
+  if (total < minScore)             return {signal:null,reason:`${pair}: Score ${total}/${minScore}`};
+  if (macroT < 1)                   return {signal:null,reason:`${pair}: No macro confirmation`};
+  if (techT < 2)                    return {signal:null,reason:`${pair}: Insufficient technical (${techT}/2)`};
+  // Session gate: wrong session reduces probability but doesn't hard-block
+  // This allows signals to generate across all hours while still weighting optimal sessions
+  const sessionPenalty = sessOk ? 0 : -5;
 
   // Build signal
   const entry=isBuy?livePrice.ask:livePrice.bid, dec=isJPY?3:5, d=isBuy?1:-1;
@@ -557,7 +562,7 @@ async function analyzeSignal(pair, enabledStratIds, ecoData, yields, REGIMES) {
   const ACCT=parseInt(process.env.AXIOM_ACCT||'10000'),RISK=parseFloat(process.env.AXIOM_RISK||'2');
   const lot=Math.max(0.01,Math.min(2.00,Math.round((ACCT*(RISK/100))/(slPips*10.0)*100)/100));
   const maxP=triggered.length*3;
-  const prob=Math.min(85,Math.round(50+(maxP>0?total/maxP*25:0)+(isStrong?4:0)+(yMom?3:0)+(newsAligned?3:0)));
+  const prob=Math.min(85,Math.max(50,Math.round(50+(maxP>0?total/maxP*25:0)+(isStrong?4:0)+(yMom?3:0)+(newsAligned?3:0)+sessionPenalty)));
 
   return {signal:{
     pair,direction:isBuy?'BUY':'SELL',entry,sl,tp1,tp2,tp3,
@@ -571,7 +576,7 @@ async function analyzeSignal(pair, enabledStratIds, ecoData, yields, REGIMES) {
     yieldSpreadAligned:yMom,newsSurpriseAligned:newsAligned,
     technicalDetails:{
       techNote:`EMA200 H4:${ae200h4?'above':'below'} ADX:${cax4?.adx?.toFixed(1)} RSI:${crs4?.toFixed(1)} Macro:${macroT} Tech:${techT}`,
-      sessionNote:`Sessions:${active.join(',')} Optimal:${sessOk}`,
+      sessionNote:`Sessions:${active.join(',')} Optimal:${sessOk}${!sessOk?' (off-session -5% prob)':''}`,
       regimeNote:`Regime:${reg} Carry:${carry.diff.toFixed(2)}% Yield:${yDiff.toFixed(2)}%`
     },
     indicators:{rsiH4:crs4?.toFixed(1),adxH4:cax4?.adx?.toFixed(1),ema200H4:ce200h4?.toFixed(dec),atrH4:(cat4*pipMult)?.toFixed(1),carry:carry.diff?.toFixed(2),yieldSpread:yDiff?.toFixed(2),ecoSurprise:netEco?.toFixed(3)},
