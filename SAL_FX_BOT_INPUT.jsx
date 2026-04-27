@@ -217,6 +217,9 @@ function AxiomFX(){
   const [trades,setTrades]=useState(()=>load("axiom_trades",[]));
   const [history,setHistory]=useState(()=>load("axiom_history",[]));
   const [modal,setModal]=useState(null);
+  // chartPairNavigated tracks whether we arrived at chart tab via a signal/GO button
+  // prevents auto-scroll to EUR/USD (default) every time the tab opens
+  const [chartPairNavigated,setChartPairNavigated]=useState(false);
   const [chartPair,setChartPair]=useState("EUR/USD");
   const [toast,setToast]=useState(null);
   // Calendar filters
@@ -403,10 +406,16 @@ For each item respond with ONLY a JSON array (no markdown, no backticks):
   useEffect(()=>{
     if(tab==="news"&&!newsLoaded){loadNews(true);}
   },[tab]);
-  // Reload when filters change
+  // Reload when filters change (only if news was already loaded)
   useEffect(()=>{
     if(tab==="news"&&newsLoaded){loadNews(true);}
   },[nCcy,nImp]);
+  // Auto-refresh news every 15 minutes when on news tab
+  useEffect(()=>{
+    if(tab!=="news")return;
+    const iv=setInterval(()=>{loadNews(true);},15*60*1000);
+    return()=>clearInterval(iv);
+  },[tab]);
 
   // ── LIVE CALENDAR — ForexFactory proxy (parsed server-side in calendar.js) ──
   const loadCalendar=useCallback(async()=>{
@@ -428,7 +437,15 @@ For each item respond with ONLY a JSON array (no markdown, no backticks):
       }
       if(combined.length>0){
         combined.sort((a,b)=>a.dt.localeCompare(b.dt));
-        setCalEvents(combined);
+        // Deduplicate by dt+ccy+ev combo — ForexFactory occasionally returns same event in both week feeds
+        const seen=new Set();
+        const deduped=combined.filter(e=>{
+          const key=`${e.dt}|${e.ccy}|${e.ev}`;
+          if(seen.has(key))return false;
+          seen.add(key);
+          return true;
+        });
+        setCalEvents(deduped);
         setCalLoaded(true);
       }else{
         // Both feeds returned empty — ForexFactory may be down
@@ -533,9 +550,17 @@ Return ONLY a valid JSON array. No markdown, no backticks, no explanation.`}]
       const match=text.match(/\[[\s\S]*\]/);
       if(!match)throw new Error("No JSON");
       const themes=JSON.parse(match[0]);
-      if(Array.isArray(themes)&&themes.length>0)setWeekendThemes(themes);
+      if(Array.isArray(themes)&&themes.length>0){
+        setWeekendThemes(themes);
+        setWeekendLoaded(true);
+      } else {
+        throw new Error("Empty themes array returned");
+      }
+    }catch(e){
+      // Don't leave UI blank — show the error state with retry
       setWeekendLoaded(true);
-    }catch(e){setWeekendLoaded(true);}
+      // weekendThemes stays null/previous value — UI will show the error/empty state with retry button
+    }
     setWeekendLoading(false);
   },[weekendLoading,prices,cbRates]);
 
@@ -602,7 +627,14 @@ Return ONLY valid JSON array. No markdown, no backticks.`}]
   const [aiLoading,setAiLoading]=useState(false);
   const [settingsSaved,setSettingsSaved]=useState(()=>load("axiom_settings",{saved:false}).saved||false);
   const aiRef=useRef(null);
-  const [sigScanning,setSigScanning]=useState(false);
+  const aiScrollRef=useRef(null);
+  // Scroll chat to bottom when new messages arrive — use container scrollTop, not scrollIntoView
+  // scrollIntoView can hijack the outer page scroll causing the viewport to jump up
+  useEffect(()=>{
+    if(aiScrollRef.current){
+      aiScrollRef.current.scrollTop=aiScrollRef.current.scrollHeight;
+    }
+  },[aiMsgs]);
   const [scanStatus,setScanStatus]=useState("Waiting for first scan...");
   const [lastScanTime,setLastScanTime]=useState(0);
   const toast_=useCallback((msg,color=C.green)=>{setToast({msg,color});setTimeout(()=>setToast(null),4500);},[]);
@@ -612,7 +644,6 @@ Return ONLY valid JSON array. No markdown, no backticks.`}]
   useEffect(()=>save("axiom_signals",signals),[signals]);
   useEffect(()=>save("axiom_trades",trades),[trades]);
   useEffect(()=>save("axiom_history",history),[history]);
-  useEffect(()=>{aiRef.current?.scrollIntoView({behavior:"smooth"});},[aiMsgs]);
 
   // ── REAL SIGNAL SCANNER ────────────────────────────────────────────────────
   const runSignalScan=useCallback(async()=>{
@@ -681,9 +712,12 @@ Entry:${sig.entry} SL:${sig.sl}`});}}catch(_){}
     setSigScanning(false);
   },[sigScanning,signals,settings.acct,settings.risk,toast_,enabledStrats]);
 
+  const runSignalRef=useRef(runSignalScan);
+  useEffect(()=>{runSignalRef.current=runSignalScan;},[runSignalScan]);
+
   useEffect(()=>{
-    const t=setTimeout(()=>runSignalScan(),5000);
-    const iv=setInterval(()=>runSignalScan(),5*60*1000);
+    const t=setTimeout(()=>runSignalRef.current(),5000);
+    const iv=setInterval(()=>runSignalRef.current(),5*60*1000);
     return()=>{clearTimeout(t);clearInterval(iv);};
   },[]);// eslint-disable-line
 
@@ -803,7 +837,7 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
         <div style={{display:"flex",gap:"6px"}}>
           <Btn label="TAKE TRADE" color={dc} onClick={()=>takeTrade(sig)} style={{flex:1,fontSize:"10px",padding:"5px 8px"}}/>
           <Sm label="DETAILS" color={C.muted} onClick={()=>{setModal(sig);setModalTab("params");}}/>
-              <Sm label="📊" color={C.blue} onClick={()=>window.open(tvUrl(sig.pair,{scalp:"15",day:"60",swing:"240"}[sig.style]||"60"),"_blank","noopener")}/>
+              <Sm label="📊" color={C.blue} onClick={()=>{setChartPair(sig.pair);setChartPairNavigated(true);setTab("chart");}}/>
           {showDismiss&&<button onClick={()=>dismissSig(sig.id)} style={{padding:"4px 8px",background:"transparent",color:C.red,border:`1px solid ${C.red}33`,borderRadius:"2px",cursor:"pointer",fontSize:"9px",fontFamily:"inherit",fontWeight:"700",flexShrink:0}}>✕</button>}
         </div>
       </div>
@@ -910,7 +944,7 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
                       <td style={{padding:"5px 6px",color:p.pct>=0?C.green:C.red,fontWeight:"600",fontSize:"9.5px",whiteSpace:"nowrap"}}>{p.pct>=0?"+":""}{p.pct.toFixed(3)}%</td>
                       <td style={{padding:"3px 6px"}}><Spark data={p?.history||[]} color={p.pct>=0?C.green:C.red}/></td>
                       <td style={{padding:"5px 6px",color:parseFloat(carry)>0?C.green:parseFloat(carry)<0?C.red:C.muted,fontWeight:"600",fontSize:"9.5px",whiteSpace:"nowrap"}}>{parseFloat(carry)>0?"+":""}{carry}%</td>
-                      <td style={{padding:"5px 6px"}}><button onClick={()=>{setChartPair(pair);setTab("chart");}} style={{padding:"2px 6px",background:C.blue+"22",color:C.blue,border:`1px solid ${C.blue}44`,borderRadius:"2px",cursor:"pointer",fontSize:"8px",fontFamily:"inherit",fontWeight:"700"}}>GO</button></td>
+                      <td style={{padding:"5px 6px"}}><button onClick={()=>{setChartPair(pair);setChartPairNavigated(true);setTab("chart");}} style={{padding:"2px 6px",background:C.blue+"22",color:C.blue,border:`1px solid ${C.blue}44`,borderRadius:"2px",cursor:"pointer",fontSize:"8px",fontFamily:"inherit",fontWeight:"700"}}>GO</button></td>
                     </tr>
                   );
                 })}
@@ -1016,10 +1050,12 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
     const TFS=[{v:"5",l:"5m"},{v:"15",l:"15m"},{v:"30",l:"30m"},{v:"60",l:"1H"},{v:"240",l:"4H"},{v:"D",l:"1D"},{v:"W",l:"1W"}];
     const highlightRef=useRef(null);
     useEffect(()=>{
-      if(highlightRef.current){
+      // Only auto-scroll to highlighted pair when explicitly navigated from a signal card
+      // Never scroll on default tab open (which would jump to EUR/USD in the middle of the list)
+      if(chartPairNavigated && highlightRef.current){
         highlightRef.current.scrollIntoView({behavior:"smooth",block:"center"});
       }
-    },[]);
+    },[chartPairNavigated]);
     return(
       <div>
         <div style={{background:`linear-gradient(90deg,${C.bg2},#0a1a2a)`,border:`2px solid ${C.gold}`,borderRadius:"7px",padding:"14px 16px",marginBottom:"12px"}}>
@@ -1045,8 +1081,8 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
             const carry=liveBase-liveQuote;
             const isSelected=pair===chartPair;
             return(
-              <button key={pair} ref={isSelected?highlightRef:null}
-                onClick={()=>{setChartPair(pair);window.open(tvUrl(pair,selectedTf),"_blank","noopener");}}
+              <button key={pair} ref={isSelected&&chartPairNavigated?highlightRef:null}
+                onClick={()=>{setChartPair(pair);setChartPairNavigated(false);window.open(tvUrl(pair,selectedTf),"_blank","noopener");}}
                 style={{background:isSelected?C.bg3:C.bg2,border:`1px solid ${isSelected?C.gold:isUp?C.green+"33":C.red+"33"}`,borderRadius:"6px",padding:"11px 12px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",WebkitTapHighlightColor:"transparent",boxShadow:isSelected?`0 0 0 2px ${C.gold}44`:"none"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"5px"}}>
                   <span style={{fontWeight:"700",color:isSelected?C.gold:C.gold,fontSize:"12px"}}>{pair}{isSelected&&<span style={{fontSize:"8px",color:C.gold,marginLeft:"5px"}}>◈</span>}</span>
@@ -1196,15 +1232,16 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
     // Use live calEvents (seeded with static, replaced with live ForexFactory data)
     const filtered=calEvents.filter(e=>{
       const eDate=e.dt.slice(0,10);
-      const eTime=new Date(e.dt);
       if(calView==="TODAY"&&eDate!==todayStr)return false;
       if(calView==="THIS WEEK"){
-        const day=now.getDay();
-        // Monday-first week
-        const start=new Date(now);start.setHours(0,0,0,0);
-        start.setDate(now.getDate()-(day===0?6:day-1));
-        const end=new Date(start);end.setDate(start.getDate()+7);
-        if(eTime<start||eTime>=end)return false;
+        // Build week range using string arithmetic — avoids timezone issues
+        const day=now.getDay(); // 0=Sun, 1=Mon...
+        const mondayOffset=day===0?-6:1-day; // days back to Monday
+        const monday=new Date(now);monday.setHours(0,0,0,0);monday.setDate(now.getDate()+mondayOffset);
+        const sunday=new Date(monday);sunday.setDate(monday.getDate()+7);
+        const mondayStr=monday.getFullYear()+"-"+String(monday.getMonth()+1).padStart(2,"0")+"-"+String(monday.getDate()).padStart(2,"0");
+        const sundayStr=sunday.getFullYear()+"-"+String(sunday.getMonth()+1).padStart(2,"0")+"-"+String(sunday.getDate()).padStart(2,"0");
+        if(eDate<mondayStr||eDate>=sundayStr)return false;
       }
       if(calView==="THIS MONTH"&&eDate.slice(0,7)!==todayStr.slice(0,7))return false;
       if(calView==="NEXT MONTH"){
@@ -1881,7 +1918,7 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
               {weekendLoading?"⟳ Generating current week analysis...":weekendLoaded&&themes.length>0?"✓ AI-GENERATED · Live macro themes with sources":"Press Refresh to generate current week analysis"}
             </span>
           </div>
-          <button onClick={()=>{setWeekendThemes(null);setWeekendLoaded(false);loadWeekendThemes();}} disabled={weekendLoading}
+          <button onClick={()=>{setWeekendThemes(null);setWeekendLoaded(false);setWeekendLoading(false);setTimeout(loadWeekendThemes,50);}} disabled={weekendLoading}
             style={{padding:"3px 8px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}44`,borderRadius:"3px",cursor:weekendLoading?"not-allowed":"pointer",fontSize:"8px",fontWeight:"700",fontFamily:"inherit",opacity:weekendLoading?0.5:1}}>
             ↺ Refresh
           </button>
@@ -2007,7 +2044,7 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
             </div>
           </div>
         </div>
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",flex:1,overflow:"auto",WebkitOverflowScrolling:"touch",padding:"10px 12px",display:"flex",flexDirection:"column",gap:"9px"}}>
+        <div ref={aiScrollRef} style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",flex:1,overflow:"auto",WebkitOverflowScrolling:"touch",padding:"10px 12px",display:"flex",flexDirection:"column",gap:"9px"}}>
           {aiMsgs.map((m,i)=>(
             <div key={i} style={{display:"flex",gap:"8px",alignItems:"flex-start"}}>
               <div style={{width:"26px",height:"26px",flexShrink:0,borderRadius:"50%",background:m.role==="assistant"?`linear-gradient(135deg,${C.gold},${C.amber})`:C.bg3,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"9.5px",fontWeight:"700",color:m.role==="assistant"?C.bg:C.gold}}>{m.role==="assistant"?"A":"S"}</div>
@@ -2015,7 +2052,6 @@ Respond with institutional precision. Give exact price levels, pip counts, lot s
             </div>
           ))}
           {aiLoading&&<div style={{display:"flex",gap:"8px",alignItems:"center"}}><div style={{width:"26px",height:"26px",borderRadius:"50%",background:`linear-gradient(135deg,${C.gold},${C.amber})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"9.5px",fontWeight:"700",color:C.bg}}>A</div><div style={{color:C.muted,fontSize:"10.5px"}}>Analyzing...</div></div>}
-          <div ref={aiRef}/>
         </div>
         <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"7px 10px",flexShrink:0,display:"flex",gap:"5px",flexWrap:"wrap"}}>
           {quickQ.slice(4).map(q=><Sm key={q} label={q} color="#7a4fc0" onClick={()=>sendAI(q)}/>)}
@@ -3013,7 +3049,7 @@ root.render(React.createElement(AxiomFX));
       case "deploy":    return <DeployTab/>;
       default:          return <Dashboard/>;
     }
-  },[tab,signals,trades,history,analyzerTab,selCB,wkView,chartTf,enabledStrats,nCcy,nImp,stratCatFilter,stratTierFilter,modal,modalTab,expandedTheme,expandedStrat,newsPage,calCcy,calImp,calType,calView,calEvents,calLoading,calLoaded,sigScanning,scanStatus,lastScanTime,aiMsgs,aiLoading,liveArts,newsLoaded,newsLoading,newsSource,newsError,prices,style,settings,apiStatus,srcCat,srcPage,deployTab,cbRates,cbRatesLoading,cbRatesSource,cbRatesUpdated,weekendThemes,weekendLoading,weekendLoaded,regimeData,regimeLoading,regimeLoaded]);
+  },[tab,signals,trades,history,analyzerTab,selCB,wkView,chartTf,chartPairNavigated,enabledStrats,nCcy,nImp,stratCatFilter,stratTierFilter,modal,modalTab,expandedTheme,expandedStrat,newsPage,calCcy,calImp,calType,calView,calEvents,calLoading,calLoaded,sigScanning,scanStatus,lastScanTime,aiMsgs,aiLoading,liveArts,newsLoaded,newsLoading,newsSource,newsError,prices,style,settings,apiStatus,srcCat,srcPage,deployTab,cbRates,cbRatesLoading,cbRatesSource,cbRatesUpdated,weekendThemes,weekendLoading,weekendLoaded,regimeData,regimeLoading,regimeLoaded]);
 
   return(
     <div style={{fontFamily:"'IBM Plex Mono','Courier New',monospace",background:C.bg,color:C.text,height:"100dvh",display:"flex",flexDirection:"column",fontSize:"clamp(12px,1.1vw,15px)",overflow:"hidden",WebkitTextSizeAdjust:"100%"}}>
@@ -3073,7 +3109,7 @@ root.render(React.createElement(AxiomFX));
             {t.icon}{t.label}
             {t.id==="signals"&&signals.length>0&&<span style={{display:"inline-block",padding:"0 4px",background:C.amber+"22",color:C.amber,border:`1px solid ${C.amber}44`,borderRadius:"2px",fontSize:"7.5px",fontWeight:"700"}}>{signals.length}</span>}
             {t.id==="trades"&&trades.length>0&&<span style={{display:"inline-block",padding:"0 4px",background:C.blue+"22",color:C.blue,border:`1px solid ${C.blue}44`,borderRadius:"2px",fontSize:"7.5px",fontWeight:"700"}}>{trades.length}</span>}
-            {t.id==="news"&&<span style={{display:"inline-block",padding:"0 4px",background:C.red+"22",color:C.red,border:`1px solid ${C.red}44`,borderRadius:"2px",fontSize:"7.5px",fontWeight:"700"}}>{liveArts.filter(n=>n.imp==="HIGH").length}H</span>}
+            {t.id==="news"&&liveArts.filter(n=>n.imp==="HIGH").length>0&&<span style={{display:"inline-block",padding:"0 4px",background:C.red+"22",color:C.red,border:`1px solid ${C.red}44`,borderRadius:"2px",fontSize:"7.5px",fontWeight:"700"}}>{liveArts.filter(n=>n.imp==="HIGH").length}H</span>}
           </button>
         ))}
       </div>
