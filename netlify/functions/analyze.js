@@ -1,12 +1,56 @@
-// AXIOM Signal Analysis Engine v7.1
-// @netlify-function timeout=26
-// v7.1: +20 pure-TA strategies, style-aware timeframes, pure-TA override gate
+// AXIOM Signal Analysis Engine v7.2
+// ═══════════════════════════════════════════════════════════════════════════
+// v7.2 changes (data integrity + correctness release):
+//  1. OANDA host fixed: api-fxtrade.oanda.com (documented v20 host) with
+//     OANDA_ENV=practice switch. v7.1 pointed at api-trade.oanda.com (invalid).
+//  2. Hardcoded CB_RATES table DELETED. Policy rates now fetched live from FRED
+//     (1h cache). If the feed is down, every carry-dependent strategy goes inert
+//     with an explicit desc — stale constants are never substituted.
+//  3. REAL CFTC COT integration (public Socrata API, TFF futures-only, 12h cache):
+//     COT_REAL and COT_FADE now run on genuine leveraged-funds positioning
+//     z-scores. Feed down → both inert with explicit desc.
+//  4. Gate integrity: PPP_VAL is now conditional (D1 EMA200 deviation ≥ 2.5×
+//     daily ATR in the reversion direction) instead of always-true; CB_INTV only
+//     fires for pairs that HAVE intervention levels and are clear of them;
+//     TRI_ARB is a real triangular-consistency check (cross vs USD-leg synthetic)
+//     instead of a spread filter. The macro gate and the pure-TA override path
+//     are now genuinely meaningful.
+//  5. Correct pip-value model (pipValueUSD) with live USD conversion legs —
+//     drives lot sizing and riskAmount; pipValuePerLot exported in the signal
+//     payload so the UI P&L uses the same math.
+//  6. One bulk pricing call for all 28 pairs (consistent snapshot + conversion
+//     legs + triangle legs); per-instrument `tradeable` flags → MARKET CLOSED
+//     short-circuit with next-open timestamp instead of scanning stale candles.
+//  7. DST-correct session/time windows via Intl timezones (London fix, NY 10am
+//     option cut, 5pm NY swap rollover, session hours). v7.1 pinned UTC hours
+//     were wrong for half the year.
+//  8. acct / risk / pairs query params are now WIRED (clamped) — Settings
+//     actually controls the engine. Env vars remain as defaults.
+//  9. Batch size 2→4 with a 20s elapsed guard → partial results instead of a
+//     hard Netlify timeout. Fetch errors are separated from gate rejections.
+// 10. timeframe/holdTime/tradeStyle returned by the engine (single source of
+//     truth — the UI no longer re-derives style from slPips).
+// ═══════════════════════════════════════════════════════════════════════════
 
 const OANDA_KEY   = process.env.OANDA_API_KEY;
 const FINNHUB_KEY = process.env.FINNHUB_API_KEY;
 const FRED_KEY    = process.env.FRED_API_KEY;
-const ACCOUNT_ID  = process.env.OANDA_ACCOUNT_ID || '001-001-21201857-001';
-const BASE        = 'https://api-trade.oanda.com/v3';
+const ACCOUNT_ID  = process.env.OANDA_ACCOUNT_ID; // required — no hardcoded default
+const OENV        = (process.env.OANDA_ENV || 'live').toLowerCase();
+const BASE        = (OENV === 'practice' ? 'https://api-fxpractice.oanda.com' : 'https://api-fxtrade.oanda.com') + '/v3';
+
+const ALL_PAIRS = ['AUD/CAD','AUD/CHF','AUD/JPY','AUD/NZD','AUD/USD','CAD/CHF','CAD/JPY','CHF/JPY','EUR/AUD','EUR/CAD','EUR/CHF','EUR/GBP','EUR/JPY','EUR/NZD','EUR/USD','GBP/AUD','GBP/CAD','GBP/CHF','GBP/JPY','GBP/NZD','GBP/USD','NZD/CAD','NZD/CHF','NZD/JPY','NZD/USD','USD/CAD','USD/CHF','USD/JPY'];
+
+function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+function round2(v) { return Math.round(v * 100) / 100; }
+
+function originBlocked(event) {
+  const allowed = process.env.AXIOM_ALLOWED_ORIGIN;
+  if (!allowed) return false;
+  const origin = event.headers?.origin || event.headers?.Origin || '';
+  const referer = event.headers?.referer || event.headers?.Referer || '';
+  return !(origin.startsWith(allowed) || referer.startsWith(allowed));
+}
 
 // ── DYNAMIC REGIMES ──────────────────────────────────────────────────────────
 const REQUIRED_CURRENCIES = ['USD','EUR','GBP','JPY','AUD','CAD','CHF','NZD','NOK','SEK'];
@@ -18,20 +62,20 @@ function getRegimes() {
     if (typeof parsed !== 'object' || parsed === null) return null;
     const missing = REQUIRED_CURRENCIES.filter(c => !parsed[c]);
     if (missing.length > 0) return { _error: `AXIOM_REGIMES missing: ${missing.join(', ')}` };
+    // v7.2 shape check — the v7.1 env format ({"USD":"BEARISH",…}) would
+    // otherwise silently degrade every regime to NEUTRAL inside the engine.
+    const DIRS = ['BULLISH', 'BEARISH', 'NEUTRAL'];
+    const badShape = REQUIRED_CURRENCIES.filter(c => !parsed[c] || typeof parsed[c] !== 'object' || !DIRS.includes(parsed[c].dir));
+    if (badShape.length > 0) {
+      return { _error: `AXIOM_REGIMES uses an old/invalid format for: ${badShape.join(', ')} — v7.2 expects {"USD":{"dir":"BULLISH","strength":"STRONG"},…}. Copy the exact JSON from Settings → Regime editor and re-paste it into Netlify.` };
+    }
     return parsed;
-  } catch(e) {
+  } catch (e) {
     return { _error: `AXIOM_REGIMES parse failed: ${e.message}` };
   }
 }
 
-// ── CB RATES — verified April 2026 ──────────────────────────────────────────
-const CB_RATES = {
-  USD: 3.75, EUR: 2.00, GBP: 4.50, JPY: 0.50,
-  AUD: 4.10, CAD: 2.75, CHF: 0.25, NZD: 3.50,
-  NOK: 4.50, SEK: 2.25,
-};
-
-// CB intervention veto levels
+// CB intervention veto levels (hard blocks — reviewed per release)
 const CB_INTERVENTION_LEVELS = {
   'USD/JPY': { buyVeto: 155.0,  sellVeto: null   },
   'EUR/CHF': { buyVeto: null,   sellVeto: 0.9200 },
@@ -59,6 +103,82 @@ const PURE_TA_STRATS = new Set([
   'HEAD_SHOULDERS','DOUBLE_TOP_BOTTOM','MARKET_STRUCTURE','FLAG_PENNANT',
   'RANGE_BREAKOUT','TREND_CONTINUATION_BREAK'
 ]);
+
+// ── TIMEZONE-CORRECT SESSION LOGIC (v7.2 — replaces fixed-UTC windows) ───────
+function tzParts(tz, d = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short',
+  }).formatToParts(d);
+  const get = t => parts.find(p => p.type === t)?.value;
+  return { h: parseInt(get('hour'), 10) % 24, mi: parseInt(get('minute'), 10), wd: get('weekday') };
+}
+function tzDateParts(tz, d = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short',
+  }).formatToParts(d);
+  const get = t => parts.find(p => p.type === t)?.value;
+  return { y: +get('year'), mo: +get('month'), d: +get('day'), h: parseInt(get('hour'), 10) % 24, mi: +get('minute'), wd: get('weekday') };
+}
+// Wall time in tz → UTC Date (iterative Intl technique, DST-correct)
+function wallToUTC(tz, y, mo, d, h, mi) {
+  let guess = Date.UTC(y, mo - 1, d, h, mi);
+  for (let i = 0; i < 2; i++) {
+    const w = tzDateParts(tz, new Date(guess));
+    const asUTC = Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi);
+    guess += Date.UTC(y, mo - 1, d, h, mi) - asUTC;
+  }
+  return new Date(guess);
+}
+
+const SESSIONS = {
+  SYDNEY:   { tz: 'Australia/Sydney',  s: 8, e: 17 },
+  TOKYO:    { tz: 'Asia/Tokyo',        s: 9, e: 18 },
+  LONDON:   { tz: 'Europe/London',     s: 8, e: 17 },
+  NEW_YORK: { tz: 'America/New_York',  s: 8, e: 17 },
+};
+function getActiveSessions(d = new Date()) {
+  return Object.entries(SESSIONS)
+    .filter(([, v]) => { const { h } = tzParts(v.tz, d); return h >= v.s && h < v.e; })
+    .map(([k]) => k);
+}
+const CCY_SESSIONS = {
+  USD: ['NEW_YORK','LONDON'], EUR: ['LONDON','NEW_YORK'], GBP: ['LONDON','NEW_YORK'],
+  CHF: ['LONDON','NEW_YORK'], JPY: ['TOKYO','LONDON'],    AUD: ['SYDNEY','TOKYO'],
+  NZD: ['SYDNEY','TOKYO'],    CAD: ['NEW_YORK'],          NOK: ['LONDON'], SEK: ['LONDON'],
+};
+function sessionSuitsPair(pair, active) {
+  const [b, q] = pair.split('/');
+  const home = new Set([...(CCY_SESSIONS[b] || []), ...(CCY_SESSIONS[q] || [])]);
+  return active.some(s => home.has(s));
+}
+// WM/Reuters fix anticipation: 15:30–16:10 LONDON LOCAL (fix is 16:00 London)
+function inLondonFixWindow(d = new Date()) {
+  const { h, mi } = tzParts('Europe/London', d);
+  return (h === 15 && mi >= 30) || (h === 16 && mi < 10);
+}
+// Swap/rollover entry window: 17:05–17:45 NEW YORK LOCAL (rollover is 17:00 NY)
+function inSwapWindow(d = new Date()) {
+  const { h, mi } = tzParts('America/New_York', d);
+  return h === 17 && mi >= 5 && mi < 45;
+}
+// NY option cut gravitation window: 09:00–10:00 NEW YORK LOCAL (cut is 10:00 NY)
+function inNYOptionCutWindow(d = new Date()) {
+  const { h } = tzParts('America/New_York', d);
+  return h === 9;
+}
+// Next FX open: Sunday 17:00 New York
+function nextSundayOpenISO(from = new Date()) {
+  for (let add = 0; add <= 8; add++) {
+    const probe = new Date(from.getTime() + add * 86400000);
+    const w = tzDateParts('America/New_York', probe);
+    if (w.wd === 'Sun') {
+      const open = wallToUTC('America/New_York', w.y, w.mo, w.d, 17, 0);
+      if (open.getTime() > from.getTime()) return open.toISOString();
+    }
+  }
+  return null;
+}
 
 // ── INDICATOR MATH ───────────────────────────────────────────────────────────
 
@@ -356,6 +476,31 @@ function detectFlagPennant(candles, currentAtr) {
   return null;
 }
 
+// ── PIP VALUE (v7.2 — correct USD conversion, single source of truth) ───────
+// Value in USD of ONE pip on ONE standard lot (100,000 units of base).
+// mids: map of pair → mid price (from the bulk pricing snapshot).
+function pipValueUSD(pair, mids) {
+  const quote = pair.split('/')[1];
+  const pipSize = quote === 'JPY' ? 0.01 : 0.0001;
+  const valueInQuote = pipSize * 100000; // per 1.00 standard lot
+  if (quote === 'USD') return valueInQuote;
+  if (quote === 'JPY' || quote === 'CHF' || quote === 'CAD') {
+    const m = mids['USD/' + quote];
+    return m ? valueInQuote / m : null;
+  }
+  // EUR, GBP, AUD, NZD quotes
+  const m = mids[quote + '/USD'];
+  return m ? valueInQuote * m : null;
+}
+
+// Price of 1 unit of ccy in USD (for triangular synthetics)
+function usdLeg(ccy, mids) {
+  if (ccy === 'USD') return 1;
+  if (mids[ccy + '/USD']) return mids[ccy + '/USD'];
+  if (mids['USD/' + ccy]) return 1 / mids['USD/' + ccy];
+  return null;
+}
+
 // ── DATA FETCHERS ────────────────────────────────────────────────────────────
 
 async function fetchCandles(instrument, granularity, count=200) {
@@ -368,15 +513,126 @@ async function fetchCandles(instrument, granularity, count=200) {
   }));
 }
 
-async function fetchLivePrice(instrument) {
-  const url=`${BASE}/accounts/${ACCOUNT_ID}/pricing?instruments=${instrument}`;
-  const res=await fetch(url,{headers:{'Authorization':`Bearer ${OANDA_KEY}`},signal:AbortSignal.timeout(6000)});
-  if (!res.ok) throw new Error(`Price fetch failed for ${instrument}`);
-  const data=await res.json();
-  const price=data.prices?.[0];
-  if (!price) throw new Error(`No price data for ${instrument}`);
-  const bid=parseFloat(price.bids[0].price), ask=parseFloat(price.asks[0].price);
-  return {bid,ask,mid:(bid+ask)/2,spread:ask-bid};
+// v7.2: ONE pricing request for the whole board — consistent snapshot,
+// tradeable flags for market-closed detection, conversion + triangle legs.
+async function fetchBulkPricing(pairs) {
+  const instruments = pairs.map(p => p.replace('/', '_')).join(',');
+  const url = `${BASE}/accounts/${ACCOUNT_ID}/pricing?instruments=${encodeURIComponent(instruments)}`;
+  const res = await fetch(url, { headers: { 'Authorization': `Bearer ${OANDA_KEY}` }, signal: AbortSignal.timeout(8000) });
+  if (!res.ok) { const t = await res.text(); throw new Error(`Bulk pricing failed ${res.status}: ${t.slice(0,200)}`); }
+  const data = await res.json();
+  const priceMap = {}, mids = {};
+  let anyTradeable = false;
+  for (const p of (data.prices || [])) {
+    const pair = p.instrument.replace('_', '/');
+    const bid = parseFloat(p.bids?.[0]?.price), ask = parseFloat(p.asks?.[0]?.price);
+    if (!isFinite(bid) || !isFinite(ask)) continue;
+    const tradeable = p.tradeable !== false;
+    if (tradeable) anyTradeable = true;
+    priceMap[pair] = { bid, ask, mid: (bid + ask) / 2, spread: ask - bid, tradeable, time: p.time };
+    mids[pair] = (bid + ask) / 2;
+  }
+  if (!Object.keys(priceMap).length) throw new Error('Bulk pricing returned no instruments');
+  return { priceMap, mids, anyTradeable };
+}
+
+// ── LIVE CB POLICY RATES (FRED, 1h cache) — replaces the hardcoded table ─────
+const CB_SERIES = {
+  USD: ['IORB','FEDFUNDS'],           EUR: ['ECBDFR','ECBMRRFR'],
+  GBP: ['IUDSOIA','IRSTCB01GBM156N'], JPY: ['IRSTCB01JPM156N','IR3TIB01JPM156N'],
+  AUD: ['IRSTCB01AUM156N','IR3TIB01AUM156N'], CAD: ['IRSTCB01CAM156N','IR3TIB01CAM156N'],
+  CHF: ['IRSTCB01CHM156N','IR3TIB01CHM156N'], NZD: ['IRSTCB01NZM156N','IR3TIB01NZM156N'],
+  NOK: ['IRSTCB01NOM156N','IR3TIB01NOM156N'], SEK: ['IRSTCB01SEM156N','IR3TIB01SEM156N'],
+};
+let _cbCache = null, _cbCacheTime = 0;
+
+async function fetchCBRatesLive() {
+  if (_cbCache && Date.now() - _cbCacheTime < 3600000) return _cbCache;
+  if (!FRED_KEY) throw new Error('FRED_API_KEY not configured');
+  const from = new Date(); from.setFullYear(from.getFullYear() - 2);
+  const fmt = d => d.toISOString().slice(0, 10);
+
+  async function latest(id) {
+    const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${FRED_KEY}&file_type=json&observation_start=${fmt(from)}&sort_order=desc&limit=12`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(7000) });
+    if (!res.ok) throw new Error(`FRED ${id} ${res.status}`);
+    const data = await res.json();
+    const obs = (data.observations || []).find(o => o.value !== '.' && o.value !== '');
+    if (!obs) throw new Error(`FRED ${id} empty`);
+    return { rate: parseFloat(obs.value), asOf: obs.date };
+  }
+
+  const rates = {}, missing = [];
+  await Promise.allSettled(Object.entries(CB_SERIES).map(async ([ccy, [id, fb]]) => {
+    try { rates[ccy] = await latest(id); }
+    catch { try { rates[ccy] = await latest(fb); } catch (e2) { missing.push(`${ccy}: ${e2.message}`); } }
+  }));
+  if (!Object.keys(rates).length) throw new Error(`FRED CB rates: all series failed (${missing[0] || 'unknown'})`);
+  const out = { rates, missing };
+  _cbCache = out; _cbCacheTime = Date.now();
+  return out;
+}
+
+// ── REAL CFTC COT (Socrata public API, TFF futures-only, 12h cache) ──────────
+// Leveraged-funds net positioning as % of open interest, z-scored vs the
+// trailing 26 weekly reports. USD read directly from the ICE Dollar Index.
+const COT_CONTRACTS = [
+  ['EUR', 'EURO FX'], ['JPY', 'JAPANESE YEN'], ['GBP', 'BRITISH POUND'],
+  ['AUD', 'AUSTRALIAN DOLLAR'], ['CAD', 'CANADIAN DOLLAR'], ['CHF', 'SWISS FRANC'],
+  ['NZD', 'NZ DOLLAR'], ['NZD', 'NEW ZEALAND'], ['USD', 'U.S. DOLLAR INDEX'], ['USD', 'USD INDEX'],
+];
+let _cotCache = null, _cotCacheTime = 0;
+
+function contractCcy(name) {
+  const n = (name || '').toUpperCase();
+  if (n.includes('MICRO') || n.includes('E-MINI') || n.includes('EMINI') || n.includes('XRATE') || n.includes('/')) return null;
+  for (const [ccy, key] of COT_CONTRACTS) if (n.includes(key)) return ccy;
+  return null;
+}
+
+async function fetchCFTCCOT() {
+  if (_cotCache && Date.now() - _cotCacheTime < 43200000) return _cotCache;
+  const from = new Date(); from.setMonth(from.getMonth() - 18);
+  const where = encodeURIComponent(`report_date_as_yyyy_mm_dd > '${from.toISOString().slice(0, 10)}T00:00:00.000'`);
+  const select = encodeURIComponent('market_and_exchange_names,report_date_as_yyyy_mm_dd,lev_money_positions_long_all,lev_money_positions_short_all,open_interest_all');
+  const url = `https://publicreporting.cftc.gov/resource/gpe5-46if.json?$select=${select}&$where=${where}&$order=${encodeURIComponent('report_date_as_yyyy_mm_dd DESC')}&$limit=15000`;
+
+  const res = await fetch(url, { headers: { 'Accept': 'application/json' }, signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error(`CFTC ${res.status}`);
+  const rows = await res.json();
+  if (!Array.isArray(rows) || !rows.length) throw new Error('CFTC returned no rows');
+
+  const series = {}; // ccy → Map(date → netPct)
+  for (const r of rows) {
+    const ccy = contractCcy(r.market_and_exchange_names);
+    if (!ccy) continue;
+    const oi = parseFloat(r.open_interest_all);
+    const lg = parseFloat(r.lev_money_positions_long_all);
+    const sh = parseFloat(r.lev_money_positions_short_all);
+    if (!isFinite(oi) || oi <= 0 || !isFinite(lg) || !isFinite(sh)) continue;
+    const date = String(r.report_date_as_yyyy_mm_dd).slice(0, 10);
+    if (!series[ccy]) series[ccy] = new Map();
+    if (!series[ccy].has(date)) series[ccy].set(date, (lg - sh) / oi);
+  }
+
+  const z = {}, netPct = {}; let asOf = null;
+  for (const [ccy, m] of Object.entries(series)) {
+    const pts = [...m.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(e => e[1]); // desc
+    if (pts.length < 13) continue;
+    const latest = pts[0];
+    const win = pts.slice(1, Math.min(27, pts.length));
+    const mean = win.reduce((a, b) => a + b, 0) / win.length;
+    const sd = Math.sqrt(win.reduce((a, b) => a + (b - mean) ** 2, 0) / win.length);
+    z[ccy] = sd < 1e-9 ? 0 : (latest - mean) / sd;
+    netPct[ccy] = latest;
+    const d = [...m.keys()].sort().pop();
+    if (!asOf || d > asOf) asOf = d;
+  }
+  if (!Object.keys(z).length) throw new Error('CFTC: no G10 contracts matched');
+
+  const out = { available: true, z, netPct, asOf };
+  _cotCache = out; _cotCacheTime = Date.now();
+  return out;
 }
 
 // ── FINNHUB ECONOMIC CALENDAR ────────────────────────────────────────────────
@@ -424,7 +680,7 @@ function countryToCcy(c) {
     'New Zealand':'NZD','Norway':'NOK','Sweden':'SEK'}[c]||null;
 }
 
-// ── FRED YIELD SPREADS ───────────────────────────────────────────────────────
+// ── FRED 10Y YIELD SPREADS ───────────────────────────────────────────────────
 const FRED_SERIES={'USD':'DGS10','JPY':'IRLTLT01JPM156N','EUR':'IRLTLT01DEM156N','GBP':'IRLTLT01GBM156N','AUD':'IRLTLT01AUM156N','CAD':'IRLTLT01CAM156N','CHF':'IRLTLT01CHM156N','NZD':'IRLTLT01NZM156N'};
 let _yieldCache=null, _yieldCacheTime=0;
 
@@ -449,19 +705,7 @@ async function fetchYieldSpreads() {
   } catch(e) { throw new Error(`FRED yield spreads: ${e.message}`); }
 }
 
-// ── SESSION LOGIC ────────────────────────────────────────────────────────────
-
-function getActiveSession() {
-  const h=new Date().getUTCHours();
-  const s={SYDNEY:{s:21,e:6},TOKYO:{s:23,e:8},LONDON:{s:7,e:16},NEW_YORK:{s:12,e:21}};
-  return Object.entries(s).filter(([,v])=>v.s<v.e?h>=v.s&&h<v.e:h>=v.s||h<v.e).map(([k])=>k);
-}
-
-function sessionSuitsPair(pair, active) {
-  const base=pair.split('/')[0];
-  const map={JPY:['TOKYO','LONDON'],AUD:['SYDNEY','TOKYO'],NZD:['SYDNEY','TOKYO'],EUR:['LONDON','NEW_YORK'],GBP:['LONDON','NEW_YORK'],CHF:['LONDON','NEW_YORK'],USD:['LONDON','NEW_YORK'],CAD:['NEW_YORK'],NOK:['LONDON'],SEK:['LONDON']};
-  return (map[base]||['LONDON','NEW_YORK']).some(s=>active.includes(s));
-}
+// ── MACRO HELPERS ────────────────────────────────────────────────────────────
 
 function regimeForPair(pair, REGIMES) {
   const [b,q]=pair.split('/');
@@ -476,23 +720,31 @@ function regimeForPair(pair, REGIMES) {
   return 'NEUTRAL';
 }
 
-function carryAnalysis(pair) {
+// v7.2: carry runs on LIVE FRED rates only; unavailable ⇒ strategies go inert.
+function carryAnalysis(pair, liveRates) {
+  if (!liveRates) return { available: false, reason: 'CB rates feed unavailable' };
   const [b,q]=pair.split('/');
-  const diff=(CB_RATES[b]||0)-(CB_RATES[q]||0);
-  return {diff,favors:diff>0.5?'BUY':diff<-0.5?'SELL':'NEUTRAL',strong:Math.abs(diff)>1.5};
+  const rb = liveRates[b]?.rate, rq = liveRates[q]?.rate;
+  if (rb == null || rq == null) return { available: false, reason: `CB rate missing: ${rb==null?b:q}` };
+  const diff = rb - rq;
+  return { available: true, diff, favors: diff>0.5?'BUY':diff<-0.5?'SELL':'NEUTRAL', strong: Math.abs(diff)>1.5 };
 }
 
 // ── MAIN SIGNAL ENGINE ───────────────────────────────────────────────────────
 
-async function analyzeSignal(pair, enabledStratIds, ecoData, yields, REGIMES, tradeStyle) {
-  tradeStyle = tradeStyle||'day';
+async function analyzeSignal(pair, ctx) {
+  const { enabledStratIds, ecoData, yields, REGIMES, tradeStyle, priceMap, mids, cbRates, cot, acct, risk, activeSessions } = ctx;
   const inst=pair.replace('/','_'), isJPY=pair.includes('JPY'), pipMult=isJPY?100:10000;
   const isScalp=tradeStyle==='scalp', isSwing=tradeStyle==='swing';
 
-  const [candlesH4,candlesH1,candlesD1,livePrice]=await Promise.all([
-    fetchCandles(inst,'H4',200),fetchCandles(inst,'H1',200),fetchCandles(inst,'D',100),fetchLivePrice(inst)
+  const livePrice = priceMap[pair];
+  if (!livePrice) throw new Error(`No live price for ${pair} in bulk snapshot`);
+  if (livePrice.tradeable === false) return { signal:null, reason:`${pair}: instrument not tradeable (market closed)` };
+
+  const [candlesH4,candlesH1,candlesD1]=await Promise.all([
+    fetchCandles(inst,'H4',200),fetchCandles(inst,'H1',200),fetchCandles(inst,'D',100)
   ]);
-  if (!candlesH4.length||!candlesH1.length) return{signal:null,reason:'Insufficient candle data'};
+  if (!candlesH4.length||!candlesH1.length) return{signal:null,reason:`${pair}: Insufficient candle data`};
 
   // Style-aware primary candles
   const primaryCandles=isScalp?candlesH1:isSwing?candlesD1:candlesH4;
@@ -541,13 +793,14 @@ async function analyzeSignal(pair, enabledStratIds, ecoData, yields, REGIMES, tr
   const cat4=at4[at4.length-1],avgat4=at4.slice(-20).reduce((a,b)=>a+b,0)/20;
   const catP=atP[atP.length-1]||cat4;
   const avgAtP_arr=atP.slice(-20).filter(Boolean); const avgAtP=avgAtP_arr.length?avgAtP_arr.reduce((a,b)=>a+b,0)/avgAtP_arr.length:cat4;
+  const catD=atd[atd.length-1]||cat4*4;
   const cmc4=mc4.macd[mc4.macd.length-1],cms4=mc4.signal[mc4.signal.length-1];
   const pmc4=mc4.macd[mc4.macd.length-2],pms4=mc4.signal[mc4.signal.length-2];
   const cmcP=mcP.macd[mcP.macd.length-1],cmsP=mcP.signal[mcP.signal.length-1];
   const pmcP=mcP.macd[mcP.macd.length-2],pmsP=mcP.signal[mcP.signal.length-2];
   const mcHistP=mcP.histogram;
   const cbb4=bb4[bb4.length-1],cax4=ax4[ax4.length-1],cic4=ic4[ic4.length-1];
-  const ckt4=keltnerChannels(candlesH4,20,1.5)[candlesH4.length-1];
+  const ckt4=kt4[candlesH4.length-1];
   const cvw1=vw1[vw1.length-1];
 
   // ── BOOLEANS ──────────────────────────────────────────────────────────────
@@ -611,8 +864,9 @@ async function analyzeSignal(pair, enabledStratIds, ecoData, yields, REGIMES, tr
   }
 
   // ── MACRO ─────────────────────────────────────────────────────────────────
-  const reg=regimeForPair(pair,REGIMES),carry=carryAnalysis(pair);
-  const active=getActiveSession(),sessOk=sessionSuitsPair(pair,active);
+  const reg=regimeForPair(pair,REGIMES);
+  const carry=carryAnalysis(pair, cbRates);
+  const active=activeSessions, sessOk=sessionSuitsPair(pair,active);
   const regIsBuy=reg==='STRONG_BUY'||reg==='MILD_BUY';
   const regIsNeutral=reg==='NEUTRAL';
   const techBias=(ae200p&&ae55p)?'BUY':(!ae200p&&!ae55p)?'SELL':null;
@@ -647,39 +901,59 @@ async function analyzeSignal(pair, enabledStratIds, ecoData, yields, REGIMES, tr
   let yDiff=0,yMom=false;
   if (by&&qy){yDiff=by.current-qy.current;const ym=(by.momentum||0)-(qy.momentum||0);yMom=(isBuy&&yDiff>0&&ym>0)||(!isBuy&&yDiff<0&&ym<0);}
 
-  const utcH=new Date().getUTCHours(),utcM=new Date().getUTCMinutes();
+  // COT z helper — USD read from the Dollar Index contract directly
+  const cotZ = (ccy) => (cot && cot.available && typeof cot.z[ccy] === 'number') ? cot.z[ccy] : null;
+  const bz = cotZ(base), qz = cotZ(quote);
+
+  // Time windows (v7.2 — DST-correct local market clocks)
+  const wmrWindow  = inLondonFixWindow();
+  const swapWindow = inSwapWindow();
+  const nyCutWindow= inNYOptionCutWindow();
+  const inLdn      = active.includes('LONDON');
+
+  // Short-term momentum for COT timing trigger (pair-level, 20 H4 bars)
+  const smPair = candlesH4.length>=20 ? (candlesH4[candlesH4.length-1].c-candlesH4[candlesH4.length-20].c)/candlesH4[candlesH4.length-20].c : 0;
 
   // ── STRATEGY CONDITIONS ───────────────────────────────────────────────────
   const SC={
     // MACRO
     BOJ_NORM:()=>{const m=REGIMES.JPY?.dir==='BULLISH'&&pair.includes('JPY')&&(pair.startsWith('USD')||pair.startsWith('EUR')||pair.startsWith('GBP'));return{met:m,score:m?3:0,desc:m?'BOJ normalization JPY bid':'N/A'};},
     CB_DIV:()=>{const br=REGIMES[base],qr=REGIMES[quote];const d=br&&qr&&br.dir!==qr.dir&&br.dir!=='NEUTRAL'&&qr.dir!=='NEUTRAL';const s=d?(br.strength==='STRONG'||qr.strength==='STRONG'?3:2):0;return{met:d,score:s,desc:d?`CB div: ${base} ${br.dir} vs ${quote} ${qr.dir}`:'No CB div'};},
-    REAL_YLD:()=>{const d=((CB_RATES[base]||0)-2.5)-((CB_RATES[quote]||0)-2.5);const m=Math.abs(d)>1.0;return{met:m,score:m?2:0,desc:m?`Real yield ${d.toFixed(2)}%`:'Insufficient'};},
-    CB_COMM:()=>{const m=REGIMES[base]?.strength==='STRONG'||REGIMES[quote]?.strength==='STRONG';return{met:m,score:m?2:1,desc:m?'Strong CB comm':'Moderate CB'};},
-    GLOB_MAC:()=>{const m=Object.values(REGIMES).filter(r=>r.strength==='STRONG').length>=3;return{met:m,score:m?2:0,desc:m?'Global macro aligned':'Macro unclear'};},
+    // v7.2b: directional — a differential AGAINST the trade is not confirmation.
+    REAL_YLD:()=>{if(!carry.available)return{met:false,score:0,desc:carry.reason};const m=(isBuy&&carry.diff>1.0)||(!isBuy&&carry.diff<-1.0);return{met:m,score:m?2:0,desc:m?`Rate differential ${carry.diff.toFixed(2)}% favors ${isBuy?'BUY':'SELL'} (live FRED)`:`Differential not supportive (${carry.diff.toFixed(2)}%)`};},
+    CB_COMM:()=>{const m=REGIMES[base]?.strength==='STRONG'||REGIMES[quote]?.strength==='STRONG';return{met:m,score:m?2:0,desc:m?'Strong CB regime conviction':'No STRONG regime'};},
+    GLOB_MAC:()=>{const m=Object.values(REGIMES).filter(r=>r.strength==='STRONG').length>=3;return{met:m,score:m?2:0,desc:m?'Global macro aligned (3+ STRONG)':'Macro unclear'};},
     GRW_DIV:()=>{const m=REGIMES[base]?.dir!==REGIMES[quote]?.dir;return{met:m,score:m?2:0,desc:m?'Growth divergence':'No growth div'};},
     EARL_WRN:()=>{const m=(isBuy&&rso4)||(!isBuy&&rsob4);return{met:m,score:m?2:0,desc:m?'RSI+regime divergence':'No early warning'};},
     REGIME_SW:()=>{const m=gcross||dcross;return{met:m,score:m?2:0,desc:m?'EMA regime switch':'No switch'};},
     TOT_SHOCK:()=>{const m=['AUD','CAD','NZD'].some(c=>pair.includes(c))&&volp;return{met:m,score:m?1:0,desc:m?'Commodity + vol':'No ToT'};},
     BOP_FLOW:()=>{const m=(pair.includes('JPY')||pair.includes('CHF'))&&reg!=='NEUTRAL';return{met:m,score:m?1:0,desc:m?'BOP safe haven':'Not BOP pair'};},
-    PPP_VAL:()=>({met:true,score:1,desc:`PPP: ${ae200d1?'above':'below'} D1 EMA200`}),
-    YIELD_SPR:()=>{if(!FRED_KEY||!by||!qy)return{met:false,score:0,desc:'FRED key needed'};const m=yMom&&Math.abs(yDiff)>0.3;const s=m?(Math.abs(yDiff)>1.0?3:Math.abs(yDiff)>0.5?2:1):0;return{met:m,score:s,desc:m?`10Y spread ${yDiff.toFixed(2)}% aligned`:'Yield not aligned'};},
+    // v7.2: was met:true always (gutted the macro gate + blocked the pure-TA
+    // path). Now a genuine valuation-reversion condition: price stretched
+    // ≥2.5× daily ATR from the D1 EMA200 long-run anchor, trading back toward it.
+    PPP_VAL:()=>{
+      const devAtr=(cp-ce200d1)/(catD||1e-9);
+      const m=(isBuy&&devAtr<=-2.5)||(!isBuy&&devAtr>=2.5);
+      const s=m?(Math.abs(devAtr)>4?2:1):0;
+      return{met:m,score:s,desc:m?`Valuation stretch ${devAtr.toFixed(1)}× ATR_D from D1 EMA200`:`Near long-run anchor (${devAtr.toFixed(1)}× ATR_D)`};
+    },
+    YIELD_SPR:()=>{if(!FRED_KEY||!by||!qy)return{met:false,score:0,desc:'FRED yields unavailable'};const m=yMom&&Math.abs(yDiff)>0.3;const s=m?(Math.abs(yDiff)>1.0?3:Math.abs(yDiff)>0.5?2:1):0;return{met:m,score:s,desc:m?`10Y spread ${yDiff.toFixed(2)}% aligned`:'Yield not aligned'};},
     ECO_SURP:()=>{const m=(isBuy&&netEco>0.05)||(!isBuy&&netEco<-0.05);return{met:m,score:m?(Math.abs(netEco)>0.15?3:2):0,desc:m?`Eco surprise index ${netEco.toFixed(3)}`:'Eco not aligned'};},
-    // TECHNICAL (existing)
+    // TECHNICAL
     STRUCT_BK:()=>{const m=(isBuy&&cp>nR*0.999&&roomR)||(!isBuy&&cp<nS*1.001&&roomS);return{met:m,score:m?3:0,desc:m?'Structure breakout':'No breakout'};},
     ICT_OB:()=>{const m=(isBuy&&atbob)||(!isBuy&&atbos);return{met:m,score:m?3:0,desc:m?'ICT order block':'Not at OB'};},
     STOP_HNT:()=>{const rc=candlesH4.slice(-5);const sh=rc.some(c=>c.h>nR)&&cp<nR,sl=rc.some(c=>c.l<nS)&&cp>nS;const m=(!isBuy&&sh)||(isBuy&&sl);return{met:m,score:m?3:0,desc:m?'Stop hunt sweep':'No stop hunt'};},
-    LIQ_SWEEP:()=>{const rc=candlesH4.slice(-5);const sa=rc.slice(0,-1).some(c=>c.h>nR)&&candlesH4[candlesH4.length-1].c<nR;const sb=rc.slice(0,-1).some(c=>c.l<nS)&&candlesH4[candlesH4.length-1].c>nS;const inLdn=active.includes('LONDON');const m=(isBuy&&sb&&avw)||(!isBuy&&sa&&bvw);return{met:m,score:m?(inLdn?3:2):0,desc:m?`Liquidity sweep${inLdn?' (London)':''}`:'No sweep'};},
+    LIQ_SWEEP:()=>{const rc=candlesH4.slice(-5);const sa=rc.slice(0,-1).some(c=>c.h>nR)&&candlesH4[candlesH4.length-1].c<nR;const sb=rc.slice(0,-1).some(c=>c.l<nS)&&candlesH4[candlesH4.length-1].c>nS;const m=(isBuy&&sb&&avw)||(!isBuy&&sa&&bvw);return{met:m,score:m?(inLdn?3:2):0,desc:m?`Liquidity sweep${inLdn?' (London)':''}`:'No sweep'};},
     SESS_BRK:()=>{const m=(active.includes('LONDON')||active.includes('NEW_YORK'))&&adxs&&volp;return{met:m,score:m?2:0,desc:m?`Session breakout: ${active.join('/')}`:'Wrong session'};},
     VOL_BRK:()=>{const m=(bbsq||ksq)&&adxs;return{met:m,score:m?3:0,desc:m?'Vol squeeze breakout':'No squeeze'};},
     ADX_BRK:()=>{const m=adxs&&cax4&&((isBuy&&cax4.plusDI>cax4.minusDI)||(!isBuy&&cax4.minusDI>cax4.plusDI));return{met:m,score:m?2:0,desc:m?`ADX ${cax4?.adx?.toFixed(1)} trend`:'ADX weak'};},
-    LDN_BRK:()=>{const m=active.includes('LONDON')&&volp&&((isBuy&&ae200h1)||(!isBuy&&!ae200h1));return{met:m,score:m?2:0,desc:m?'London breakout':'Not London'};},
+    LDN_BRK:()=>{const m=inLdn&&volp&&((isBuy&&ae200h1)||(!isBuy&&!ae200h1));return{met:m,score:m?2:0,desc:m?'London breakout':'Not London'};},
     FIBO_PULL:()=>{const hi=Math.max(...candlesH4.slice(-20).map(c=>c.h)),lo=Math.min(...candlesH4.slice(-20).map(c=>c.l));const fb=lo+(hi-lo)*0.382,fs=lo+(hi-lo)*0.618;const m=(isBuy&&cp>=fb*0.998&&cp<=fb*1.002)||(!isBuy&&cp>=fs*0.998&&cp<=fs*1.002);return{met:m,score:m?2:0,desc:m?'61.8% Fibonacci':'Not at Fib'};},
     ICHIMOKU:()=>{const m=(isBuy&&pac&&tak)||(!isBuy&&pbc&&tbk);return{met:m,score:m?3:0,desc:m?'Ichimoku full alignment':'Ichi not aligned'};},
     KELTNER:()=>{const m=ksq&&volp;return{met:m,score:m?2:0,desc:m?'Keltner squeeze':'No Keltner'};},
     SUPPLY_DEM:()=>{const m=(isBuy&&atSup&&roomR)||(!isBuy&&atRes&&roomS);return{met:m,score:m?2:0,desc:m?'At S/D zone':'Not at S/D'};},
     ENG_CAN:()=>{const m=(isBuy&&(eg4==='BULLISH'||eg1==='BULLISH'))||(!isBuy&&(eg4==='BEARISH'||eg1==='BEARISH'));return{met:m,score:m?2:0,desc:m?`${eg4||eg1} engulfing`:'No engulfing'};},
-    GAMMA_EXP:()=>{const nyFix=utcH>=14&&utcH<15;const ru=isJPY?1.0:0.005;const nr=Math.round(cp/ru)*ru;const near=Math.abs(cp-nr)/cat4<0.3;const lv=cat4<avgat4*0.85;const m=near&&lv&&(nyFix||!adxs);return{met:m,score:m?2:0,desc:m?`Gamma magnet ${nr}${nyFix?' (fix window)':''}`:'No gamma'};},
+    GAMMA_EXP:()=>{const ru=isJPY?1.0:0.005;const nr=Math.round(cp/ru)*ru;const near=Math.abs(cp-nr)/cat4<0.3;const lv=cat4<avgat4*0.85;const m=near&&lv&&(nyCutWindow||!adxs);return{met:m,score:m?2:0,desc:m?`Gamma magnet ${nr}${nyCutWindow?' (NY cut window)':''}`:'No gamma'};},
     NEWS_DFT:()=>{if(newsAligned){const mg=Math.max(...[...bSurp,...qSurp].map(s=>Math.abs(s.surprise)),0);return{met:true,score:mg>0.3?3:2,desc:`News drift: ${(mg*100).toFixed(0)}% surprise`};}const rm=Math.abs((cp-(candlesH1[candlesH1.length-4]?.c||cp))/(cat4||0.001));const m=rm>1.5&&volp&&((isBuy&&cp>(candlesH1[candlesH1.length-4]?.c||0))||(!isBuy&&cp<(candlesH1[candlesH1.length-4]?.c||999)));return{met:m,score:m?2:0,desc:m?`News drift: ${rm.toFixed(1)}× ATR`:'No news drift'};},
     TSM_CTA:()=>{const m=((isBuy&&ae200d1&&ae200h4)||(!isBuy&&!ae200d1&&!ae200h4))&&adxt;return{met:m,score:m?2:0,desc:m?'CTA trend aligned':'CTA not aligned'};},
     CS_MOM:()=>{const m=(isBuy&&ae200h4&&mbull)||(!isBuy&&!ae200h4&&mbear);return{met:m,score:m?2:0,desc:m?'Cross-sectional momentum':'No CS mom'};},
@@ -692,18 +966,55 @@ async function analyzeSignal(pair, enabledStratIds, ecoData, yields, REGIMES, tr
     STOCH_RSI:()=>{const m=(isBuy&&sto4&&stbx)||(!isBuy&&stob4&&stsx);return{met:m,score:m?2:0,desc:m?`StochRSI ${isBuy?'oversold':'overbought'} cross`:'No StochRSI'};},
     RSIMR:()=>{const m=(isBuy&&crsd<30)||(!isBuy&&crsd>70);return{met:m,score:m?2:0,desc:m?`D1 RSI extreme ${crsd?.toFixed(1)}`:'RSI not extreme'};},
     ATR_FADE:()=>{const dr=cat4*6;const ext=candlesH4[candlesH4.length-6]?.c?Math.abs(cp-candlesH4[candlesH4.length-6].c)>dr*1.5:false;const m=ext&&!adxs;return{met:m,score:m?1:0,desc:m?'ATR overextension':'No overextension'};},
-    // CARRY
-    RATE_SRP:()=>{const al=(isBuy&&carry.favors==='BUY')||(!isBuy&&carry.favors==='SELL');const nb=newsAligned?1:0;return{met:al&&carry.strong,score:(al&&carry.strong?3:al?1:0)+nb,desc:al?`Rate spread ${carry.diff.toFixed(2)}%${nb?' +news':''}`:'Rate against dir'};},
-    CROSS_CAR:()=>{const al=(isBuy&&carry.favors==='BUY')||(!isBuy&&carry.favors==='SELL');return{met:al&&carry.strong,score:al&&carry.strong?2:al?1:0,desc:al?`Cross-carry ${carry.diff.toFixed(2)}%`:'Carry against'};},
-    CARRY_MOM:()=>{const c=(isBuy&&carry.favors==='BUY')||(!isBuy&&carry.favors==='SELL');const m=(isBuy&&mbull)||(!isBuy&&mbear);return{met:c&&m,score:c&&m?2:0,desc:c&&m?'Carry + momentum':'Carry-mom misaligned'};},
-    UIP_DEV:()=>{const m=Math.abs(carry.diff)>2.0&&((isBuy&&ae200h4)||(!isBuy&&!ae200h4));return{met:m,score:m?1:0,desc:m?'UIP deviation':'Not significant'};},
-    CARRY:()=>{const al=(isBuy&&carry.favors==='BUY')||(!isBuy&&carry.favors==='SELL');return{met:al,score:al?1:0,desc:`Carry ${carry.diff.toFixed(2)}%`};},
-    // FLOW/OTHER
-    SWAP_TIME:()=>{const inW=utcH===22&&utcM>=15&&utcM<=45;const al=(isBuy&&carry.favors==='BUY')||(!isBuy&&carry.favors==='SELL');const m=inW&&carry.strong&&al;return{met:m,score:m?2:0,desc:m?`Rollover timing: ${carry.diff.toFixed(2)}%`:'Not rollover window'};},
-    COT_REAL:()=>{const isUsdBase=base==='USD';const lm=candlesD1.length>=26?(candlesD1[candlesD1.length-1].c-candlesD1[candlesD1.length-26].c)/candlesD1[candlesD1.length-26].c:0;const sm=candlesH4.length>=20?(candlesH4[candlesH4.length-1].c-candlesH4[candlesH4.length-20].c)/candlesH4[candlesH4.length-20].c:0;if(isUsdBase){const ul=lm>0.04&&sm<lm*0.5,us=lm<-0.04&&sm>lm*0.5;const ct=(!isBuy&&ul)||(isBuy&&us);return{met:ct,score:ct?2:0,desc:ct?`COT DXY extreme: USD ${(lm*100).toFixed(1)}% 26wk`:'DXY COT not extreme'};}const ct=(!isBuy&&lm>0.04&&sm<lm*0.5)||(isBuy&&lm<-0.04&&sm>lm*0.5);return{met:ct,score:ct?2:0,desc:ct?`COT extreme: ${base} ${(lm*100).toFixed(1)}% 26wk`:'COT not extreme'};},
-    CB_INTV:()=>{if(!iv)return{met:true,score:1,desc:'No CB intervention risk'};const safe=(isBuy&&(!iv.buyVeto||cp<iv.buyVeto*0.97))||(!isBuy&&(!iv.sellVeto||cp>iv.sellVeto*1.03));return{met:safe,score:safe?1:0,desc:safe?'Clear of intervention zone':'Near intervention'};},
-    TRI_ARB:()=>{const t=livePrice.spread<(isJPY?0.03:0.00015);return{met:t,score:t?1:0,desc:t?'Tight spread / liquidity':'Wide spread'};},
-    WMR_FIX:()=>{const n=(utcH===15&&utcM>=30)||(utcH===16&&utcM<=15);return{met:n,score:n?2:0,desc:n?'WMR Fix window':'Not fix window'};},
+    // CARRY — all inert without live CB rates (no stale substitution)
+    RATE_SRP:()=>{if(!carry.available)return{met:false,score:0,desc:carry.reason};const al=(isBuy&&carry.favors==='BUY')||(!isBuy&&carry.favors==='SELL');const nb=newsAligned?1:0;return{met:al&&carry.strong,score:(al&&carry.strong?3:0)+((al&&carry.strong)?nb:0),desc:al?`Rate spread ${carry.diff.toFixed(2)}%${nb&&al&&carry.strong?' +news':''}`:'Rate against dir'};},
+    CROSS_CAR:()=>{if(!carry.available)return{met:false,score:0,desc:carry.reason};const al=(isBuy&&carry.favors==='BUY')||(!isBuy&&carry.favors==='SELL');return{met:al&&carry.strong,score:al&&carry.strong?2:0,desc:al?`Cross-carry ${carry.diff.toFixed(2)}%`:'Carry against'};},
+    CARRY_MOM:()=>{if(!carry.available)return{met:false,score:0,desc:carry.reason};const c=(isBuy&&carry.favors==='BUY')||(!isBuy&&carry.favors==='SELL');const m=(isBuy&&mbull)||(!isBuy&&mbear);return{met:c&&m,score:c&&m?2:0,desc:c&&m?'Carry + momentum':'Carry-mom misaligned'};},
+    UIP_DEV:()=>{if(!carry.available)return{met:false,score:0,desc:carry.reason};const m=Math.abs(carry.diff)>2.0&&((isBuy&&ae200h4)||(!isBuy&&!ae200h4));return{met:m,score:m?1:0,desc:m?'UIP deviation':'Not significant'};},
+    CARRY:()=>{if(!carry.available)return{met:false,score:0,desc:carry.reason};const al=(isBuy&&carry.favors==='BUY')||(!isBuy&&carry.favors==='SELL');return{met:al,score:al?1:0,desc:`Carry ${carry.diff.toFixed(2)}% (live)`};},
+    SWAP_TIME:()=>{if(!carry.available)return{met:false,score:0,desc:carry.reason};const al=(isBuy&&carry.favors==='BUY')||(!isBuy&&carry.favors==='SELL');const m=swapWindow&&carry.strong&&al;return{met:m,score:m?2:0,desc:m?`Rollover window (5pm NY): ${carry.diff.toFixed(2)}%`:'Not rollover window'};},
+    // FLOW — v7.2: REAL CFTC positioning
+    COT_REAL:()=>{
+      if(!cot||!cot.available)return{met:false,score:0,desc:'CFTC COT feed unavailable'};
+      if(bz===null&&qz===null)return{met:false,score:0,desc:'No CFTC contract for pair'};
+      // Fade a crowded extreme when short-term momentum has already turned with the trade.
+      const fadeBaseShort=!isBuy&&bz!==null&&bz>=1.5;   // crowd long base → sell base
+      const fadeBaseLong = isBuy&&bz!==null&&bz<=-1.5;  // crowd short base → buy base
+      const fadeQuoteViaBuy = isBuy&&qz!==null&&qz>=1.5;   // crowd long quote → buy pair
+      const fadeQuoteViaSell=!isBuy&&qz!==null&&qz<=-1.5;  // crowd short quote → sell pair
+      const posOk=fadeBaseShort||fadeBaseLong||fadeQuoteViaBuy||fadeQuoteViaSell;
+      const momTurn=(isBuy&&smPair>0)||(!isBuy&&smPair<0);
+      const m=posOk&&momTurn;
+      const zTxt=bz!==null?`${base} z=${bz.toFixed(1)}`:`${quote} z=${qz.toFixed(1)}`;
+      return{met:m,score:m?2:0,desc:m?`CFTC extreme faded: ${zTxt} + momentum turn`:posOk?'COT extreme, momentum not turned':'COT not extreme'};
+    },
+    COT_FADE:()=>{
+      if(!cot||!cot.available)return{met:false,score:0,desc:'CFTC COT feed unavailable'};
+      if(bz===null&&qz===null)return{met:false,score:0,desc:'No CFTC contract for pair'};
+      const m=(!isBuy&&bz!==null&&bz>=2.0)||(isBuy&&bz!==null&&bz<=-2.0)||(isBuy&&qz!==null&&qz>=2.0)||(!isBuy&&qz!==null&&qz<=-2.0);
+      const zTxt=bz!==null?`${base} z=${bz.toFixed(1)}`:`${quote} z=${qz.toFixed(1)}`;
+      return{met:m,score:m?2:0,desc:m?`CFTC ≥2σ positioning fade: ${zTxt}`:'No 2σ positioning extreme'};
+    },
+    // v7.2: was met:true score:1 for the 24 pairs WITHOUT levels — a freebie
+    // that inflated confluence counts. Now only real clearance counts.
+    CB_INTV:()=>{
+      if(!iv)return{met:false,score:0,desc:'No intervention levels for pair'};
+      const safe=(isBuy&&(!iv.buyVeto||cp<iv.buyVeto*0.97))||(!isBuy&&(!iv.sellVeto||cp>iv.sellVeto*1.03));
+      return{met:safe,score:safe?1:0,desc:safe?'Clear of CB intervention zone':'Near intervention level'};
+    },
+    // v7.2: REAL triangular consistency — cross vs USD-leg synthetic.
+    TRI_ARB:()=>{
+      if(base==='USD'||quote==='USD')return{met:false,score:0,desc:'Direct USD pair — no triangle'};
+      const b$=usdLeg(base,mids), q$=usdLeg(quote,mids);
+      if(!b$||!q$)return{met:false,score:0,desc:'USD legs unavailable'};
+      const synth=b$/q$;
+      const devPips=(cp-synth)*pipMult;
+      // Rich cross (dev>0) corrects DOWN → favors SELL; cheap corrects UP → BUY.
+      const m=Math.abs(devPips)>=1.5&&((isBuy&&devPips<=-1.5)||(!isBuy&&devPips>=1.5));
+      const s=m?(Math.abs(devPips)>=3?2:1):0;
+      return{met:m,score:s,desc:m?`Triangle dev ${devPips.toFixed(1)}p vs synthetic ${synth.toFixed(isJPY?3:5)}`:`Triangle aligned (${devPips.toFixed(1)}p)`};
+    },
+    WMR_FIX:()=>{return{met:wmrWindow,score:wmrWindow?2:0,desc:wmrWindow?'WMR fix window (16:00 London)':'Not fix window'};},
     FX_VOL:()=>{const l=cat4<avgat4*0.8;return{met:l,score:l?1:0,desc:l?'Low vol carry env':'Elevated vol'};},
     SAFE_HVN:()=>{const s=pair.includes('JPY')||pair.includes('CHF');const ro=REGIMES.USD?.dir==='BEARISH'&&REGIMES.JPY?.dir==='BULLISH';const m=s&&ro&&reg!=='NEUTRAL';return{met:m,score:m?3:0,desc:m?'Safe haven demand':'No safe haven'};},
     GOLD_USD:()=>{const m=REGIMES.USD?.dir==='BEARISH'&&(pair.includes('CHF')||pair.includes('JPY'));return{met:m,score:m?2:0,desc:m?'Gold/USD correlation':'No gold signal'};},
@@ -714,7 +1025,7 @@ async function analyzeSignal(pair, enabledStratIds, ecoData, yields, REGIMES, tr
 
     // ══ PURE-TA: Group A — EMA / Momentum ════════════════════════════════════
     EMA_CROSS_55:()=>{const freshCross=ema55CrossRecent&&((isBuy&&ema55CrossDir==='BULLISH')||(!isBuy&&ema55CrossDir==='BEARISH'));const pb=isBuy?(cp>=ce55p*0.998&&cp<=ce55p*1.005):(cp<=ce55p*1.002&&cp>=ce55p*0.995);const rsiN=crsP>=38&&crsP<=62;const m=freshCross&&pb&&rsiN;return{met:m,score:m?3:0,desc:m?`EMA55/200 cross pullback (${ema55CrossDir})`:'No EMA55 cross'};},
-    PRICE_ACTION_PIN:()=>{const shadow=shadowP;const atLvl=(isBuy&&atSupP)||(!isBuy&&atResP);const rsiDiv=(isBuy&&crsP<40&&crsP>prsP)||(!isBuy&&crsP>60&&crsP<prsP);const ema55Ok=isBuy?ae55p:!ae55p;const m=shadow&&atLvl&&rsiDiv&&ema55Ok;const type=shadow==='HAMMER'?'Hammer pin':'Shooting star pin';return{met:m,score:m?3:0,desc:m?`${type} at S/R level`:'No pin bar'};},
+    PRICE_ACTION_PIN:()=>{const shadow=shadowP;const shOk=(isBuy&&shadow==='HAMMER')||(!isBuy&&shadow==='SHOOTING_STAR');const atLvl=(isBuy&&atSupP)||(!isBuy&&atResP);const rsiDiv=(isBuy&&crsP<40&&crsP>prsP)||(!isBuy&&crsP>60&&crsP<prsP);const ema55Ok=isBuy?ae55p:!ae55p;const m=shOk&&atLvl&&rsiDiv&&ema55Ok;const type=shadow==='HAMMER'?'Hammer pin':'Shooting star pin';return{met:m,score:m?3:0,desc:m?`${type} at S/R level`:'No pin bar'};},
     INSIDE_BAR_BO:()=>{if(!insideB)return{met:false,score:0,desc:'No inside bar'};const bkBull=cp>insideB.motherHigh*1.001;const bkBear=cp<insideB.motherLow*0.999;const ema55Dir=isBuy?(ce55p>ce200p):(ce55p<ce200p);const m=(isBuy&&bkBull&&ema55Dir&&(volExpand||slStochBullCross))||(!isBuy&&bkBear&&ema55Dir&&(volExpand||slStochBearCross));return{met:m,score:m?2:0,desc:m?`Inside bar breakout (${isBuy?'bull':'bear'})`:'No IB breakout'};},
     SR_BOUNCE:()=>{const atMT=(isBuy&&multiTouchSupport)||(!isBuy&&multiTouchResist);const rsiExt=(isBuy&&crsP<35)||(!isBuy&&crsP>65);const ema200Side=isBuy?ae200p:!ae200p;const stochPending=isBuy?(!slStochBullCross&&slStochOversold):(!slStochBearCross&&slStochOverbought);const m=atMT&&rsiExt&&ema200Side&&stochPending;return{met:m,score:m?3:0,desc:m?`Multi-touch S/R bounce (RSI ${crsP?.toFixed(0)})`:'No SR bounce'};},
     MACD_HIST_DIVERGENCE:()=>{const divOk=(isBuy&&macdHistDivBull)||(!isBuy&&macdHistDivBear);const atLvl=(isBuy&&atSupP)||(!isBuy&&atResP);const rsiDiv=(isBuy&&crsP<50&&crsP>prsP)||(!isBuy&&crsP>50&&crsP<prsP);const m=divOk&&atLvl&&rsiDiv;return{met:m,score:m?3:0,desc:m?`MACD hist divergence (${isBuy?'bull':'bear'})`:'No MACD div'};},
@@ -784,29 +1095,41 @@ async function analyzeSignal(pair, enabledStratIds, ecoData, yields, REGIMES, tr
   const tp1=parseFloat((entry+dir*tp1p*pip).toFixed(dec));
   const tp2=parseFloat((entry+dir*tp2p*pip).toFixed(dec));
   const tp3=parseFloat((entry+dir*tp3p*pip).toFixed(dec));
-  const ACCT=parseInt(process.env.AXIOM_ACCT||'10000'),RISK=parseFloat(process.env.AXIOM_RISK||'2');
-  const lot=Math.max(0.01,Math.min(2.00,Math.round((ACCT*(RISK/100))/(slPips*10.0)*100)/100));
+
+  // v7.2 — correct money math: pip value in USD via live conversion legs.
+  const pipVal = pipValueUSD(pair, mids);
+  if (pipVal == null || !isFinite(pipVal)) throw new Error(`${pair}: pip-value conversion leg missing from price snapshot`);
+  const riskTargetUSD = acct * (risk/100);
+  const lot = clamp(round2(riskTargetUSD / (slPips * pipVal)), 0.01, 2.00);
+  const riskAmount = round2(slPips * pipVal * lot); // actual $ at the clamped lot
+
   const maxP=triggered.length*3;
   const rawProb=Math.round(50+(maxP>0?total/maxP*25:0)+(isStrong?4:0)+(yMom?3:0)+(newsAligned?3:0)+sessionPenalty);
   const prob=isPureTASignal?Math.min(62,Math.max(50,rawProb)):Math.min(85,Math.max(50,rawProb));
+
+  const TF_BY_STYLE={scalp:'H1',day:'H4',swing:'D1'};
+  const HOLD_BY_STYLE={scalp:'2-12 hrs',day:'1-3 days',swing:'1-3 weeks'};
 
   return{signal:{
     pair,direction:isBuy?'BUY':'SELL',entry,sl,tp1,tp2,tp3,
     slPips,tp1Pips:tp1p,tp2Pips:tp2p,tp3Pips:tp3p,
     rr1:+(tp1p/slPips).toFixed(1),rr2:+(tp2p/slPips).toFixed(1),rr3:+(tp3p/slPips).toFixed(1),
-    lotSize:lot,riskAmount:+(ACCT*(RISK/100)).toFixed(2),probability:prob,
+    lotSize:lot,riskAmount,pipValuePerLot:+pipVal.toFixed(4),probability:prob,
     isPureTASignal,pureTA_T,
-    primaryStrategy:{id:triggered[0].id,name:triggered[0].id,tier:triggered.length>=6?'S':triggered.length>=4?'A':'C',cat:isPureTASignal?'PURE TECHNICAL':'REAL',wr:prob},
-    supportingStrategy:{id:(triggered[1]||triggered[0]).id,name:(triggered[1]||triggered[0]).id},
+    tradeStyle,timeframe:TF_BY_STYLE[tradeStyle]||'H4',holdTime:HOLD_BY_STYLE[tradeStyle]||'1-3 days',
+    primaryStrategy:{id:triggered[0].id},
+    supportingStrategy:{id:(triggered[1]||triggered[0]).id},
     confluences:triggered.slice(0,6).map(s=>s.desc),
+    confluenceIds:triggered.slice(0,6).map(s=>s.id),
+    allTriggered:triggered.map(s=>({id:s.id,score:s.score,desc:s.desc})),
     technicalScore:total,strategiesTriggered:triggered.length,macroTriggered:macroT,techTriggered:techT,
-    yieldSpreadAligned:yMom,newsSurpriseAligned:newsAligned,tradeStyle,
+    yieldSpreadAligned:yMom,newsSurpriseAligned:newsAligned,
     technicalDetails:{
       techNote:`EMA55:${ae55p?'above':'below'} EMA200:${ae200p?'above':'below'} ADX:${cax4?.adx?.toFixed(1)} RSI:${crsP?.toFixed(1)} Stoch:${slStochP.k?.toFixed(0)} PureTA:${pureTA_T}`,
-      sessionNote:`Sessions:${active.join(',')} Optimal:${sessOk}${!sessOk?' (off-session -5%)':''}`,
-      regimeNote:`Regime:${reg} Carry:${carry.diff.toFixed(2)}% Yield:${yDiff.toFixed(2)}%`
+      sessionNote:`Sessions:${active.join(',')||'none'} Optimal:${sessOk}${!sessOk?' (off-session -5%)':''}`,
+      regimeNote:`Regime:${reg} Carry:${carry.available?carry.diff.toFixed(2)+'%':'n/a'} Yield:${yDiff.toFixed(2)}%`
     },
-    indicators:{rsiPrimary:crsP?.toFixed(1),adxH4:cax4?.adx?.toFixed(1),ema200:ce200p?.toFixed(dec),ema55:ce55p?.toFixed(dec),atr:(catP*pipMult)?.toFixed(1),slowStochK:slStochP.k?.toFixed(0),carry:carry.diff?.toFixed(2),yieldSpread:yDiff?.toFixed(2),ecoSurprise:netEco?.toFixed(3)},
+    indicators:{rsiPrimary:crsP?.toFixed(1),adxH4:cax4?.adx?.toFixed(1),ema200:ce200p?.toFixed(dec),ema55:ce55p?.toFixed(dec),atr:(catP*pipMult)?.toFixed(1),slowStochK:slStochP.k?.toFixed(0),carry:carry.available?carry.diff.toFixed(2):'n/a',yieldSpread:yDiff?.toFixed(2),ecoSurprise:netEco?.toFixed(3),cotZBase:bz!==null?bz.toFixed(2):'n/a'},
     timestamp:new Date().toISOString()
   }};
 }
@@ -828,51 +1151,114 @@ function correlationGate(signals) {
 // ── HANDLER ──────────────────────────────────────────────────────────────────
 exports.handler = async function(event) {
   const h={'Content-Type':'application/json','Access-Control-Allow-Origin':'*'};
+  if (event.httpMethod==='OPTIONS') return{statusCode:200,headers:h,body:''};
+  if (originBlocked(event)) return{statusCode:403,headers:h,body:JSON.stringify({error:'Origin not allowed'})};
 
-  if (!OANDA_KEY) return{statusCode:503,headers:h,body:JSON.stringify({error:'OANDA_API_KEY not configured',action:'Add OANDA_API_KEY to Netlify environment variables',source:'error',signals:null})};
+  if (!OANDA_KEY)  return{statusCode:503,headers:h,body:JSON.stringify({error:'OANDA_API_KEY not configured',action:'Add OANDA_API_KEY to Netlify environment variables',source:'error',signals:null})};
+  if (!ACCOUNT_ID) return{statusCode:503,headers:h,body:JSON.stringify({error:'OANDA_ACCOUNT_ID not configured',action:'Add OANDA_ACCOUNT_ID to Netlify environment variables',source:'error',signals:null})};
 
+  const t0=Date.now();
   const p=event.queryStringParameters||{};
   const enabledStratIds=p.strategies?p.strategies.split(',').filter(Boolean):null;
-  const tradeStyle=p.style||'day';
+  const tradeStyle=['scalp','day','swing'].includes(p.style)?p.style:'day';
+
+  // v7.2: acct/risk from the UI are now WIRED (clamped); env vars are defaults.
+  const acct = clamp(parseFloat(p.acct) || parseFloat(process.env.AXIOM_ACCT) || 10000, 100, 10000000);
+  const risk = clamp(parseFloat(p.risk) || parseFloat(process.env.AXIOM_RISK) || 2, 0.1, 5);
 
   const REGIMES=getRegimes();
   if (!REGIMES) return{statusCode:503,headers:h,body:JSON.stringify({error:'AXIOM_REGIMES not configured',action:'Go to AXIOM Settings tab → update regime → copy JSON → paste into Netlify AXIOM_REGIMES',source:'error',signals:null})};
   if (REGIMES._error) return{statusCode:503,headers:h,body:JSON.stringify({error:REGIMES._error,action:'Fix AXIOM_REGIMES in Netlify env vars — must be valid JSON with all 10 G10 currencies',source:'error',signals:null})};
 
+  // v7.2: pairs param wired — Settings selector now controls the scan.
+  let scanPairs=ALL_PAIRS;
+  if (p.pairs) {
+    const req=decodeURIComponent(p.pairs).split(',').map(s=>s.trim()).filter(x=>ALL_PAIRS.includes(x));
+    if (req.length>0) scanPairs=req;
+  }
+  if (p.pair && ALL_PAIRS.includes(p.pair)) scanPairs=[p.pair];
+
+  // ── One bulk pricing snapshot for the whole board (always all 28 — the
+  //    conversion + triangle legs must be present regardless of scan subset) ──
+  let bulk;
+  try { bulk=await fetchBulkPricing(ALL_PAIRS); }
+  catch(e){ return{statusCode:502,headers:h,body:JSON.stringify({error:`OANDA pricing snapshot failed: ${e.message}`,source:'error',signals:null})}; }
+
+  if (!bulk.anyTradeable) {
+    return{statusCode:200,headers:h,body:JSON.stringify({
+      marketClosed:true, nextOpen:nextSundayOpenISO(), signals:[], count:0, scanned:0,
+      note:'FX market closed — all instruments non-tradeable. Scanning resumes at the Sunday 17:00 New York open.',
+      timestamp:new Date().toISOString()
+    })};
+  }
+
+  // ── Environment feeds (each independent; failures reported, never faked) ──
   const feedErrors=[];
   let ecoData={recent:[],surprises:{},ecoSurpIndex:{}};
   let yields={};
-  const [ecoResult,yieldResult]=await Promise.allSettled([fetchEconomicReleases(),fetchYieldSpreads()]);
-  if (ecoResult.status==='fulfilled'){ecoData=ecoResult.value;}
-  else{feedErrors.push({feed:'Finnhub Economic Calendar',error:ecoResult.reason?.message||'Unknown error'});}
-  if (yieldResult.status==='fulfilled'){yields=yieldResult.value;}
-  else{feedErrors.push({feed:'FRED Yield Spreads',error:yieldResult.reason?.message||'Unknown error'});}
+  let cbRates=null, cbAsOf=null;
+  let cot={available:false};
 
-  if (p.pair) {
-    try{const r=await analyzeSignal(p.pair,enabledStratIds,ecoData,yields,REGIMES,tradeStyle);return{statusCode:200,headers:h,body:JSON.stringify(r)};}
-    catch(e){return{statusCode:500,headers:h,body:JSON.stringify({signal:null,error:e.message,pair:p.pair})};}
-  }
+  const [ecoResult,yieldResult,cbResult,cotResult]=await Promise.allSettled([
+    fetchEconomicReleases(),fetchYieldSpreads(),fetchCBRatesLive(),fetchCFTCCOT()
+  ]);
+  if (ecoResult.status==='fulfilled') ecoData=ecoResult.value;
+  else feedErrors.push({feed:'Finnhub Economic Calendar',error:ecoResult.reason?.message||'Unknown error'});
+  if (yieldResult.status==='fulfilled') yields=yieldResult.value;
+  else feedErrors.push({feed:'FRED Yield Spreads',error:yieldResult.reason?.message||'Unknown error'});
+  if (cbResult.status==='fulfilled'){
+    cbRates=cbResult.value.rates;
+    const dates=Object.values(cbRates).map(r=>r.asOf).sort();
+    cbAsOf=dates[0]||null;
+    if (cbResult.value.missing?.length) feedErrors.push({feed:'FRED CB Rates (partial)',error:cbResult.value.missing.join('; ').slice(0,200)});
+  } else feedErrors.push({feed:'FRED CB Policy Rates',error:cbResult.reason?.message||'Unknown error — carry strategies inert'});
+  if (cotResult.status==='fulfilled') cot=cotResult.value;
+  else feedErrors.push({feed:'CFTC COT (Socrata)',error:cotResult.reason?.message||'Unknown error — COT strategies inert'});
 
-  const ALL_PAIRS=['AUD/CAD','AUD/CHF','AUD/JPY','AUD/NZD','AUD/USD','CAD/CHF','CAD/JPY','CHF/JPY','EUR/AUD','EUR/CAD','EUR/CHF','EUR/GBP','EUR/JPY','EUR/NZD','EUR/USD','GBP/AUD','GBP/CAD','GBP/CHF','GBP/JPY','GBP/NZD','GBP/USD','NZD/CAD','NZD/CHF','NZD/JPY','NZD/USD','USD/CAD','USD/CHF','USD/JPY'];
-  const raw=[],skipped=[];
-  for (let i=0;i<ALL_PAIRS.length;i+=2) {
-    const res=await Promise.allSettled(ALL_PAIRS.slice(i,i+2).map(pp=>analyzeSignal(pp,enabledStratIds,ecoData,yields,REGIMES,tradeStyle).catch(e=>({signal:null,error:e.message,pair:pp}))));
-    for (const r of res){
-      if (r.status==='fulfilled'){if(r.value.signal)raw.push(r.value.signal);else skipped.push(r.value.reason||r.value.error);}
-      else skipped.push(r.reason?.message);
-    }
+  const activeSessions=getActiveSessions();
+  const ctxBase={enabledStratIds,ecoData,yields,REGIMES,tradeStyle,priceMap:bulk.priceMap,mids:bulk.mids,cbRates,cot,acct,risk,activeSessions};
+
+  // ── Scan loop: batches of 4 with a 20s elapsed guard → partial, not timeout ──
+  const raw=[],reasons=[],errList=[];
+  let partial=false,unscanned=[];
+  for (let i=0;i<scanPairs.length;i+=4) {
+    if (Date.now()-t0>20000){partial=true;unscanned=scanPairs.slice(i);break;}
+    const batch=scanPairs.slice(i,i+4);
+    const res=await Promise.allSettled(batch.map(pp=>analyzeSignal(pp,ctxBase)));
+    res.forEach((r,j)=>{
+      if (r.status==='fulfilled'){ if(r.value.signal) raw.push(r.value.signal); else if(r.value.reason) reasons.push(r.value.reason); }
+      else errList.push(`${batch[j]}: ${r.reason?.message||r.reason}`);
+    });
   }
 
   const {kept:signals,filtered:corr}=correlationGate(raw);
-  corr.forEach(f=>skipped.push(`CORR: ${f.pair} — ${f.reason}`));
+  corr.forEach(f=>reasons.push(`CORR: ${f.pair} — ${f.reason}`));
+
+  if (errList.length>0 && errList.length>=Math.ceil((scanPairs.length-unscanned.length)/2)) {
+    feedErrors.push({feed:'OANDA Candles',error:`${errList.length} pairs failed to fetch — ${errList[0]}`});
+  }
 
   return{statusCode:200,headers:h,body:JSON.stringify({
-    signals,count:signals.length,scanned:ALL_PAIRS.length,
-    skipped:skipped.length,correlationFiltered:corr.length,
-    reasons:skipped.slice(0,20),
-    regime:REGIMES,tradeStyle,
-    feeds:{finnhub:!!FINNHUB_KEY,fred:!!FRED_KEY,ecoEvents:ecoData.recent?.length||0,yieldPairs:Object.keys(yields).length},
+    signals,count:signals.length,
+    scanned:scanPairs.length-unscanned.length,requested:scanPairs.length,
+    skipped:reasons.length,errorCount:errList.length,
+    errors:errList.length?errList.slice(0,10):undefined,
+    correlationFiltered:corr.length,
+    reasons:reasons.slice(0,20),
+    partial:partial||undefined,unscanned:partial?unscanned:undefined,
+    regime:REGIMES,tradeStyle,acct,risk,
+    feeds:{finnhub:!!FINNHUB_KEY,fred:!!FRED_KEY,ecoEvents:ecoData.recent?.length||0,yieldPairs:Object.keys(yields).length,cbRates:!!cbRates,cbAsOf,cot:cot.available,cotAsOf:cot.asOf||null},
     feedErrors:feedErrors.length>0?feedErrors:undefined,
+    marketClosed:false,
+    elapsedMs:Date.now()-t0,
     timestamp:new Date().toISOString()
   })};
+};
+
+// Exposed for the offline test harness — Netlify ignores extra exports.
+exports.__test__ = {
+  pipValueUSD, usdLeg, tzParts, wallToUTC, getActiveSessions, sessionSuitsPair,
+  inLondonFixWindow, inSwapWindow, inNYOptionCutWindow, nextSundayOpenISO,
+  analyzeSignal, correlationGate, carryAnalysis, regimeForPair, contractCcy,
+  ALL_PAIRS, MACRO_STRATS, TECHNICAL_STRATS, PURE_TA_STRATS,
 };
