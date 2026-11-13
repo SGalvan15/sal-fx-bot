@@ -1,6 +1,11 @@
 [build]
   functions = "netlify/functions"
 
+# NOTE: analyze.js scans 28 pairs and can exceed the free-plan 10s function
+# timeout. Netlify Pro raises the synchronous function timeout to 26s (set in
+# the Netlify UI — it is not configurable from this file). The engine also
+# self-guards at 20s and returns partial results instead of dying.
+
 [[redirects]]
   from = "/api/calendar"
   to = "/.netlify/functions/calendar"
@@ -27,18 +32,13 @@
   status = 200
 
 [[redirects]]
-  from = "/api/news"
-  to = "/.netlify/functions/news"
-  status = 200
-
-[[redirects]]
   from = "/api/cbrates"
   to = "/.netlify/functions/cbrates"
   status = 200
 
 [[redirects]]
-  from = "/api/cot"
-  to = "/.netlify/functions/cot"
+  from = "/api/news"
+  to = "/.netlify/functions/news"
   status = 200
 
 [[headers]]

@@ -1,3224 +1,2129 @@
-// React hooks available globally via CDN
-const { useState, useEffect, useRef, useCallback, useMemo, memo } = React;
-
 // ═══════════════════════════════════════════════════════════════════════════
-// AXIOM FX TERMINAL v7.0
-// Signal engine rebuilt: 57 strategies, dynamic regimes, FRED yield spreads,
-// Finnhub eco calendar, CB intervention, correlation gate, layered confluence
+// AXIOM FX — Institutional G10 Terminal — v7.2.0
 // ═══════════════════════════════════════════════════════════════════════════
+// v7.2 architecture + data-integrity release. Highlights:
+//  • Price engine moved to a module-level store (useSyncExternalStore). Price
+//    ticks no longer re-render the whole app — only the components that show
+//    prices subscribe. Auto-pauses in hidden tabs; 60s slow-poll when the
+//    market is closed (per-instrument OANDA tradeable flags).
+//  • All tab components are module-level with stable identities — internal
+//    state survives root re-renders (v7.1 nested definitions remounted every
+//    render and silently wiped in-progress edits like regime toggles).
+//  • TRUE daily change: CHG/CHG% measured from today's 5pm-NY daily open
+//    (bulk daily-opens endpoint), not "since page load".
+//  • Money math corrected end-to-end: pipValueUSD with live conversion legs
+//    drives P&L; engine lot sizing and the Trades tab now agree.
+//  • Signal cards show the ENGINE's style/timeframe/hold and the library-
+//    joined primary strategy (name/tier/research WR clearly separated from
+//    live probability).
+//  • Regime editor: direction + STRENGTH (STRONG/MODERATE/WEAK) per currency,
+//    state lifted to root, persisted as axiom_regimes_v2 (auto-migrates v1).
+//  • Weekend Desk + Analyzer regime AI are manual Generate actions, grounded
+//    ONLY in live data (FRED rates, regimes, prices, this week's calendar);
+//    evidence links validated against a central-bank source whitelist.
+//  • News tab is live Finnhub only — the AI article fallback is deleted.
+//    Calendar tab consumes the new server-parsed JSON feed with local-time
+//    rendering. CB Rates shows derived outlook/bias + per-series as-of dates.
+//  • MARKET CLOSED state everywhere it matters; scans short-circuit with the
+//    next Sunday-17:00-NY open time.
+//  • 77 strategies wired (OPT_EXP merged into GAMMA_EXP; COT_REAL + COT_FADE
+//    now run on live CFTC data). Library count asserted against the engine.
+// ═══════════════════════════════════════════════════════════════════════════
+const { useState, useEffect, useRef, useCallback, useMemo, memo, useSyncExternalStore } = React;
 
-// ── 28 PAIRS ALPHABETICAL (per your request) ────────────────────────────
-const ALL_PAIRS = [
-  "AUD/CAD","AUD/CHF","AUD/JPY","AUD/NZD","AUD/USD",
-  "CAD/CHF","CAD/JPY","CHF/JPY",
-  "EUR/AUD","EUR/CAD","EUR/CHF","EUR/GBP","EUR/JPY","EUR/NZD","EUR/USD",
-  "GBP/AUD","GBP/CAD","GBP/CHF","GBP/JPY","GBP/NZD","GBP/USD",
-  "NZD/CAD","NZD/CHF","NZD/JPY","NZD/USD",
-  "USD/CAD","USD/CHF","USD/JPY",
-];
+const VERSION = "7.2.0";
 
-const TV_SYM = {
-  "AUD/CAD":"FX:AUDCAD","AUD/CHF":"FX:AUDCHF","AUD/JPY":"FX:AUDJPY",
-  "AUD/NZD":"FX:AUDNZD","AUD/USD":"FX:AUDUSD","CAD/CHF":"FX:CADCHF",
-  "CAD/JPY":"FX:CADJPY","CHF/JPY":"FX:CHFJPY","EUR/AUD":"FX:EURAUD",
-  "EUR/CAD":"FX:EURCAD","EUR/CHF":"FX:EURCHF","EUR/GBP":"FX:EURGBP",
-  "EUR/JPY":"FX:EURJPY","EUR/NZD":"FX:EURNZD","EUR/USD":"FX:EURUSD",
-  "GBP/AUD":"FX:GBPAUD","GBP/CAD":"FX:GBPCAD","GBP/CHF":"FX:GBPCHF",
-  "GBP/JPY":"FX:GBPJPY","GBP/NZD":"FX:GBPNZD","GBP/USD":"FX:GBPUSD",
-  "NZD/CAD":"FX:NZDCAD","NZD/CHF":"FX:NZDCHF","NZD/JPY":"FX:NZDJPY",
-  "NZD/USD":"FX:NZDUSD","USD/CAD":"FX:USDCAD","USD/CHF":"FX:USDCHF",
-  "USD/JPY":"FX:USDJPY",
-};
+const ALL_PAIRS = ["AUD/CAD","AUD/CHF","AUD/JPY","AUD/NZD","AUD/USD","CAD/CHF","CAD/JPY","CHF/JPY","EUR/AUD","EUR/CAD","EUR/CHF","EUR/GBP","EUR/JPY","EUR/NZD","EUR/USD","GBP/AUD","GBP/CAD","GBP/CHF","GBP/JPY","GBP/NZD","GBP/USD","NZD/CAD","NZD/CHF","NZD/JPY","NZD/USD","USD/CAD","USD/CHF","USD/JPY"];
+const G10 = ["USD","EUR","GBP","JPY","AUD","CAD","CHF","NZD","NOK","SEK"];
 
-// ── REFERENCE PRICES: Forex Factory screenshot Apr 7 2026 ~11:55 PM ─────
-// EUR/USD 1.1669, GBP/USD 1.3397, USD/JPY 158.384 (your ForexFactory screenshot)
-
-// ── NO STATIC PRICE DATA ─────────────────────────────────────────────────────
-// Prices initialize as null — UI shows CONNECTING state until OANDA responds
-// No fallback prices — stale data is not displayed under any circumstance
-
-// ── NO STATIC CB RATES ───────────────────────────────────────────────────────
-// CB rates are fetched live from FRED — no hardcoded fallback values
-// CB Rates tab shows error state if FRED is unavailable
-
-// ── NO STATIC CALENDAR DATA ──────────────────────────────────────────────────
-// Calendar is 100% live from ForexFactory via calendar.js
-// Calendar tab shows error state if ForexFactory is unavailable
-
-// ── NO STATIC NEWS DATA ──────────────────────────────────────────────────────
-// News is live from Finnhub — no static articles, no AI fallback, no rotation
-// News tab shows error state if Finnhub is unavailable
-
-
-// ── STRATEGIES ───────────────────────────────────────────────────────────
-// ── MASTER STRATEGY LIBRARY — 71 STRATEGIES ─────────────────────────────
-const STRATEGIES=[
-  {id:"BOJ_NORM", tier:"S",wr:68,cat:"MACRO",      tf:"H4/D1", minC:4,name:"BOJ Normalization Trend",            note:"Only G10 hiker 2026. USD/JPY sell on rallies. MUFG target 146.",url:"https://www.boj.or.jp/en/mopo/",desc:"BOJ: Policy normalization 2026"},
-  {id:"NEWS_DFT", tier:"S",wr:64,cat:"MOMENTUM",   tf:"M5/H1", minC:3,name:"Post-Release News Drift",             note:"CPI/NFP drive 2-4hr drift. Apr 10 CPI = key catalyst.",         url:"https://www.nber.org/papers/w20427",desc:"NBER WP 20427: News and exchange rates"},
-  {id:"TRI_ARB",  tier:"S",wr:74,cat:"FLOW",        tf:"M1/M5", minC:2,name:"Triangular Arbitrage Signal",         note:"Cross-rate mispricing. Highest edge when aligned.",              url:"https://www.jstor.org/stable/2329601",desc:"Journal of Finance: Arbitrage"},
-  {id:"RATE_SRP", tier:"S",wr:67,cat:"CARRY",       tf:"H1/H4", minC:4,name:"Rate Surprise Extension",             note:"Post-CB drift 2-6hrs. RBNZ cut Apr 9 = NZD continuation.",       url:"https://www.sciencedirect.com/science/article/abs/pii/S0261560604000026",desc:"Jansen/De Haan: CB statements and FX"},
-  {id:"CB_DIV",   tier:"S",wr:66,cat:"MACRO",       tf:"H4/D1", minC:5,name:"Central Bank Divergence",              note:"BOJ hiking vs Fed holding = structural JPY bid.",                url:"https://www.bis.org/publ/work801.htm",desc:"BIS WP #801: Monetary policy divergence"},
-  {id:"WMR_FIX",  tier:"S",wr:65,cat:"FLOW",        tf:"M15/H1",minC:3,name:"WMR 4PM Fix Anticipation",             note:"Predictable pre-4PM London order flow. Month-end strongest.",    url:"https://www.lseg.com/en/data-analytics/financial-data/foreign-exchange/wm-reuters-rates",desc:"LSEG: WM/Reuters Fix methodology"},
-  {id:"STRUCT_BK",tier:"S",wr:63,cat:"TECHNICAL",   tf:"H4/D1", minC:5,name:"Macro Structure Breakout",              note:"EUR/USD broke 1.16 structural resistance. Monitor 1.19 next.",   url:"https://www.tandfonline.com/doi/abs/10.1080/14697688.2011.613931",desc:"Quantitative Finance: Technical patterns"},
-  {id:"GRW_DIV",  tier:"S",wr:63,cat:"MACRO",       tf:"D1/W1", minC:5,name:"Macro Growth Divergence",               note:"Eurozone 1.7-1.8% H2 2026 vs US slowdown = EUR/USD bull.",      url:"https://www.imf.org/en/Publications/WEO",desc:"IMF WEO: Growth and exchange rates"},
-  {id:"REAL_YLD", tier:"S",wr:63,cat:"MACRO",       tf:"H4/D1", minC:4,name:"Real Yield Differential",               note:"USD real yields compressing; JPY rising as BOJ hikes.",          url:"https://www.federalreserve.gov/pubs/ifdp/2003/765/ifdp765.pdf",desc:"Fed IFDP 765: Real interest differentials"},
-  {id:"SAFE_HVN", tier:"S",wr:63,cat:"CORRELATION", tf:"H1/H4", minC:4,name:"Safe Haven Demand Model",              note:"JPY/CHF bid in risk-off. USD no longer safe haven in 2026.",     url:"https://www.bis.org/publ/work570.htm",desc:"BIS WP #570: Safe haven currencies"},
-  {id:"OPT_EXP",  tier:"S",wr:62,cat:"FLOW",        tf:"M15/H1",minC:3,name:"Option Expiry Gamma Trade",             note:"NY 10AM strikes create price magnetism. CME data confirms.",     url:"https://www.cmegroup.com/trading/fx/g10/euro-fx.html",desc:"CME: FX option expiry magnetism"},
-  {id:"GAMMA_EXP",tier:"A",wr:61,cat:"FLOW",        tf:"M15/H1",minC:3,name:"Gamma Exposure Proxy",                  note:"Round number gravity + NY fix window + low vol = dealer gamma bid.",url:"https://www.cmegroup.com/trading/fx/g10/euro-fx.html",desc:"CME: FX option expiry magnetism"},
-  {id:"YIELD_SPR",tier:"S",wr:66,cat:"MACRO",       tf:"H4/D1", minC:4,name:"10Y Yield Spread Momentum",             note:"US-Japan/Germany spread momentum drives FX. Most validated free signal.",url:"https://fred.stlouisfed.org/series/DGS10",desc:"FRED: 10-year government bond yield spreads"},
-  {id:"ECO_SURP", tier:"A",wr:62,cat:"MACRO",       tf:"H4/D1", minC:4,name:"Economic Surprise Index",               note:"Rolling 8-release surprise index per CCY. Persistently beating = buy.",url:"https://finnhub.io/docs/api/economic-calendar",desc:"Finnhub: Economic calendar with actual vs estimate"},
-  {id:"CB_INTV",  tier:"A",wr:65,cat:"RISK MGMT",   tf:"H1/H4", minC:3,name:"CB Intervention Watch",                 note:"BOJ 155+, SNB 0.92 thresholds. Suppresses signals fighting active CB.",url:"https://www.boj.or.jp/en/mopo/",desc:"BOJ: FX intervention history"},
-  {id:"SWAP_TIME",tier:"B",wr:58,cat:"CARRY",       tf:"M15/H1",minC:3,name:"Overnight Swap Timing",                 note:"Enter carry longs 15-45min after 5PM NY rollover. Documented edge.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1343490",desc:"SSRN: Carry timing effects"},
-  {id:"COT_REAL", tier:"A",wr:61,cat:"FLOW",        tf:"D1/W1", minC:4,name:"COT Positioning Proxy",                 note:"26wk vs short-term momentum divergence as COT extreme proxy.",url:"https://www.cftc.gov/MarketReports/CommitmentsofTraders/",desc:"CFTC: Commitments of Traders"},
-  {id:"LIQ_SWEEP",tier:"A",wr:62,cat:"TECHNICAL",   tf:"M15/H1",minC:3,name:"Liquidity Sweep Refined",              note:"Spike beyond swing + reversal + VWAP. London open +1 bonus.",url:"https://www.bis.org/publ/work492.htm",desc:"BIS: Institutional order flow"},
-  {id:"CB_COMM",  tier:"A",wr:62,cat:"MACRO",       tf:"H4/D1", minC:4,name:"CB Communication Drift",               note:"ECB Schnabel hike-more-likely = EUR higher. BOJ = JPY bid.",     url:"https://www.bis.org/publ/work952.htm",desc:"BIS WP #952: CB communication and FX"},
-  {id:"TSM_CTA",  tier:"A",wr:62,cat:"MOMENTUM",    tf:"D1/W1", minC:4,name:"CTA Time-Series Momentum",              note:"AQR: 12-month momentum across 58 markets including FX.",         url:"https://www.aqr.com/Insights/Research/Journal-Article/Time-Series-Momentum",desc:"AQR: Time-Series Momentum"},
-  {id:"CROSS_CAR",tier:"A",wr:62,cat:"CARRY",       tf:"D1/W1", minC:4,name:"Cross-Carry with Momentum Filter",      note:"AQR: carry + momentum improves Sharpe by 0.4+.",                url:"https://www.aqr.com/Insights/Research/Working-Paper/Currency-Carry-Trades",desc:"AQR: Carry and momentum filter"},
-  {id:"FX_VOL",   tier:"A",wr:61,cat:"FLOW",        tf:"D1/W1", minC:4,name:"FX Volatility Risk Premium",            note:"Selling implied > realized vol = carry-like premium.",           url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1343490",desc:"SSRN: FX vol risk premium"},
-  {id:"ICT_OB",   tier:"A",wr:61,cat:"TECHNICAL",   tf:"M15/H1",minC:4,name:"ICT Order Block + FVG Entry",            note:"Institutional order blocks. FVG fills precede continuation.",    url:"https://www.bis.org/publ/work492.htm",desc:"BIS: Institutional order flow"},
-  {id:"STOP_HNT", tier:"A",wr:61,cat:"TECHNICAL",   tf:"M5/M15",minC:4,name:"Liquidity Sweep Reversal",              note:"Equal highs/lows swept. High-probability reversal entry.",        url:"https://www.bis.org/publ/work492.htm",desc:"BIS WP #492: Stop-loss orders"},
-  {id:"GLOB_MAC", tier:"A",wr:61,cat:"MACRO",       tf:"D1/W1", minC:5,name:"Global Macro Thematic Trade",           note:"Post-peak USD 2026 consensus. Long EUR/JPY/CHF vs USD.",         url:"https://www.bis.org/publ/arpdf/ar2023e2.htm",desc:"BIS Annual Report: Global macro FX"},
-  {id:"CARRY_MOM",tier:"A",wr:60,cat:"CARRY",       tf:"D1/W1", minC:4,name:"Carry + Momentum Blend",                note:"High-yielder + momentum confirmation. BOJ hike = JPY reversal.", url:"https://www.aqr.com/Insights/Research/Working-Paper/Value-and-Momentum-Everywhere",desc:"AQR: Value and Momentum Everywhere"},
-  {id:"CS_MOM",   tier:"A",wr:60,cat:"MOMENTUM",    tf:"D1/W1", minC:4,name:"Cross-Sectional FX Momentum",           note:"Long top G10 CCY, short worst. JPY structural momentum 2026.",   url:"https://pages.stern.nyu.edu/~lpederse/papers/MomentumCurrencies.pdf",desc:"Pedersen/Frazzini: FX Momentum"},
-  {id:"COT_FADE", tier:"A",wr:60,cat:"FLOW",        tf:"D1/W1", minC:4,name:"COT Extreme Positioning",               note:"CFTC extremes mean-revert. USD net-short at multi-year extreme.",url:"https://www.cftc.gov/MarketReports/CommitmentsofTraders/",desc:"CFTC COT: Institutional positioning"},
-  {id:"GOLD_USD", tier:"A",wr:60,cat:"CORRELATION", tf:"H4/D1", minC:3,name:"Gold / USD Divergence",                 note:"Gold all-time highs = USD debasement. Short USD vs CHF/JPY.",    url:"https://www.gold.org/goldhub/research/relevance-of-gold-as-strategic-asset",desc:"WGC: Gold and USD correlation"},
-  {id:"SESS_BRK", tier:"A",wr:60,cat:"TECHNICAL",   tf:"M15/H1",minC:3,name:"NY Open Session Breakout",              note:"NY open 13:30 UTC. Highest institutional volume.",               url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2837743",desc:"SSRN: Session open patterns"},
-  {id:"VOL_BRK",  tier:"A",wr:60,cat:"TECHNICAL",   tf:"H1/H4", minC:3,name:"ATR Volatility Compression Break",      note:"Low ATR precedes breakout. Calendar events = catalysts.",         url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2337011",desc:"SSRN: Volatility compression breakouts"},
-  {id:"CORR_BRK", tier:"A",wr:60,cat:"CORRELATION", tf:"H4/D1", minC:4,name:"G10 Correlation Break Trade",           note:"Normally-correlated pairs diverge = mean reversion trade.",       url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2840338",desc:"SSRN: Correlation-based pairs trading"},
-  {id:"UIP_DEV",  tier:"A",wr:60,cat:"CARRY",       tf:"D1/W1", minC:4,name:"UIP Deviation (Forward Premium)",       note:"Fama 1984: higher interest rate currency appreciates.",           url:"https://www.nber.org/papers/w1393",desc:"Fama 1984: Forward rates — UIP puzzle"},
-  {id:"ADX_BRK",  tier:"A",wr:59,cat:"TECHNICAL",   tf:"H1/H4", minC:3,name:"ADX Trend Acceleration",                note:"ADX >25 with DI cross = trend entry. Best in directional mkt.",   url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1930932",desc:"SSRN: Trend indicators and FX returns"},
-  {id:"LDN_BRK",  tier:"A",wr:59,cat:"TECHNICAL",   tf:"M15/H1",minC:3,name:"London Open Range Breakout",            note:"London 07:00-08:00 UTC. Asian range breaks 68% of time.",         url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1664718",desc:"SSRN: Session breakout strategies"},
-  {id:"VWAP_REV", tier:"A",wr:59,cat:"MEAN REVERT", tf:"M15/H1",minC:3,name:"VWAP Mean Reversion",                   note:"Price >2σ from VWAP has 72% reversion within session.",           url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2995423",desc:"SSRN: VWAP trading strategies"},
-  {id:"EARL_WRN", tier:"A",wr:59,cat:"MACRO",       tf:"D1/W1", minC:4,name:"Currency Stress Early Warning",         note:"IMF model: CDS + CA deficit + reserves signal stress.",           url:"https://www.imf.org/en/Publications/WP/Issues/2016/12/31/Currency-Crises-36154",desc:"IMF WP: Currency crisis warning"},
-  {id:"MOMO_CRS", tier:"A",wr:59,cat:"MOMENTUM",    tf:"H1/H4", minC:3,name:"Triple EMA Crossover System",           note:"5/13/50 EMA triple cross = momentum confirmation.",               url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2550618",desc:"SSRN: EMA strategies in FX"},
-  {id:"BOP_FLOW", tier:"A",wr:59,cat:"MACRO",       tf:"W1",    minC:4,name:"Balance of Payments Flow",              note:"Japan CA surplus ¥2.4T structural JPY support.",                  url:"https://www.imf.org/external/pubs/ft/wp/2010/wp10149.pdf",desc:"IMF WP: Capital flows and FX"},
-  {id:"CARRY",    tier:"B",wr:57,cat:"CARRY",       tf:"D1/W1", minC:3,name:"G10 Carry Trade",                       note:"Long high-yielder vs low-yielder. BOJ hike = JPY carry reversal.",url:"https://www.nber.org/papers/w11631",desc:"NBER: Returns to currency speculation"},
-  {id:"BB_FADE",  tier:"B",wr:57,cat:"MEAN REVERT", tf:"H1/H4", minC:3,name:"Bollinger Band 2σ Fade",                note:"Price at 2σ band has 68% reversion to mean probability.",         url:"https://www.investopedia.com/articles/technical/04/030304.asp",desc:"Bollinger: Mean reversion"},
-  {id:"FIBO_PULL",tier:"B",wr:58,cat:"TECHNICAL",   tf:"H1/H4", minC:3,name:"Fibonacci 61.8% Pullback",              note:"61.8% retracement = high-probability continuation entry.",        url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1293728",desc:"SSRN: Fibonacci as support/resistance"},
-  {id:"ICHIMOKU", tier:"B",wr:57,cat:"TECHNICAL",   tf:"H4/D1", minC:4,name:"Ichimoku Cloud System",                 note:"Kumo breakout with Tenkan/Kijun cross = trend confirmation.",     url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1481600",desc:"SSRN: Ichimoku in forex"},
-  {id:"MON_PULL", tier:"B",wr:57,cat:"MOMENTUM",    tf:"H1/H4", minC:3,name:"Monday Pullback Entry",                 note:"Friday momentum continues Monday. Pullback = optimal R:R.",       url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1935275",desc:"SSRN: Day-of-week effects"},
-  {id:"EQ_BETA",  tier:"B",wr:58,cat:"CORRELATION", tf:"H1/H4", minC:3,name:"Equity-FX Risk Beta Trade",             note:"AUD/NZD/CAD positive beta. JPY/CHF negative. Trade the regime.",  url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2521095",desc:"SSRN: Equity-FX co-movement"},
-  {id:"REGIME_SW",tier:"B",wr:58,cat:"MACRO",       tf:"H4/D1", minC:3,name:"VIX Regime Switching",                  note:"VIX <15 = carry. VIX >25 = JPY/CHF. Trade the regime.",          url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2965903",desc:"SSRN: VIX regimes and carry"},
-  {id:"COMD_CCY", tier:"B",wr:57,cat:"CORRELATION", tf:"H1/H4", minC:3,name:"Commodity Currency Correlation",        note:"AUD: iron ore. CAD: crude oil. CHF: inversely to commodities.",  url:"https://www.rba.gov.au/publications/rdp/2012/pdf/rdp2012-06.pdf",desc:"RBA: Commodity prices and AUD"},
-  {id:"TURT_TR",  tier:"B",wr:55,cat:"MOMENTUM",    tf:"D1/W1", minC:3,name:"Turtle Donchian Breakout",              note:"20-day high/low breakout. Classic systematic CTA strategy.",      url:"https://www.trendfollowing.com/turtlerules.pdf",desc:"Turtle Rules: Donchian breakout"},
-  {id:"STOCH_RSI",tier:"B",wr:57,cat:"MEAN REVERT", tf:"H1/H4", minC:3,name:"Stochastic RSI Divergence",             note:"StochRSI divergence = high-probability reversal signal.",         url:"https://www.investopedia.com/terms/s/stochrsi.asp",desc:"StochRSI: Divergence signals"},
-  {id:"DUAL_THR", tier:"B",wr:58,cat:"MOMENTUM",    tf:"H1/H4", minC:3,name:"Dual Thrust Momentum System",           note:"Dynamic session range breakout. Systematic edge confirmed.",       url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1680057",desc:"SSRN: Systematic FX momentum"},
-  {id:"KELTNER",  tier:"B",wr:55,cat:"TECHNICAL",   tf:"H4/D1", minC:3,name:"Keltner Channel Breakout",              note:"Price outside Keltner = trend continuation signal.",              url:"https://www.investopedia.com/terms/k/keltnerchannel.asp",desc:"Keltner: Volatility breakout"},
-  {id:"RISK_PAR", tier:"B",wr:57,cat:"RISK MGMT",   tf:"D1/W1", minC:4,name:"Risk Parity G10 Portfolio",             note:"Equal-volatility-weighted G10 portfolio. Diversification alpha.", url:"https://www.aqr.com/Insights/Research/White-Papers/Risk-Parity-Portfolios",desc:"AQR: Risk parity portfolios"},
-  {id:"SUPPLY_DEM",tier:"B",wr:57,cat:"TECHNICAL",  tf:"H1/H4", minC:3,name:"Supply & Demand Zone Entry",            note:"Institutional accumulation/distribution zones. High R:R.",        url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2862935",desc:"SSRN: S/R levels and FX"},
-  {id:"TOT_SHOCK",tier:"B",wr:56,cat:"MACRO",       tf:"H4/D1", minC:3,name:"Terms of Trade Shock",                  note:"Commodity shocks hit commodity-linked CCY immediately.",           url:"https://www.rba.gov.au/publications/rdp/2014/pdf/rdp2014-01.pdf",desc:"RBA: Terms of trade and AUD"},
-  {id:"ENG_CAN",  tier:"B",wr:55,cat:"TECHNICAL",   tf:"H4/D1", minC:4,name:"Engulfing Candle Reversal",             note:"Full engulfing at S/R with volume = reversal signal.",             url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"SSRN: Candlestick patterns in FX"},
-  {id:"PPP_VAL",  tier:"B",wr:54,cat:"MACRO",       tf:"W1/MN", minC:4,name:"PPP/BEER Valuation Reversion",          note:"OECD PPP: EUR/USD fair ~1.14, USD/JPY fair ~140. Long-run.",      url:"https://stats.oecd.org/index.aspx?queryid=221",desc:"OECD PPP Database: FX valuation"},
-  {id:"RSIMR",    tier:"B",wr:54,cat:"MEAN REVERT", tf:"H4/D1", minC:3,name:"RSI Mean Reversion",                    note:"RSI >75 or <25 on daily. Fade extreme with structure.",           url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2995423",desc:"SSRN: RSI-based mean reversion"},
-  {id:"ATR_FADE", tier:"B",wr:53,cat:"MEAN REVERT", tf:"H1/H4", minC:3,name:"ATR Overextension Fade",                note:"Price >2× daily ATR = high reversion probability.",               url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2337011",desc:"SSRN: ATR and intraday reversion"},
-  // ── PURE-TA STRATEGIES — Group A: EMA / Momentum ──────────────────────────
-  {id:"EMA_CROSS_55",        tier:"C",wr:57,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"EMA 55/200 Cross Pullback",         note:"Fresh EMA55/200 golden/death cross on primary TF + first pullback to EMA55 + RSI 40-60 neutral zone. Style-aware: H1/H4/D1.",                              url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2550618",desc:"EMA55 cross + pullback entry — no macro required"},
-  {id:"PRICE_ACTION_PIN",    tier:"C",wr:58,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Pin Bar at S/R Level",               note:"Hammer or shooting star with wick ≥2.5× body at defined swing S/R. RSI diverging from extreme. EMA55 aligned.",                                         url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"Pin bar reversal at structural level"},
-  {id:"INSIDE_BAR_BO",       tier:"C",wr:56,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Inside Bar Breakout",                note:"Inside bar (bar 2 within bar 1 range) on primary TF + directional break of mother bar high/low + ATR expansion or stoch cross. EMA55 direction confirmed.", url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"Inside bar compression breakout"},
-  {id:"SR_BOUNCE",           tier:"C",wr:57,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Multi-Touch S/R Bounce",             note:"Price at swing level tested 2+ times (within 0.2%) + RSI extreme (<35 buy / >65 sell) + EMA200 aligned + stochastic pending cross. Not yet crossed.",     url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2862935",desc:"Multi-touch S/R bounce with momentum"},
-  {id:"MACD_HIST_DIVERGENCE",tier:"C",wr:58,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"MACD Histogram Divergence",          note:"MACD histogram making higher lows (bull) or lower highs (bear) while price makes opposing extreme. At S/R level. RSI confirming. Primary TF.",            url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2995423",desc:"MACD histogram divergence at structure"},
-  {id:"STOCH_SR_CONFLUENCE", tier:"C",wr:58,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Slow Stoch + S/R Confluence",        note:"Slow stochastic (14,3,3) exhausted at extreme for 2+ bars, crosses at S/R level. Conviction close (body >60% of range). EMA200 aligned.",               url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2995423",desc:"Slow stochastic exhaustion cross at S/R"},
-  {id:"CANDLE_REVERSAL_CLUSTER",tier:"C",wr:56,cat:"PURE TECHNICAL",tf:"All",minC:3,name:"Candle Reversal Cluster",           note:"Morning/evening star or three white soldiers/black crows. RSI turning from extreme (prior RSI <35 bull / >65 bear). Within 3 ATR of EMA55.",               url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"Multi-candle reversal cluster pattern"},
-  {id:"TREND_PULLBACK_EMA55",tier:"C",wr:57,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"EMA55 Trend Pullback",               note:"Trend established (EMA55 > EMA200 bull) + price pulls to EMA55 zone (within 0.8%) + RSI reset 38-58 + stoch between 25-55. Orderly pullback (ATR calm).",  url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2550618",desc:"Trend pullback to EMA55 with reset"},
-  // ── PURE-TA STRATEGIES — Group B: Candlestick Patterns ───────────────────
-  {id:"ENGULF_STRUCT",       tier:"C",wr:58,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Engulfing at Structure",              note:"Full bullish/bearish engulfing candle at swing S/R with RSI divergence from prior candle. EMA55 not opposing. Fires on primary TF (H1/H4/D1 by style).",  url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"Full engulfing candle at structural level"},
-  {id:"THREE_BAR_PLAY",      tier:"C",wr:57,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Three-Bar Play",                     note:"Bar 1 directional, bar 2 inside/narrow (≤60% of bar 1 range), bar 3 breaks bar 1 extreme. ATR expanding on bar 3 or stoch cross. EMA200 aligned.",       url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"Three-bar play breakout pattern"},
-  {id:"OUTSIDE_BAR",         tier:"C",wr:56,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Outside Bar / Outside Week",          note:"Outside bar engulfs prior bar's entire range (high > prior high AND low < prior low). Direction = close vs midpoint. At S/R or RSI turning from extreme.",  url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"Outside bar engulfing at S/R"},
-  {id:"HAMMER_STAR",         tier:"C",wr:55,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Hammer / Shooting Star",              note:"Shadow candle: lower wick ≥2.5× body (hammer) or upper wick ≥2.5× body (shooting star). At defined S/R level. EMA55 aligned or stochastic at extreme.",  url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"Hammer or shooting star at S/R"},
-  {id:"THREE_SOLDIERS_CROWS",tier:"C",wr:57,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Three White Soldiers / Black Crows",  note:"Three consecutive full-bodied candles (body >60% of range) each opening inside prior body. Preceded by low ATR or EMA55 sloping in direction. RSI in 40-65 zone.", url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"Three soldiers/crows trend initiation"},
-  {id:"MORNING_EVENING_STAR",tier:"C",wr:58,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Morning Star / Evening Star",         note:"3-candle star: large directional, small-bodied doji/star, reversal candle closes >50% into first. At multi-touch S/R or RSI diverging or stoch crossing.",    url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"Morning/evening star reversal pattern"},
-  // ── PURE-TA STRATEGIES — Group C: Chart Patterns ─────────────────────────
-  {id:"HEAD_SHOULDERS",      tier:"C",wr:59,cat:"PURE TECHNICAL",tf:"D1/H4",minC:3,name:"Head & Shoulders Pattern",           note:"Day/swing only. Middle peak/trough most extreme, shoulders within 1.5% of each other. Price breaks neckline. RSI divergence on head vs shoulders or EMA55 aligned.", url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1293728",desc:"H&S and inverse H&S neckline break"},
-  {id:"DOUBLE_TOP_BOTTOM",   tier:"C",wr:59,cat:"PURE TECHNICAL",tf:"D1/H4",minC:3,name:"Double Top / Double Bottom",         note:"Day/swing only. Two swing highs/lows within 0.3% of each other. Price breaks intervening swing low/high (neckline). RSI divergence between tests. EMA55 aligned.", url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1293728",desc:"Double top/bottom neckline breakout"},
-  {id:"MARKET_STRUCTURE",    tier:"C",wr:58,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Market Structure Break/Continuation", note:"HH/HL uptrend continuation or LH/LL downtrend. Market structure break (MSB): was trending but price breaks last HL or LH = reversal. RSI + EMA55 confirm.", url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2862935",desc:"Market structure continuation or break"},
-  {id:"FLAG_PENNANT",        tier:"C",wr:57,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Bull/Bear Flag & Pennant",            note:"Sharp impulse (≥2.5× ATR in 3-5 candles) + tight consolidation (range ≤45% of impulse). Breakout in impulse direction + ATR expands + EMA55 aligned.",         url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1293728",desc:"Flag/pennant breakout after impulse"},
-  // ── PURE-TA STRATEGIES — Group D: Breakout Patterns ──────────────────────
-  {id:"RANGE_BREAKOUT",      tier:"C",wr:56,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Range / Consolidation Breakout",      note:"Last 20 primary-TF candles in consolidation (range ≤1.8× ATR avg). Price closes decisively outside range + ATR expands. RSI not yet extreme. EMA55 aligned.", url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2337011",desc:"Range breakout with ATR expansion"},
-  {id:"TREND_CONTINUATION_BREAK",tier:"C",wr:58,cat:"PURE TECHNICAL",tf:"All",minC:3,name:"Trend Continuation Break",          note:"Established trend (EMA55+200 aligned) + ATR compression in last 8 candles vs prior 8 + break to new 20-candle extreme + stochastic reset and re-cross in trend direction.", url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2550618",desc:"Trend continuation after compression breakout"},
-];
-const DEFAULT_ENABLED=STRATEGIES.filter(s=>s.tier==="S"||s.tier==="A").map(s=>s.id);
-
-function tvUrl(pair,tf="60"){
-  const sym=({"AUD/CAD":"AUDCAD","AUD/CHF":"AUDCHF","AUD/JPY":"AUDJPY","AUD/NZD":"AUDNZD","AUD/USD":"AUDUSD","CAD/CHF":"CADCHF","CAD/JPY":"CADJPY","CHF/JPY":"CHFJPY","EUR/AUD":"EURAUD","EUR/CAD":"EURCAD","EUR/CHF":"EURCHF","EUR/GBP":"EURGBP","EUR/JPY":"EURJPY","EUR/NZD":"EURNZD","EUR/USD":"EURUSD","GBP/AUD":"GBPAUD","GBP/CAD":"GBPCAD","GBP/CHF":"GBPCHF","GBP/JPY":"GBPJPY","GBP/NZD":"GBPNZD","GBP/USD":"GBPUSD","NZD/CAD":"NZDCAD","NZD/CHF":"NZDCHF","NZD/JPY":"NZDJPY","NZD/USD":"NZDUSD","USD/CAD":"USDCAD","USD/CHF":"USDCHF","USD/JPY":"USDJPY"})[pair]||"EURUSD";
-  return `https://www.tradingview.com/chart/?symbol=FX%3A${sym}&interval=${tf}`;
-}
 const C={bg:"#05090f",bg1:"#091525",bg2:"#0d1e35",bg3:"#112540",bdr:"#172f50",gold:"#d4af37",green:"#00e5a0",red:"#ff4560",blue:"#3b8cf7",amber:"#ff9f1c",text:"#dce8f5",muted:"#4a6a8a",dim:"#29415e",scalp:"#ff6b35",day:"#3b8cf7",swing:"#00e5a0"};
 const SC={scalp:C.scalp,day:C.day,swing:C.swing};
-const CATC={MOMENTUM:"#1d5c35",CARRY:"#7a5500","MEAN REVERT":"#005a5a",MACRO:"#1a3a6a",FLOW:"#4a1f6a",TECHNICAL:"#1a4a6a",CORRELATION:"#6a2a00","RISK MGMT":"#6a1111"};
+const CATC={MOMENTUM:"#1d5c35",CARRY:"#7a5500","MEAN REVERT":"#005a5a",MACRO:"#1a3a6a",FLOW:"#4a1f6a",TECHNICAL:"#1a4a6a",CORRELATION:"#6a2a00","RISK MGMT":"#6a1111","PURE TECHNICAL":"#3a3a5a"};
 
-// ── PRICE ENGINE (memoized, stable) ──────────────────────────────────────
-function usePrices(oandaKey){
-  // Prices init as null — no static seed data, UI shows CONNECTING until OANDA responds
-  const [prices,setPrices]=useState(null);
-  const [apiStatus,setApiStatus]=useState("connecting");
-  const [priceError,setPriceError]=useState(null);
-  const priceHistoryRef=useRef({});
-  const OINSTR={"AUD/CAD":"AUD_CAD","AUD/CHF":"AUD_CHF","AUD/JPY":"AUD_JPY","AUD/NZD":"AUD_NZD","AUD/USD":"AUD_USD","CAD/CHF":"CAD_CHF","CAD/JPY":"CAD_JPY","CHF/JPY":"CHF_JPY","EUR/AUD":"EUR_AUD","EUR/CAD":"EUR_CAD","EUR/CHF":"EUR_CHF","EUR/GBP":"EUR_GBP","EUR/JPY":"EUR_JPY","EUR/NZD":"EUR_NZD","EUR/USD":"EUR_USD","GBP/AUD":"GBP_AUD","GBP/CAD":"GBP_CAD","GBP/CHF":"GBP_CHF","GBP/JPY":"GBP_JPY","GBP/NZD":"GBP_NZD","GBP/USD":"GBP_USD","NZD/CAD":"NZD_CAD","NZD/CHF":"NZD_CHF","NZD/JPY":"NZD_JPY","NZD/USD":"NZD_USD","USD/CAD":"USD_CAD","USD/CHF":"USD_CHF","USD/JPY":"USD_JPY"};
-  useEffect(()=>{
-    let mounted=true;
-    const instStr=Object.values(OINSTR).join("%2C");
-    const fetch_=async()=>{
-      try{
-        const r=await fetch(`/.netlify/functions/prices?instruments=${instStr}`,{signal:AbortSignal.timeout(6000)});
-        if(!r.ok)throw new Error("OANDA returned "+r.status);
-        const d=await r.json();
-        if(!mounted||!d.prices?.length)throw new Error("No price data in response");
-        setPrices(prev=>{
-          const next={...(prev||{})};
-          d.prices.forEach(p=>{
-            const pair=Object.keys(OINSTR).find(k=>OINSTR[k]===p.instrument);
-            if(!pair)return;
-            const bid=parseFloat(p.bids?.[0]?.price||0),ask=parseFloat(p.asks?.[0]?.price||0);
-            if(!bid||!ask)return;
-            const mid=(bid+ask)/2;
-            const isJPY=pair.includes("JPY");
-            // Track session change from first confirmed live price
-            if(!priceHistoryRef.current[pair]) priceHistoryRef.current[pair]={sessionOpen:mid,history:[]};
-            const ref=priceHistoryRef.current[pair];
-            ref.history=[...ref.history.slice(-59),mid];
-            const sessionOpen=ref.sessionOpen;
-            const prevMid=prev?.[pair]?.mid||mid;
-            next[pair]={bid,ask,mid,
-              change:mid-sessionOpen,
-              pct:(mid-sessionOpen)/sessionOpen*100,
-              dir:mid>prevMid?"up":mid<prevMid?"down":"flat",
-              live:true,
-              history:ref.history};
-          });
-          return next;
-        });
-        setApiStatus("live_oanda");
-        setPriceError(null);
-      }catch(e){
-        if(mounted){
-          setApiStatus("error");
-          setPriceError(e.message);
-          // Do NOT fall back to static prices — show error
-        }
-      }
-    };
-    fetch_();
-    const iv=setInterval(fetch_,3000);
-    return()=>{mounted=false;clearInterval(iv);};
-  },[oandaKey]);
+// ── STRATEGY LIBRARY — 77 entries, 1:1 with engine SC keys (asserted) ───────
+const STRATEGIES=[
+  {id:"BOJ_NORM", tier:"S",wr:68,cat:"MACRO",      tf:"H4/D1", minC:4,name:"BOJ Normalization Trend",            note:"JPY-bullish regime on major yen pairs — the structural normalization theme.",url:"https://www.boj.or.jp/en/mopo/",desc:"BOJ: Policy normalization"},
+  {id:"NEWS_DFT", tier:"S",wr:64,cat:"MOMENTUM",   tf:"M5/H1", minC:3,name:"Post-Release News Drift",             note:"High-impact CPI/NFP-class releases drive 2-4hr drift; live Finnhub surprise feed.",url:"https://www.nber.org/papers/w20427",desc:"NBER WP 20427: News and exchange rates"},
+  {id:"TRI_ARB",  tier:"S",wr:74,cat:"FLOW",        tf:"M1/M5", minC:2,name:"Triangular Consistency Signal",       note:"Cross vs USD-leg synthetic deviation ≥1.5 pips, traded in the correction direction. Computed from the live 28-pair snapshot.",url:"https://www.jstor.org/stable/2329601",desc:"Journal of Finance: Arbitrage"},
+  {id:"RATE_SRP", tier:"S",wr:67,cat:"CARRY",       tf:"H1/H4", minC:4,name:"Rate Surprise Extension",             note:"Post-CB drift 2-6hrs after decisions; strong live-FRED differential + news alignment extends.",url:"https://www.sciencedirect.com/science/article/abs/pii/S0261560604000026",desc:"Jansen/De Haan: CB statements and FX"},
+  {id:"CB_DIV",   tier:"S",wr:66,cat:"MACRO",       tf:"H4/D1", minC:5,name:"Central Bank Divergence",              note:"Opposing policy regimes between the two central banks — the structural driver.",url:"https://www.bis.org/publ/work801.htm",desc:"BIS WP #801: Monetary policy divergence"},
+  {id:"WMR_FIX",  tier:"S",wr:65,cat:"FLOW",        tf:"M15/H1",minC:3,name:"WMR 4PM Fix Anticipation",             note:"Pre-16:00-London fix order flow; month-end strongest. DST-aware London clock.",url:"https://www.lseg.com/en/data-analytics/financial-data/foreign-exchange/wm-reuters-rates",desc:"LSEG: WM/Reuters Fix methodology"},
+  {id:"STRUCT_BK",tier:"S",wr:63,cat:"TECHNICAL",   tf:"H4/D1", minC:5,name:"Macro Structure Breakout",              note:"Break of multi-week structural level with ATR room to the next zone.",url:"https://www.tandfonline.com/doi/abs/10.1080/14697688.2011.613931",desc:"Quantitative Finance: Technical patterns"},
+  {id:"GRW_DIV",  tier:"S",wr:63,cat:"MACRO",       tf:"D1/W1", minC:5,name:"Macro Growth Divergence",               note:"Relative growth-trajectory divergence between the two economies (regime-encoded).",url:"https://www.imf.org/en/Publications/WEO",desc:"IMF WEO: Growth and exchange rates"},
+  {id:"REAL_YLD", tier:"S",wr:63,cat:"MACRO",       tf:"H4/D1", minC:4,name:"Real Yield Differential",               note:"Live FRED policy-rate differential >1% in the trade direction — no stale tables.",url:"https://www.federalreserve.gov/pubs/ifdp/2003/765/ifdp765.pdf",desc:"Fed IFDP 765: Real interest differentials"},
+  {id:"SAFE_HVN", tier:"S",wr:63,cat:"CORRELATION", tf:"H1/H4", minC:4,name:"Safe Haven Demand Model",              note:"JPY/CHF bid in risk-off regime configurations.",url:"https://www.bis.org/publ/work570.htm",desc:"BIS WP #570: Safe haven currencies"},
+  {id:"GAMMA_EXP",tier:"A",wr:61,cat:"FLOW",        tf:"M15/H1",minC:3,name:"Gamma Exposure Proxy",                  note:"Round-number gravity in the NY 10AM option-cut window with muted vol — dealer-gamma magnet (absorbs the former Option Expiry entry).",url:"https://www.cmegroup.com/trading/fx/g10/euro-fx.html",desc:"CME: FX option expiry magnetism"},
+  {id:"YIELD_SPR",tier:"S",wr:66,cat:"MACRO",       tf:"H4/D1", minC:4,name:"10Y Yield Spread Momentum",             note:"US vs foreign 10Y spread level + momentum from live FRED. Most validated free signal.",url:"https://fred.stlouisfed.org/series/DGS10",desc:"FRED: 10-year government bond yield spreads"},
+  {id:"ECO_SURP", tier:"A",wr:62,cat:"MACRO",       tf:"H4/D1", minC:4,name:"Economic Surprise Index",               note:"Rolling 8-release surprise index per CCY from live Finnhub calendar. Persistently beating = buy.",url:"https://finnhub.io/docs/api/economic-calendar",desc:"Finnhub: Economic calendar with actual vs estimate"},
+  {id:"CB_INTV",  tier:"A",wr:65,cat:"RISK MGMT",   tf:"H1/H4", minC:3,name:"CB Intervention Watch",                 note:"Fires only for pairs with defined intervention thresholds when price is well clear; near-threshold trades are hard-vetoed.",url:"https://www.boj.or.jp/en/mopo/",desc:"BOJ: FX intervention history"},
+  {id:"SWAP_TIME",tier:"B",wr:58,cat:"CARRY",       tf:"M15/H1",minC:3,name:"Overnight Swap Timing",                 note:"Enter aligned carry 5-45 min after the 5PM New York rollover (DST-aware NY clock).",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1343490",desc:"SSRN: Carry timing effects"},
+  {id:"COT_REAL", tier:"A",wr:61,cat:"FLOW",        tf:"D1/W1", minC:4,name:"COT Positioning (CFTC Live)",           note:"Live CFTC TFF leveraged-funds z-score: ≥1.5σ crowding faded once short-term momentum turns with the trade. Weekly public Socrata feed.",url:"https://www.cftc.gov/MarketReports/CommitmentsofTraders/",desc:"CFTC: Commitments of Traders"},
+  {id:"LIQ_SWEEP",tier:"A",wr:62,cat:"TECHNICAL",   tf:"M15/H1",minC:3,name:"Liquidity Sweep Refined",              note:"Spike beyond swing + reversal + VWAP filter. London session +1 bonus (local clock).",url:"https://www.bis.org/publ/work492.htm",desc:"BIS: Institutional order flow"},
+  {id:"CB_COMM",  tier:"A",wr:62,cat:"MACRO",       tf:"H4/D1", minC:4,name:"CB Communication Drift",               note:"Persistent hawkish/dovish communication drift — encoded as STRONG regime conviction.",url:"https://www.bis.org/publ/work952.htm",desc:"BIS WP #952: CB communication and FX"},
+  {id:"TSM_CTA",  tier:"A",wr:62,cat:"MOMENTUM",    tf:"D1/W1", minC:4,name:"CTA Time-Series Momentum",              note:"AQR: 12-month momentum across 58 markets including FX.",url:"https://www.aqr.com/Insights/Research/Journal-Article/Time-Series-Momentum",desc:"AQR: Time-Series Momentum"},
+  {id:"CROSS_CAR",tier:"A",wr:62,cat:"CARRY",       tf:"D1/W1", minC:4,name:"Cross-Carry with Momentum Filter",      note:"AQR: carry + momentum improves Sharpe by 0.4+. Runs on live FRED differentials.",url:"https://www.aqr.com/Insights/Research/Working-Paper/Currency-Carry-Trades",desc:"AQR: Carry and momentum filter"},
+  {id:"FX_VOL",   tier:"A",wr:61,cat:"FLOW",        tf:"D1/W1", minC:4,name:"FX Volatility Risk Premium",            note:"Low realized-vol environments favor carry-style premium capture.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1343490",desc:"SSRN: FX vol risk premium"},
+  {id:"ICT_OB",   tier:"A",wr:61,cat:"TECHNICAL",   tf:"M15/H1",minC:4,name:"ICT Order Block + FVG Entry",            note:"Institutional order blocks; FVG fills precede continuation.",url:"https://www.bis.org/publ/work492.htm",desc:"BIS: Institutional order flow"},
+  {id:"STOP_HNT", tier:"A",wr:61,cat:"TECHNICAL",   tf:"M5/M15",minC:4,name:"Liquidity Sweep Reversal",              note:"Equal highs/lows swept then reclaimed — high-probability reversal entry.",url:"https://www.bis.org/publ/work492.htm",desc:"BIS WP #492: Stop-loss orders"},
+  {id:"GLOB_MAC", tier:"A",wr:61,cat:"MACRO",       tf:"D1/W1", minC:5,name:"Global Macro Thematic Trade",           note:"3+ STRONG regime alignments across G10 — thematic tailwind confirmation.",url:"https://www.bis.org/publ/arpdf/ar2023e2.htm",desc:"BIS Annual Report: Global macro FX"},
+  {id:"CARRY_MOM",tier:"A",wr:60,cat:"CARRY",       tf:"D1/W1", minC:4,name:"Carry + Momentum Blend",                note:"High-yielder longs filtered by momentum confirmation (live FRED rates).",url:"https://www.aqr.com/Insights/Research/Working-Paper/Value-and-Momentum-Everywhere",desc:"AQR: Value and Momentum Everywhere"},
+  {id:"CS_MOM",   tier:"A",wr:60,cat:"MOMENTUM",    tf:"D1/W1", minC:4,name:"Cross-Sectional FX Momentum",           note:"Long the strongest G10 momentum currency against the weakest.",url:"https://pages.stern.nyu.edu/~lpederse/papers/MomentumCurrencies.pdf",desc:"Pedersen/Frazzini: FX Momentum"},
+  {id:"COT_FADE", tier:"A",wr:60,cat:"FLOW",        tf:"D1/W1", minC:4,name:"COT ≥2σ Extreme Fade",                  note:"Pure positioning fade at ≥2σ leveraged-funds extremes from live CFTC data — no momentum filter.",url:"https://www.cftc.gov/MarketReports/CommitmentsofTraders/",desc:"CFTC COT: Institutional positioning"},
+  {id:"GOLD_USD", tier:"A",wr:60,cat:"CORRELATION", tf:"H4/D1", minC:3,name:"Gold / USD Divergence",                 note:"USD-debasement regime proxy: short USD vs CHF/JPY when the USD regime is bearish.",url:"https://www.gold.org/goldhub/research/relevance-of-gold-as-strategic-asset",desc:"WGC: Gold and USD correlation"},
+  {id:"SESS_BRK", tier:"A",wr:60,cat:"TECHNICAL",   tf:"M15/H1",minC:3,name:"NY Open Session Breakout",              note:"New York open — highest institutional volume window (local NY clock, DST-aware).",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2837743",desc:"SSRN: Session open patterns"},
+  {id:"VOL_BRK",  tier:"A",wr:60,cat:"TECHNICAL",   tf:"H1/H4", minC:3,name:"ATR Volatility Compression Break",      note:"Low ATR precedes breakout; calendar events act as catalysts.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2337011",desc:"SSRN: Volatility compression breakouts"},
+  {id:"CORR_BRK", tier:"A",wr:60,cat:"CORRELATION", tf:"H4/D1", minC:4,name:"G10 Correlation Break Trade",           note:"Two STRONG opposing regimes on normally-correlated legs — divergence trade.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2840338",desc:"SSRN: Correlation-based pairs trading"},
+  {id:"UIP_DEV",  tier:"A",wr:60,cat:"CARRY",       tf:"D1/W1", minC:4,name:"UIP Deviation (Forward Premium)",       note:"Fama 1984: the higher-rate currency tends to appreciate. Live differential >2%.",url:"https://www.nber.org/papers/w1393",desc:"Fama 1984: Forward rates — UIP puzzle"},
+  {id:"ADX_BRK",  tier:"A",wr:59,cat:"TECHNICAL",   tf:"H1/H4", minC:3,name:"ADX Trend Acceleration",                note:"ADX >30 with DI alignment = trend entry. Best in directional markets.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1930932",desc:"SSRN: Trend indicators and FX returns"},
+  {id:"LDN_BRK",  tier:"A",wr:59,cat:"TECHNICAL",   tf:"M15/H1",minC:3,name:"London Open Range Breakout",            note:"London session break of the Asian range (local London clock, DST-aware).",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1664718",desc:"SSRN: Session breakout strategies"},
+  {id:"VWAP_REV", tier:"A",wr:59,cat:"MEAN REVERT", tf:"M15/H1",minC:3,name:"VWAP Mean Reversion",                   note:"Price >1.5 ATR from session VWAP reverts intraday with high frequency.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2995423",desc:"SSRN: VWAP trading strategies"},
+  {id:"EARL_WRN", tier:"A",wr:59,cat:"MACRO",       tf:"D1/W1", minC:4,name:"Currency Stress Early Warning",         note:"RSI-vs-regime divergence as an early stress tell.",url:"https://www.imf.org/en/Publications/WP/Issues/2016/12/31/Currency-Crises-36154",desc:"IMF WP: Currency crisis warning"},
+  {id:"MOMO_CRS", tier:"A",wr:59,cat:"MOMENTUM",    tf:"H1/H4", minC:3,name:"EMA Crossover Momentum",                note:"Fresh 20/50 EMA cross with MACD confirmation = momentum entry.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2550618",desc:"SSRN: EMA strategies in FX"},
+  {id:"BOP_FLOW", tier:"A",wr:59,cat:"MACRO",       tf:"W1",    minC:4,name:"Balance of Payments Flow",              note:"Structural current-account-surplus currencies (JPY/CHF) attract flows in stress.",url:"https://www.imf.org/external/pubs/ft/wp/2010/wp10149.pdf",desc:"IMF WP: Capital flows and FX"},
+  {id:"CARRY",    tier:"B",wr:57,cat:"CARRY",       tf:"D1/W1", minC:3,name:"G10 Carry Trade",                       note:"Long high-yielder vs low-yielder using live FRED policy differentials.",url:"https://www.nber.org/papers/w11631",desc:"NBER: Returns to currency speculation"},
+  {id:"BB_FADE",  tier:"B",wr:57,cat:"MEAN REVERT", tf:"H1/H4", minC:3,name:"Bollinger Band 2σ Fade",                note:"Price at 2σ band in a non-trending tape — reversion to mean.",url:"https://www.investopedia.com/articles/technical/04/030304.asp",desc:"Bollinger: Mean reversion"},
+  {id:"FIBO_PULL",tier:"B",wr:58,cat:"TECHNICAL",   tf:"H1/H4", minC:3,name:"Fibonacci 61.8% Pullback",              note:"38.2/61.8% retracement zones as continuation entries.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1293728",desc:"SSRN: Fibonacci as support/resistance"},
+  {id:"ICHIMOKU", tier:"B",wr:57,cat:"TECHNICAL",   tf:"H4/D1", minC:4,name:"Ichimoku Cloud System",                 note:"Kumo breakout with Tenkan/Kijun alignment = trend confirmation.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1481600",desc:"SSRN: Ichimoku in forex"},
+  {id:"MON_PULL", tier:"B",wr:57,cat:"MOMENTUM",    tf:"H1/H4", minC:3,name:"Monthly Range Pullback",                note:"Position inside the 22-day range extremes — pullback continuation zone.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1935275",desc:"SSRN: Day-of-week effects"},
+  {id:"EQ_BETA",  tier:"B",wr:58,cat:"CORRELATION", tf:"H1/H4", minC:3,name:"Equity-FX Risk Beta Trade",             note:"AUD/NZD/CAD positive beta; JPY/CHF negative. Trade the regime.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2521095",desc:"SSRN: Equity-FX co-movement"},
+  {id:"REGIME_SW",tier:"B",wr:58,cat:"MACRO",       tf:"H4/D1", minC:3,name:"EMA Regime Switching",                  note:"Fresh 20/50 EMA regime flip as a structural switch marker.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2965903",desc:"SSRN: Regime switching and carry"},
+  {id:"COMD_CCY", tier:"B",wr:57,cat:"CORRELATION", tf:"H1/H4", minC:3,name:"Commodity Currency Correlation",        note:"AUD/CAD/NZD regime alignment with the commodity complex.",url:"https://www.rba.gov.au/publications/rdp/2012/pdf/rdp2012-06.pdf",desc:"RBA: Commodity prices and AUD"},
+  {id:"TURT_TR",  tier:"B",wr:55,cat:"MOMENTUM",    tf:"D1/W1", minC:3,name:"Turtle Donchian Breakout",              note:"20-day high/low breakout. Classic systematic CTA strategy.",url:"https://www.trendfollowing.com/turtlerules.pdf",desc:"Turtle Rules: Donchian breakout"},
+  {id:"STOCH_RSI",tier:"B",wr:57,cat:"MEAN REVERT", tf:"H1/H4", minC:3,name:"Stochastic RSI Reversal",               note:"StochRSI extreme + cross = high-probability reversal signal.",url:"https://www.investopedia.com/terms/s/stochrsi.asp",desc:"StochRSI: Divergence signals"},
+  {id:"DUAL_THR", tier:"B",wr:58,cat:"MOMENTUM",    tf:"H1/H4", minC:3,name:"Dual Thrust Momentum System",           note:"Dynamic daily-range thrust breakout. Systematic edge confirmed.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1680057",desc:"SSRN: Systematic FX momentum"},
+  {id:"KELTNER",  tier:"B",wr:55,cat:"TECHNICAL",   tf:"H4/D1", minC:3,name:"Keltner Squeeze Setup",                 note:"Bollinger-inside-Keltner squeeze with participation — pre-breakout state.",url:"https://www.investopedia.com/terms/k/keltnerchannel.asp",desc:"Keltner: Volatility breakout"},
+  {id:"RISK_PAR", tier:"B",wr:57,cat:"RISK MGMT",   tf:"D1/W1", minC:4,name:"Risk Parity Filter",                    note:"Trend + participation present — portfolio-quality environment filter.",url:"https://www.aqr.com/Insights/Research/White-Papers/Risk-Parity-Portfolios",desc:"AQR: Risk parity portfolios"},
+  {id:"SUPPLY_DEM",tier:"B",wr:57,cat:"TECHNICAL",  tf:"H1/H4", minC:3,name:"Supply & Demand Zone Entry",            note:"Institutional accumulation/distribution zones with room to target. High R:R.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2862935",desc:"SSRN: S/R levels and FX"},
+  {id:"TOT_SHOCK",tier:"B",wr:56,cat:"MACRO",       tf:"H4/D1", minC:3,name:"Terms of Trade Shock",                  note:"Commodity-linked currencies in elevated-vol regimes — immediate transmission.",url:"https://www.rba.gov.au/publications/rdp/2014/pdf/rdp2014-01.pdf",desc:"RBA: Terms of trade and AUD"},
+  {id:"ENG_CAN",  tier:"B",wr:55,cat:"TECHNICAL",   tf:"H4/D1", minC:4,name:"Engulfing Candle Reversal",             note:"Full engulfing on H4/H1 in the trade direction.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"SSRN: Candlestick patterns in FX"},
+  {id:"PPP_VAL",  tier:"B",wr:54,cat:"MACRO",       tf:"W1/MN", minC:4,name:"Long-Run Valuation Reversion",          note:"Price stretched ≥2.5× daily ATR from the D1 EMA200 long-run anchor, trading back toward it — a live proxy for valuation pull.",url:"https://stats.oecd.org/index.aspx?queryid=221",desc:"OECD PPP Database: FX valuation"},
+  {id:"RSIMR",    tier:"B",wr:54,cat:"MEAN REVERT", tf:"H4/D1", minC:3,name:"RSI Mean Reversion",                    note:"Daily RSI >70 or <30 — fade the extreme with structure.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2995423",desc:"SSRN: RSI-based mean reversion"},
+  {id:"ATR_FADE", tier:"B",wr:53,cat:"MEAN REVERT", tf:"H1/H4", minC:3,name:"ATR Overextension Fade",                note:"Multi-bar move beyond 1.5× the daily range without trend strength — reversion.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2337011",desc:"SSRN: ATR and intraday reversion"},
+  // ── PURE-TA — Group A: EMA / Momentum ─────────────────────────────────────
+  {id:"EMA_CROSS_55",        tier:"C",wr:57,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"EMA 55/200 Cross Pullback",         note:"Fresh EMA55/200 golden/death cross on primary TF + first pullback to EMA55 + RSI 40-60 neutral zone. Style-aware: H1/H4/D1.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2550618",desc:"EMA55 cross + pullback entry — no macro required"},
+  {id:"PRICE_ACTION_PIN",    tier:"C",wr:58,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Pin Bar at S/R Level",               note:"Hammer or shooting star with wick ≥2.5× body at defined swing S/R. RSI diverging from extreme. EMA55 aligned.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"Pin bar reversal at structural level"},
+  {id:"INSIDE_BAR_BO",       tier:"C",wr:56,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Inside Bar Breakout",                note:"Inside bar (bar 2 within bar 1 range) on primary TF + directional break of mother bar high/low + ATR expansion or stoch cross. EMA55 direction confirmed.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"Inside bar compression breakout"},
+  {id:"SR_BOUNCE",           tier:"C",wr:57,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Multi-Touch S/R Bounce",             note:"Price at swing level tested 2+ times (within 0.2%) + RSI extreme (<35 buy / >65 sell) + EMA200 aligned + stochastic pending cross. Not yet crossed.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2862935",desc:"Multi-touch S/R bounce with momentum"},
+  {id:"MACD_HIST_DIVERGENCE",tier:"C",wr:58,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"MACD Histogram Divergence",          note:"MACD histogram making higher lows (bull) or lower highs (bear) while price makes opposing extreme. At S/R level. RSI confirming. Primary TF.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2995423",desc:"MACD histogram divergence at structure"},
+  {id:"STOCH_SR_CONFLUENCE", tier:"C",wr:58,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Slow Stoch + S/R Confluence",        note:"Slow stochastic (14,3,3) exhausted at extreme for 2+ bars, crosses at S/R level. Conviction close (body >60% of range). EMA200 aligned.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2995423",desc:"Slow stochastic exhaustion cross at S/R"},
+  {id:"CANDLE_REVERSAL_CLUSTER",tier:"C",wr:56,cat:"PURE TECHNICAL",tf:"All",minC:3,name:"Candle Reversal Cluster",           note:"Morning/evening star or three white soldiers/black crows. RSI turning from extreme (prior RSI <35 bull / >65 bear). Within 3 ATR of EMA55.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"Multi-candle reversal cluster pattern"},
+  {id:"TREND_PULLBACK_EMA55",tier:"C",wr:57,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"EMA55 Trend Pullback",               note:"Trend established (EMA55 > EMA200 bull) + price pulls to EMA55 zone (within 0.8%) + RSI reset 38-58 + stoch between 25-55. Orderly pullback (ATR calm).",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2550618",desc:"Trend pullback to EMA55 with reset"},
+  // ── PURE-TA — Group B: Candlestick Patterns ───────────────────────────────
+  {id:"ENGULF_STRUCT",       tier:"C",wr:58,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Engulfing at Structure",              note:"Full bullish/bearish engulfing candle at swing S/R with RSI divergence from prior candle. EMA55 not opposing. Fires on primary TF (H1/H4/D1 by style).",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"Full engulfing candle at structural level"},
+  {id:"THREE_BAR_PLAY",      tier:"C",wr:57,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Three-Bar Play",                     note:"Bar 1 directional, bar 2 inside/narrow (≤60% of bar 1 range), bar 3 breaks bar 1 extreme. ATR expanding on bar 3 or stoch cross. EMA200 aligned.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"Three-bar play breakout pattern"},
+  {id:"OUTSIDE_BAR",         tier:"C",wr:56,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Outside Bar / Outside Week",          note:"Outside bar engulfs prior bar's entire range (high > prior high AND low < prior low). Direction = close vs midpoint. At S/R or RSI turning from extreme.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"Outside bar engulfing at S/R"},
+  {id:"HAMMER_STAR",         tier:"C",wr:55,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Hammer / Shooting Star",              note:"Shadow candle: lower wick ≥2.5× body (hammer) or upper wick ≥2.5× body (shooting star). At defined S/R level. EMA55 aligned or stochastic at extreme.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"Hammer or shooting star at S/R"},
+  {id:"THREE_SOLDIERS_CROWS",tier:"C",wr:57,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Three White Soldiers / Black Crows",  note:"Three consecutive full-bodied candles (body >60% of range) each opening inside prior body. Preceded by low ATR or EMA55 sloping in direction. RSI in 40-65 zone.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"Three soldiers/crows trend initiation"},
+  {id:"MORNING_EVENING_STAR",tier:"C",wr:58,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Morning Star / Evening Star",         note:"3-candle star: large directional, small-bodied doji/star, reversal candle closes >50% into first. At multi-touch S/R or RSI diverging or stoch crossing.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1013905",desc:"Morning/evening star reversal pattern"},
+  // ── PURE-TA — Group C: Chart Patterns ─────────────────────────────────────
+  {id:"HEAD_SHOULDERS",      tier:"C",wr:59,cat:"PURE TECHNICAL",tf:"D1/H4",minC:3,name:"Head & Shoulders Pattern",           note:"Day/swing only. Middle peak/trough most extreme, shoulders within 1.5% of each other. Price breaks neckline. RSI divergence on head vs shoulders or EMA55 aligned.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1293728",desc:"H&S and inverse H&S neckline break"},
+  {id:"DOUBLE_TOP_BOTTOM",   tier:"C",wr:59,cat:"PURE TECHNICAL",tf:"D1/H4",minC:3,name:"Double Top / Double Bottom",         note:"Day/swing only. Two swing highs/lows within 0.3% of each other. Price breaks intervening swing low/high (neckline). RSI divergence between tests. EMA55 aligned.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1293728",desc:"Double top/bottom neckline breakout"},
+  {id:"MARKET_STRUCTURE",    tier:"C",wr:58,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Market Structure Break/Continuation", note:"HH/HL uptrend continuation or LH/LL downtrend. Market structure break (MSB): was trending but price breaks last HL or LH = reversal. RSI + EMA55 confirm.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2862935",desc:"Market structure continuation or break"},
+  {id:"FLAG_PENNANT",        tier:"C",wr:57,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Bull/Bear Flag & Pennant",            note:"Sharp impulse (≥2.5× ATR in 3-5 candles) + tight consolidation (range ≤45% of impulse). Breakout in impulse direction + ATR expands + EMA55 aligned.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1293728",desc:"Flag/pennant breakout after impulse"},
+  // ── PURE-TA — Group D: Breakout Patterns ──────────────────────────────────
+  {id:"RANGE_BREAKOUT",      tier:"C",wr:56,cat:"PURE TECHNICAL",tf:"All",  minC:3,name:"Range / Consolidation Breakout",      note:"Last 20 primary-TF candles in consolidation (range ≤1.8× ATR avg). Price closes decisively outside range + ATR expands. RSI not yet extreme. EMA55 aligned.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2337011",desc:"Range breakout with ATR expansion"},
+  {id:"TREND_CONTINUATION_BREAK",tier:"C",wr:58,cat:"PURE TECHNICAL",tf:"All",minC:3,name:"Trend Continuation Break",          note:"Established trend (EMA55+200 aligned) + ATR compression in last 8 candles vs prior 8 + break to new 20-candle extreme + stochastic reset and re-cross in trend direction.",url:"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2550618",desc:"Trend continuation after compression breakout"},
+];
+const DEFAULT_ENABLED=STRATEGIES.filter(s=>s.tier==="S"||s.tier==="A").map(s=>s.id);
+const STRAT_BY_ID={}; STRATEGIES.forEach(s=>{STRAT_BY_ID[s.id]=s;});
 
-  return{prices,apiStatus,priceError};
+// Central-bank + FRED source whitelist — the ONLY URLs AI outputs may cite.
+const CB_SOURCE_URLS={
+  USD:"https://www.federalreserve.gov/monetarypolicy/openmarket.htm",
+  EUR:"https://www.ecb.europa.eu/mopo/decisions/html/index.en.html",
+  GBP:"https://www.bankofengland.co.uk/monetary-policy-summary-and-minutes",
+  JPY:"https://www.boj.or.jp/en/mopo/mpmdeci/",
+  AUD:"https://www.rba.gov.au/monetary-policy/rba-board-minutes/",
+  CAD:"https://www.bankofcanada.ca/core-functions/monetary-policy/key-interest-rate/",
+  CHF:"https://www.snb.ch/en/monetary-policy/monetary-policy-decisions",
+  NZD:"https://www.rbnz.govt.nz/monetary-policy/official-cash-rate-decisions",
+  NOK:"https://www.norges-bank.no/en/topics/Monetary-policy/monetary-policy-meetings/",
+  SEK:"https://www.riksbank.se/en-gb/monetary-policy/the-policy-rate/policy-rate-table/",
+};
+const AI_URL_WHITELIST=[...Object.values(CB_SOURCE_URLS),"https://fred.stlouisfed.org","https://www.cftc.gov/MarketReports/CommitmentsofTraders/"];
+const CB_NAMES={USD:"Federal Reserve",EUR:"ECB",GBP:"Bank of England",JPY:"Bank of Japan",AUD:"RBA",CAD:"Bank of Canada",CHF:"SNB",NZD:"RBNZ",NOK:"Norges Bank",SEK:"Riksbank"};
+
+const DEFAULT_REGIMES={USD:{dir:"BEARISH",strength:"STRONG"},EUR:{dir:"BULLISH",strength:"MODERATE"},GBP:{dir:"NEUTRAL",strength:"WEAK"},JPY:{dir:"BULLISH",strength:"STRONG"},AUD:{dir:"NEUTRAL",strength:"MODERATE"},CAD:{dir:"BEARISH",strength:"MODERATE"},CHF:{dir:"BULLISH",strength:"MODERATE"},NZD:{dir:"NEUTRAL",strength:"WEAK"},NOK:{dir:"NEUTRAL",strength:"WEAK"},SEK:{dir:"NEUTRAL",strength:"WEAK"}};
+
+function tvUrl(pair,tf="60"){
+  const sym=pair.replace("/","");
+  return `https://www.tradingview.com/chart/?symbol=FX%3A${sym}&interval=${tf}`;
 }
 
-function Spark({data,color,w=60,h=20}){
-  if(!data?.length)return null;
-  const mn=Math.min(...data),mx=Math.max(...data),rng=mx-mn||0.00001;
-  const pts=data.map((v,i)=>`${(i/(data.length-1))*w},${h-((v-mn)/rng)*h}`).join(" ");
-  return(<svg width={w} height={h} style={{display:"block",overflow:"visible"}}><polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>);
+// ── SHARED HELPERS ───────────────────────────────────────────────────────────
+function fmtP(pair,v){ if(v==null||!isFinite(v))return "—"; return v.toFixed(pair.includes("JPY")?3:5); }
+function pipMultOf(pair){ return pair.includes("JPY")?100:10000; }
+function fmtUsd(v){ if(v==null||!isFinite(v))return "—"; const s=v<0?"-":""; return `${s}$${Math.abs(v).toFixed(2)}`; }
+function timeAgo(ts){ const s=Math.floor((Date.now()-ts)/1000); if(s<60)return s+"s ago"; const m=Math.floor(s/60); if(m<60)return m+"m ago"; const h=Math.floor(m/60); if(h<24)return h+"h ago"; return Math.floor(h/24)+"d ago"; }
+function localDT(iso){ const d=new Date(iso); return d.toLocaleString([],{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}); }
+function localTime(iso){ return new Date(iso).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}); }
+function localDateKey(d){ const p=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
+
+// Client copy of the engine's pip-value model — MUST stay in sync with
+// analyze.js pipValueUSD. Value in USD of one pip on `lot` standard lots.
+function pipValueUSDClient(pair, lot, prices){
+  const quote=pair.split("/")[1];
+  const vq=(quote==="JPY"?0.01:0.0001)*100000*lot;
+  if(quote==="USD") return vq;
+  if(quote==="JPY"||quote==="CHF"||quote==="CAD"){ const m=prices?.["USD/"+quote]?.mid; return m?vq/m:null; }
+  const m=prices?.[quote+"/USD"]?.mid; return m?vq*m:null;
 }
 
-// ── SIGNAL ENGINE ────────────────────────────────────────────────────────
-function calcLots(acct,risk,slPips,pair){return Math.max(0.01,Math.min(2.00,Math.round((acct*risk/100)/(slPips*10.0)*100)/100));}
+// ═══ PRICE STORE — module-level; components subscribe individually ══════════
+const priceStore={
+  snap:{status:"connecting",prices:null,marketClosed:false,error:null,staleSince:null,lastTick:0,dailyOpens:null,opensDate:null},
+  listeners:new Set(),
+  set(patch){ priceStore.snap={...priceStore.snap,...patch}; priceStore.listeners.forEach(f=>{try{f();}catch(_){}}); },
+  subscribe(f){ priceStore.listeners.add(f); return ()=>priceStore.listeners.delete(f); },
+  get(){ return priceStore.snap; },
+};
+function usePriceSnap(){ return useSyncExternalStore(priceStore.subscribe, priceStore.get); }
 
+// Session change (vs last tick baseline captured at first load) is replaced by
+// TRUE daily change: mid − dailyOpen (5pm-NY FX day). Helper:
+function dailyChg(pair,snap){
+  const p=snap.prices?.[pair], o=snap.dailyOpens?.[pair]?.open;
+  if(!p||o==null) return null;
+  const chg=p.mid-o;
+  return {chg, pct:(chg/o)*100, pips:chg*pipMultOf(pair)};
+}
 
+// ── UI ATOMS ─────────────────────────────────────────────────────────────────
 const Bdg=memo(({label,color,sz="8.5px"})=>(<span style={{display:"inline-block",padding:"2px 7px",background:color+"22",color,border:`1px solid ${color}44`,borderRadius:"2px",fontSize:sz,fontWeight:"700",letterSpacing:"0.8px",lineHeight:"1.4"}}>{label}</span>));
 const Btn=memo(({label,color=C.gold,ghost=false,onClick,style:cs,disabled})=>(<button onClick={onClick} disabled={disabled} style={{padding:"7px 13px",background:ghost?"transparent":color,color:ghost?color:"#05090f",border:`1px solid ${color}`,borderRadius:"3px",cursor:disabled?"not-allowed":"pointer",fontSize:"10.5px",fontWeight:"700",letterSpacing:"0.8px",fontFamily:"inherit",opacity:disabled?0.5:1,...cs}}>{label}</button>));
 const Sm=memo(({label,color=C.gold,onClick,active})=>(<button onClick={onClick} style={{padding:"4px 9px",background:active?color+"22":"transparent",color:active?color:C.muted,border:`1px solid ${active?color:C.bdr}`,borderRadius:"2px",cursor:"pointer",fontSize:"9px",fontWeight:"700",letterSpacing:"0.5px",fontFamily:"inherit"}}>{label}</button>));
 const Kv=memo(({k,v,vc=C.text})=>(<div style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:`1px solid ${C.bdr}22`,fontSize:"10.5px"}}><span style={{color:C.muted,flexShrink:0}}>{k}</span><span style={{color:vc,fontWeight:"700",textAlign:"right",marginLeft:"8px"}}>{v}</span></div>));
 const Tag=memo(({label,color})=>(<span style={{padding:"2px 8px",background:color+"22",color,border:`1px solid ${color}44`,borderRadius:"3px",fontSize:"8px",fontWeight:"700",marginRight:"5px"}}>{label}</span>));
+const Card=memo(({children,style:cs})=>(<div style={{background:C.bg1,border:`1px solid ${C.bdr}`,borderRadius:"4px",padding:"14px",...cs}}>{children}</div>));
+const SecT=memo(({t,sub})=>(<div style={{marginBottom:"10px"}}><div style={{fontSize:"11px",fontWeight:"800",letterSpacing:"1.5px",color:C.gold}}>{t}</div>{sub&&<div style={{fontSize:"9px",color:C.muted,marginTop:"3px",lineHeight:"1.5"}}>{sub}</div>}</div>));
 
-// ── TRADINGVIEW CHART — Fixed implementation ──────────────────────────────
+// Sparkline (guards <2 points — v7.1 rendered NaN paths)
+const Spark=memo(({data,w=64,h=20,color=C.blue})=>{
+  if(!data||data.length<2) return <span style={{fontSize:"8px",color:C.dim}}>—</span>;
+  const mn=Math.min(...data),mx=Math.max(...data),rg=mx-mn||1e-9;
+  const pts=data.map((v,i)=>`${(i/(data.length-1))*w},${h-((v-mn)/rg)*h}`).join(" ");
+  return(<svg width={w} height={h} style={{display:"block"}}><polyline points={pts} fill="none" stroke={color} strokeWidth="1.3"/></svg>);
+});
 
-// ─────────────────────────────────────────────────────────────────────────
-// MAIN APP
-// ─────────────────────────────────────────────────────────────────────────
-function AxiomFX(){
-  const load=(k,d)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):d;}catch{return d;}};
-  const save=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}};
+// Self-ticking age label — updates itself every 30s without re-rendering parents
+const SigAge=memo(({ts,color=C.muted})=>{
+  const [,force]=useState(0);
+  useEffect(()=>{const iv=setInterval(()=>force(x=>x+1),30000);return()=>clearInterval(iv);},[]);
+  return <span style={{fontSize:"8.5px",color}}>{timeAgo(ts)}</span>;
+});
 
-  const [tab,setTab]=useState("dashboard");
-  const [style,setStyle]=useState(()=>load("axiom_style","day"));
-  const API_KEY_DEFAULT="";
-  const OANDA_KEY_DEFAULT="";
-  const SETTINGS_DEFAULT={acct:10000,risk:2,lev:50,broker:"TastyFX",pairs:ALL_PAIRS,notif:false,apiKey:API_KEY_DEFAULT,oandaKey:OANDA_KEY_DEFAULT,saved:false};
-  const [settings,setSettings]=useState(()=>{const s=load("axiom_settings",SETTINGS_DEFAULT);if(!s.apiKey)s.apiKey=API_KEY_DEFAULT;if(!s.oandaKey)s.oandaKey=OANDA_KEY_DEFAULT;return s;});
-  const [signals,setSignals]=useState(()=>{const all=load("axiom_signals",[]);const cut=Date.now()-14*24*3600*1000;return all.filter(s=>new Date(s.ts).getTime()>cut);});
-  const [trades,setTrades]=useState(()=>load("axiom_trades",[]));
-  const [history,setHistory]=useState(()=>load("axiom_history",[]));
-  const [modal,setModal]=useState(null);
-  // chartPairNavigated tracks whether we arrived at chart tab via a signal/GO button
-  // prevents auto-scroll to EUR/USD (default) every time the tab opens
-  const [chartPairNavigated,setChartPairNavigated]=useState(false);
-  const [chartPair,setChartPair]=useState("EUR/USD");
-  const [toast,setToast]=useState(null);
-  // Calendar filters
-  const [calCcy,setCalCcy]=useState("ALL");
-  const [calImp,setCalImp]=useState("HIGH");
-  const [calType,setCalType]=useState("ALL");
-  const [calView,setCalView]=useState("THIS WEEK"); // TODAY, THIS WEEK, THIS MONTH, NEXT MONTH
-  // Live calendar data from ForexFactory proxy — starts EMPTY, fills from live feed
-  const [calEvents,setCalEvents]=useState([]);
-  const [calLoading,setCalLoading]=useState(false);
-  const [calLoaded,setCalLoaded]=useState(false);
-  // Signal filter
-  const [sFilter,setSFilter]=useState("ALL");
-  // Lifted states — no reset bugs
-  const [nCcy,setNCcy]=useState("ALL");
-  const [nImp,setNImp]=useState("ALL");
-  const [stratCatFilter,setStratCatFilter]=useState("ALL");
-  const [stratTierFilter,setStratTierFilter]=useState("ALL");
-  // localSettings mirrors settings — same object, single source of truth
-  const localSettings=settings,setLocalSettings=setSettings;
-  const [enabledStrats,setEnabledStrats]=useState(()=>load("axiom_strats",STRATEGIES.map(s=>s.id))); // default ALL 51
-  const [modalTab,setModalTab]=useState("params");
-  const [chartTf,setChartTf]=useState("60");
-  const [wkView,setWkView]=useState("current");
-  const [analyzerTab,setAnalyzerTab]=useState("regime");
-  const [selCB,setSelCB]=useState(null);
-  const [expandedTheme,setExpandedTheme]=useState(null);
-  const [expandedStrat,setExpandedStrat]=useState(null);
-  // SourcesTab state lifted — prevents reset on tab switch
-  const [srcCat,setSrcCat]=useState("ALL");
-  const [srcPage,setSrcPage]=useState(0);
-  // DeployTab state lifted — prevents reset on tab switch
-  const [deployTab,setDeployTab]=useState("overview");
-  // Live CB rates from FRED
-  const [cbRates,setCbRates]=useState(null); // null = not loaded yet
-  const [cbRatesLoading,setCbRatesLoading]=useState(false);
-  const [cbRatesSource,setCbRatesSource]=useState("loading");
-  const [cbRatesUpdated,setCbRatesUpdated]=useState(null);
-  const {prices,apiStatus,priceError}=usePrices(settings.oandaKey||localSettings.oandaKey);
-  // Weekend tab — AI-generated themes
-  const [weekendThemes,setWeekendThemes]=useState(null);
-  const [weekendLoading,setWeekendLoading]=useState(false);
-  const [weekendLoaded,setWeekendLoaded]=useState(false);
-  // Analyzer tab — AI-generated regime
-  const [regimeData,setRegimeData]=useState(null);
-  const [regimeLoading,setRegimeLoading]=useState(false);
-  const [regimeLoaded,setRegimeLoaded]=useState(false);
-  // NewsTab state lifted to root — survives price ticks and tab switches
-  const [liveArts,setLiveArts]=useState([]); // no static seed — live only
-  const [newsLoading,setNewsLoading]=useState(false);
-  const [newsLoaded,setNewsLoaded]=useState(false);
-  const [newsSource,setNewsSource]=useState(null); // null | "finnhub" — no static/ai fallback
-  const [newsError,setNewsError]=useState(null);
-  const [newsPage,setNewsPage]=useState(0); // for AI pagination fallback
-  // Use refs to avoid stale closures in loadNews
-  const newsLoadingRef=useRef(false);
-  const newsPageRef=useRef(0);
+// Header connection status — the ONLY header piece that ticks with prices
+const ConnStatus=memo(()=>{
+  const s=usePriceSnap();
+  let color=C.amber,label="CONNECTING",pulse=true;
+  if(s.status==="live"&&s.marketClosed){color=C.amber;label="MARKET CLOSED";pulse=false;}
+  else if(s.status==="live"){color=C.green;label="LIVE · OANDA";pulse=false;}
+  else if(s.status==="error"){color=C.red;label=s.prices?"STALE · FEED ERROR":"FEED DOWN";pulse=true;}
+  return(<span style={{display:"inline-flex",alignItems:"center",gap:"6px",fontSize:"9px",fontWeight:"700",color,letterSpacing:"1px"}}>
+    <span style={{width:"7px",height:"7px",borderRadius:"50%",background:color,animation:pulse?"axpulse 1.2s infinite":"none"}}/>{label}
+  </span>);
+});
 
-  const loadNews=useCallback(async(reset=true)=>{
-    if(newsLoadingRef.current)return;
-    newsLoadingRef.current=true;
-    setNewsLoading(true);
-    setNewsError(null);
-    if(reset){newsPageRef.current=0;setNewsPage(0);}
+// Amber note used inside Signals tab when the market is closed
+const MarketClosedNote=memo(()=>{
+  const s=usePriceSnap();
+  if(!s.marketClosed) return null;
+  return(<div style={{padding:"9px 12px",background:C.amber+"14",border:`1px solid ${C.amber}55`,borderRadius:"4px",fontSize:"10px",color:C.amber,marginBottom:"10px"}}>
+    ◈ FX MARKET CLOSED — all OANDA instruments report non-tradeable. Scans resume at the Sunday 17:00 New York open. Prices poll at 60s until then.
+  </div>);
+});
 
-    const ccyParam=nCcy!=="ALL"?`&ccy=${nCcy}`:"";
-    const impParam=nImp!=="ALL"?`&imp=${nImp}`:"";
-
-    try{
-      // ── LAYER 1: Finnhub real news via our new news.js function ─────────
-      const r=await fetch(`/.netlify/functions/news?${ccyParam}${impParam}`.replace("?&","?"),{
-        signal:AbortSignal.timeout(12000)
-      });
-      if(!r.ok)throw new Error("News function returned "+r.status);
-      const d=await r.json();
-      if(d.error)throw new Error(d.error);
-
-      const arts=d.articles||[];
-      if(arts.length>0){
-        const stamped=arts.map((a,i)=>({
-          ...a,
-          id:a.id||`news_${Date.now()}_${i}`,
-          // Ensure required fields exist
-          imp:a.imp||"MED",
-          impact:a.impact||"NEUTRAL",
-          ccy:a.ccy||"USD",
-          hl:a.hl||a.headline||"",
-          detail:a.detail||a.summary||"",
-          source:a.source||"Financial News",
-          realSource:a.realSource||false,
-        }));
-
-        if(reset){
-          setLiveArts(stamped);
-        }else{
-          setLiveArts(prev=>{
-            const existIds=new Set(prev.map(x=>x.id));
-            const newArts=stamped.filter(x=>!existIds.has(x.id));
-            return [...prev,...newArts];
-          });
-        }
-        setNewsSource(d.source||"finnhub");
-        setNewsLoaded(true);
-        newsLoadingRef.current=false;
-        setNewsLoading(false);
-        return;
-      }
-      throw new Error("No articles returned");
-    }catch(e){
-      // ── LAYER 2: news.js unavailable — fallback to AI via chat.js ──────
-      const now=new Date();
-      const todayDate=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
-      const page=newsPageRef.current;
-
-      // Time context rotates so each load call generates different time periods
-      const timeCtxs=[
-        `the current session on ${todayDate}`,
-        `morning trading on ${todayDate}`,
-        `overnight Asian session on ${todayDate}`,
-        `yesterday's close`,
-        `this week so far`,
-        `last 48 hours`,
-        `this month`,
-        `recent weeks`,
-      ];
-      const timeCtx=timeCtxs[page%timeCtxs.length];
-      const ccyCtx=nCcy!=="ALL"?` Focus on ${nCcy} pairs.`:"";
-      const impCtx=nImp!=="ALL"?` Include only ${nImp}-impact items.`:"";
-
-      try{
-        const r2=await fetch("/.netlify/functions/chat",{
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({
-            model:"claude-sonnet-4-5",
-            max_tokens:3000,
-            messages:[{role:"user",content:`Today is ${todayDate}. Generate 15 institutional G10 FX news analysis items for ${timeCtx}.${ccyCtx}${impCtx}
-
-Current macro context: BOJ hiking 0.50% (only G10 hiker, structural JPY bid), ECB hawkish hold 2.00% (Schnabel hike bias), Fed hold 3.75% (tariff uncertainty, Jun cut ~38%), RBNZ cutting to 3.50%, RBA hold 4.10% (Bullock hawkish), BOC 2.75% (cutting), GBP 4.50% BOE hold, CHF 0.25% SNB, DXY testing 100, 90-day tariff pause active, US CPI ${todayDate} key release.
-
-For each item respond with ONLY a JSON array (no markdown, no backticks):
-[{"dt":"${todayDate} HH:MM","ccy":"USD","hl":"specific 80-120 char institutional headline","detail":"2 precise sentences with exact figures","impact":"BULLISH|BEARISH|NEUTRAL","imp":"HIGH|MED|LOW","source":"Reuters|Bloomberg|FT|WSJ|ECB|BOJ|Fed","url":"","realSource":false}]`}]
-          })
-        },{signal:AbortSignal.timeout(25000)});
-
-        const d2=await r2.json();
-        if(d2.error)throw new Error(d2.error.message);
-        const text=(d2.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
-        const match=text.match(/\[[\s\S]*\]/);
-        if(!match)throw new Error("No JSON in response");
-        const arts2=JSON.parse(match[0]);
-        if(!Array.isArray(arts2)||!arts2.length)throw new Error("Empty array");
-
-        const stamped2=arts2.map((a,i)=>({
-          ...a,
-          id:`ai_${page}_${i}_${Date.now()}`,
-          url:"",
-          realSource:false,
-        }));
-
-        if(reset){
-          setLiveArts(stamped2);
-        }else{
-          setLiveArts(prev=>[...prev,...stamped2]);
-        }
-        newsPageRef.current=page+1;
-        setNewsPage(page+1);
-        setNewsSource("ai");
-        setNewsLoaded(true);
-      }catch(e2){
-        // Both Finnhub and AI failed — hard error, no static fallback
-        if(reset){setLiveArts([]);}
-        setNewsSource("error");
-        setNewsLoaded(true);
-        setNewsError(`NEWS FEED UNAVAILABLE — Finnhub: ${e.message} · AI: ${e2.message}`);
-      }
-    }
-
-    newsLoadingRef.current=false;
-    setNewsLoading(false);
-  },[nCcy,nImp]);
-
-  // Load news when tab first opened
-  useEffect(()=>{
-    if(tab==="news"&&!newsLoaded){loadNews(true);}
-  },[tab]);
-  // Reload when filters change (only if news was already loaded)
-  useEffect(()=>{
-    if(tab==="news"&&newsLoaded){loadNews(true);}
-  },[nCcy,nImp]);
-  // Auto-refresh news every 15 minutes when on news tab
-  useEffect(()=>{
-    if(tab!=="news")return;
-    const iv=setInterval(()=>{loadNews(true);},15*60*1000);
-    return()=>clearInterval(iv);
-  },[tab]);
-
-  // ── LIVE CALENDAR — ForexFactory proxy (parsed server-side in calendar.js) ──
-  const loadCalendar=useCallback(async()=>{
-    if(calLoading)return;
-    setCalLoading(true);
-    try{
-      const [thisRes,nextRes]=await Promise.all([
-        fetch("/.netlify/functions/calendar?week=this",{signal:AbortSignal.timeout(12000)}),
-        fetch("/.netlify/functions/calendar?week=next",{signal:AbortSignal.timeout(12000)})
-      ]);
-      const combined=[];
-      if(thisRes.ok){
-        const data=await thisRes.json();
-        if(data.events?.length)combined.push(...data.events);
-      }
-      if(nextRes.ok){
-        const data=await nextRes.json();
-        if(data.events?.length)combined.push(...data.events);
-      }
-      if(combined.length>0){
-        combined.sort((a,b)=>a.dt.localeCompare(b.dt));
-        // Deduplicate by dt+ccy+ev combo — ForexFactory occasionally returns same event in both week feeds
-        const seen=new Set();
-        const deduped=combined.filter(e=>{
-          const key=`${e.dt}|${e.ccy}|${e.ev}`;
-          if(seen.has(key))return false;
-          seen.add(key);
-          return true;
-        });
-        setCalEvents(deduped);
-        setCalLoaded(true);
-      }else{
-        // Both feeds returned empty — ForexFactory may be down
-        setCalEvents([]);
-        setCalLoaded(true);
-      }
-    }catch(e){
-      setCalEvents([]);
-      setCalLoaded(true);
-    }
-    setCalLoading(false);
-  },[calLoading]);
-
-  useEffect(()=>{
-    if(tab==="calendar"&&!calLoaded)loadCalendar();
-  },[tab,calLoaded]);
-
-  // ── LIVE CB RATES from FRED ──────────────────────────────────────────────
-  const loadCBRates=useCallback(async()=>{
-    if(cbRatesLoading)return;
-    setCbRatesLoading(true);
-    try{
-      const r=await fetch("/.netlify/functions/cbrates",{signal:AbortSignal.timeout(15000)});
-      const d=await r.json();
-      // Hard error from cbrates.js — no FRED key or all fetches failed
-      if(d.source==="error"||!d.rates){
-        setCbRates(null);
-        setCbRatesSource("error");
-        toast_("✗ CB Rates: "+(d.error||"FRED unavailable")+" — "+d.action,C.red);
-        setCbRatesLoading(false);
-        return;
-      }
-      setCbRates(d.rates);
-      setCbRatesSource(d.source||"FRED");
-      setCbRatesUpdated(d.updated||new Date().toISOString());
-      // Warn about partial failures without substituting static data
-      if(d.errors?.length){
-        d.errors.forEach(e=>toast_(`⚠ CB Rate missing: ${e.currency} — ${e.error}`,C.amber));
-      }
-    }catch(e){
-      setCbRates(null);
-      setCbRatesSource("error");
-      toast_("✗ CB Rates fetch failed: "+e.message,C.red);
-    }
-    setCbRatesLoading(false);
-  },[cbRatesLoading]);
-
-  useEffect(()=>{
-    if(tab==="cb"&&!cbRates)loadCBRates();
-  },[tab,cbRates]);
-
-  // ── WEEKEND AI THEMES ────────────────────────────────────────────────────
-  const loadWeekendThemes=useCallback(async()=>{
-    if(weekendLoading)return;
-    setWeekendLoading(true);
-    const now=new Date();
-    const todayDate=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
-    // Build live context from current CB data and prices
-    const liveP=Object.entries(prices||{}).slice(0,8).map(([p,d])=>`${p}:${d.mid?.toFixed(d.mid>10?3:5)||"–"}`).join(" ");
-    const cbSummary=cbRates
-      ? Object.entries(cbRates).map(([ccy,d])=>`${ccy}:${d.rate}%(${d.outlook})`).join(" ")
-      : "USD:3.75%(Hold) EUR:2.00%(Hawkish) JPY:0.50%(Hiking) GBP:4.50%(Hold) AUD:4.10%(Hold) NZD:3.50%(Cutting) CAD:2.75%(Cutting) CHF:0.25%(Hold)";
-    try{
-      const r=await fetch("/.netlify/functions/chat",{
-        method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          model:"claude-sonnet-4-5",max_tokens:4000,
-          messages:[{role:"user",content:`Today is ${todayDate}. You are an institutional G10 FX strategist generating the weekly theme analysis for a trading terminal.
-
-Current CB Rates: ${cbSummary}
-Current Prices: ${liveP}
-
-Generate a JSON array of 8 G10 currency weekly themes (one per major currency: USD, EUR, GBP, JPY, AUD, NZD, CAD, CHF). Each theme must reflect the CURRENT week's actual market conditions and recent CB decisions — not generic boilerplate.
-
-For each currency return:
-{
-  "ccy": "USD",
-  "dir": "BEARISH|BULLISH|NEUTRAL",
-  "priority": "HIGH|MED",
-  "color": "#ff4560 for bearish | #00e5a0 for bullish | #ff9f1c for neutral",
-  "title": "concise 60-char title with specific current event/level",
-  "detail": "2-3 sentence specific detail with exact current rates, levels, recent data releases",
-  "support": "key support level",
-  "resistance": "key resistance level",
-  "pivot": "key pivot level",
-  "pairs": ["PAIR1","PAIR2"],
-  "dirs": ["BUY|SELL","BUY|SELL"],
-  "deepAnalysis": "3-4 sentence institutional-grade analysis with specific data points, rate differentials, and positioning rationale",
-  "watchFor": "specific events/releases to watch this week with exact dates/times if known",
-  "evidence": [
-    {"title":"specific report title","source":"institution name","url":"real institution URL (not article, use institution homepage or policy page)"},
-    {"title":"specific data release or CB statement","source":"source name","url":"real URL"}
-  ]
-}
-
-Return ONLY a valid JSON array. No markdown, no backticks, no explanation.`}]
-        })
-      });
-      const d=await r.json();
-      if(d.error)throw new Error(d.error.message);
-      const text=(d.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
-      const match=text.match(/\[[\s\S]*\]/);
-      if(!match)throw new Error("No JSON");
-      const themes=JSON.parse(match[0]);
-      if(Array.isArray(themes)&&themes.length>0){
-        setWeekendThemes(themes);
-        setWeekendLoaded(true);
-      } else {
-        throw new Error("Empty themes array returned");
-      }
-    }catch(e){
-      // Don't leave UI blank — show the error state with retry
-      setWeekendLoaded(true);
-      // weekendThemes stays null/previous value — UI will show the error/empty state with retry button
-    }
-    setWeekendLoading(false);
-  },[weekendLoading,prices,cbRates]);
-
-  useEffect(()=>{
-    if(tab==="weekend"&&!weekendLoaded)loadWeekendThemes();
-  },[tab,weekendLoaded]);
-
-  // ── ANALYZER REGIME AI ───────────────────────────────────────────────────
-  const loadRegime=useCallback(async()=>{
-    if(regimeLoading)return;
-    setRegimeLoading(true);
-    const now=new Date();
-    const todayDate=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
-    const liveP=Object.entries(prices||{}).slice(0,10).map(([p,d])=>`${p}:${d.mid?.toFixed(d.mid>10?3:5)||"–"}`).join(" ");
-    const cbSummary=cbRates
-      ? Object.entries(cbRates).map(([ccy,d])=>`${ccy}:${d.rate}%(${d.outlook})`).join(" ")
-      : "USD:3.75%(Hold) EUR:2.00%(Hawkish) JPY:0.50%(Hiking) GBP:4.50%(Hold) AUD:4.10%(Hold) NZD:3.50%(Cutting) CAD:2.75%(Cutting) CHF:0.25%(Hold)";
-    try{
-      const r=await fetch("/.netlify/functions/chat",{
-        method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          model:"claude-sonnet-4-5",max_tokens:3000,
-          messages:[{role:"user",content:`Today is ${todayDate}. Generate a G10 FX macro regime assessment for an institutional trading terminal.
-
-Current CB Policy Rates: ${cbSummary}
-Live Prices: ${liveP}
-
-Return a JSON array of 8 regime objects (USD, EUR, GBP, JPY, AUD, NZD, CAD, CHF) with this structure:
-{
-  "ccy": "USD",
-  "regime": "BULLISH|BEARISH|NEUTRAL",
-  "strength": "STRONG|MOD|WEAK",
-  "detail": "2 sentences with specific current data points, rate levels, recent releases",
-  "best_strat": ["STRAT_ID1","STRAT_ID2","STRAT_ID3"],
-  "avoid": ["STRAT_ID1"],
-  "evidence": "specific institutional source name and report",
-  "url": "real institution URL (policy page, not article)",
-  "summary": "1 sentence dominant regime narrative"
-}
-
-Strategy IDs available: BOJ_NORM, NEWS_DFT, TRI_ARB, RATE_SRP, CB_DIV, WMR_FIX, STRUCT_BK, GRW_DIV, REAL_YLD, SAFE_HVN, CB_COMM, TSM_CTA, CROSS_CAR, FX_VOL, ICT_OB, STOP_HNT, GLOB_MAC, VOL_BRK, CORR_BRK, UIP_DEV, ADX_BRK, LDN_BRK, VWAP_REV, EARL_WRN, MOMO_CRS, BOP_FLOW, CARRY, BB_FADE, FIBO_PULL, ICHIMOKU, MON_PULL, EQ_BETA, REGIME_SW, COMD_CCY, TURT_TR, STOCH_RSI, DUAL_THR, KELTNER, RISK_PAR, SUPPLY_DEM, TOT_SHOCK, ENG_CAN, PPP_VAL, RSIMR, ATR_FADE
-
-Return ONLY valid JSON array. No markdown, no backticks.`}]
-        })
-      });
-      const d=await r.json();
-      if(d.error)throw new Error(d.error.message);
-      const text=(d.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
-      const match=text.match(/\[[\s\S]*\]/);
-      if(!match)throw new Error("No JSON");
-      const regimes=JSON.parse(match[0]);
-      if(Array.isArray(regimes)&&regimes.length>0)setRegimeData(regimes);
-      setRegimeLoaded(true);
-    }catch(e){setRegimeLoaded(true);}
-    setRegimeLoading(false);
-  },[regimeLoading,prices,cbRates]);
-
-  useEffect(()=>{
-    if(tab==="analyzer"&&analyzerTab==="regime"&&!regimeLoaded)loadRegime();
-  },[tab,analyzerTab,regimeLoaded]);
-
-  const [aiMsgs,setAiMsgs]=useState([{role:"assistant",content:"I'm AXIOM — your institutional G10 FX intelligence.\n\nI have full context of your live account, all 28 pairs, 51 strategies, and today's macro environment. API key is pre-configured server-side.\n\nAsk me anything: trade setups, risk calculations, CB analysis, entry/exit levels, macro regime, strategy selection. I respond with precision — exact prices, pip counts, lot sizes, R:R ratios.\n\nWhat's on your radar?"}]);
-  const [aiInput,setAiInput]=useState("");
-  const [aiLoading,setAiLoading]=useState(false);
-  const [settingsSaved,setSettingsSaved]=useState(()=>load("axiom_settings",{saved:false}).saved||false);
-  const aiRef=useRef(null);
-  const aiScrollRef=useRef(null);
-  const [sigScanning,setSigScanning]=useState(false);
-  // Scroll chat to bottom when new messages arrive — use container scrollTop, not scrollIntoView
-  // scrollIntoView can hijack the outer page scroll causing the viewport to jump up
-  useEffect(()=>{
-    if(aiScrollRef.current){
-      aiScrollRef.current.scrollTop=aiScrollRef.current.scrollHeight;
-    }
-  },[aiMsgs]);
-  const [scanStatus,setScanStatus]=useState("Waiting for first scan...");
-  const [lastScanTime,setLastScanTime]=useState(0);
-  const toast_=useCallback((msg,color=C.green)=>{setToast({msg,color});setTimeout(()=>setToast(null),4500);},[]);
-
-  useEffect(()=>save("axiom_style",style),[style]);
-  useEffect(()=>save("axiom_settings",settings),[settings]);
-  useEffect(()=>save("axiom_signals",signals),[signals]);
-  useEffect(()=>save("axiom_trades",trades),[trades]);
-  useEffect(()=>save("axiom_history",history),[history]);
-
-  // ── REAL SIGNAL SCANNER ────────────────────────────────────────────────────
-  const runSignalScan=useCallback(async()=>{
-    if(sigScanning)return;
-    setSigScanning(true);
-    setScanStatus("Scanning 28 pairs — fetching live candles & running real analysis...");
-    try{
-      const acctP=settings.acct||10000;const riskP=settings.risk||2;
-      // Pass enabled strategies so toggles actually affect signal generation
-      const stratParam=enabledStrats.length>0?`&strategies=${enabledStrats.join(',')}`:'';
-      const res=await fetch(`/.netlify/functions/analyze?acct=${acctP}&risk=${riskP}&style=${style}${stratParam}`,{signal:AbortSignal.timeout(120000)});
-      if(!res.ok){
-        const errBody=await res.json().catch(()=>({error:'Analyze function error '+res.status}));
-        if(errBody.error?.includes('AXIOM_REGIMES')){
-          setScanStatus('✗ AXIOM_REGIMES not configured — Settings → Regime Update → copy JSON → Netlify env var AXIOM_REGIMES');
-          setSigScanning(false);
-          return;
-        }
-        throw new Error(errBody.error||'Analyze returned '+res.status);
-      }
-      const data=await res.json();
-      const now=Date.now();setLastScanTime(now);
-      if(data.signals&&data.signals.length>0){
-        const existingKeys=new Set(signals.map(s=>s.pair+s.direction));
-        const freshSigs=data.signals
-          .filter(s=>!existingKeys.has(s.pair+s.direction))
-          .map(s=>({...s,id:now+Math.random(),
-            primaryStrategy:{id:s.primaryStrategy?.id||"REAL",name:s.primaryStrategy?.id||"Multi-Strategy",
-              tier:s.strategiesTriggered>=6?"S":s.strategiesTriggered>=4?"A":"B",
-              cat:"REAL ANALYSIS",wr:s.probability,
-              note:`${s.strategiesTriggered} strategies · Score:${s.technicalScore}`},
-            supportingStrategy:{id:s.supportingStrategy?.id||"TECH",name:s.supportingStrategy?.id||"Confluence"},
-            style:s.slPips<=20?"scalp":s.slPips<=60?"day":"swing",
-            timeframe:s.slPips<=20?"M5/M15":s.slPips<=60?"H1/H4":"H4/D1",
-            holdTime:s.slPips<=20?"15-60 min":s.slPips<=60?"2-8 hrs":"2-10 days",
-            winExits:[`TP1 ${s.tp1} — move SL to breakeven`,`TP2 ${s.tp2} — trail stop`,`TP3 ${s.tp3} — full exit ${s.rr3}R`,s.technicalDetails?.sessionNote||""],
-            lossExits:[`Hard SL ${s.sl} — ${s.slPips}p — no exceptions`,`Regime change — exit immediately`,`CB communication reversal`,`Correlated pairs reversing`],
-            ts:new Date(s.timestamp||Date.now()),status:"PENDING",pnl:0,pips:0,currentPrice:s.entry}));
-        if(freshSigs.length>0){
-          setSignals(prev=>[...freshSigs,...prev].slice(0,50));
-          freshSigs.forEach(sig=>{
-            toast_(`⚡ REAL: ${sig.direction} ${sig.pair} ${sig.probability}% · ${sig.strategiesTriggered} strategies`,sig.direction==="BUY"?C.green:C.red);
-            try{if(typeof Notification!=="undefined"&&Notification.permission==="granted"){new Notification(`AXIOM: ${sig.direction} ${sig.pair}`,{body:`${sig.probability}% · ${sig.strategiesTriggered} strategies
-Entry:${sig.entry} SL:${sig.sl}`});}}catch(_){}
-          });
-        }
-        const corrNote=data.correlationFiltered>0?` · ${data.correlationFiltered} corr-filtered`:'';
-        const feedNote=data.feeds?` · Eco:${data.feeds.ecoEvents||0} Yields:${data.feeds.yieldPairs||0}`:''
-        if(data.feedErrors?.length){data.feedErrors.forEach(fe=>toast_(`⚠ Feed error: ${fe.feed} — ${fe.error}`,C.amber));};
-        setScanStatus(`Scan complete — ${data.signals.length} signal${data.signals.length!==1?"s":""} found · ${data.scanned} pairs scanned${corrNote}${feedNote}`);
-      }else{
-        const corrNote=data.correlationFiltered>0?` · ${data.correlationFiltered} corr-filtered`:'';
-        setScanStatus(`No setups found across ${data.scanned||28} pairs (${data.skipped||0} rejected)${corrNote} · Next scan in 5 min`);
-      }
-    }catch(e){
-      // Check if this is a regime configuration error
-      const msg=e.message||'Unknown error';
-      if(msg.includes('AXIOM_REGIMES')){
-        setScanStatus('✗ AXIOM_REGIMES not configured — go to Settings → Regime Update → save JSON to Netlify env var');
-      } else if(msg.includes('OANDA_API_KEY')){
-        setScanStatus('✗ OANDA_API_KEY not configured — add to Netlify environment variables');
-      } else {
-        setScanStatus(`✗ Scan error: ${msg}`);
-      }
-    }
-    setSigScanning(false);
-  },[sigScanning,signals,settings.acct,settings.risk,toast_,enabledStrats]);
-
-  const runSignalRef=useRef(runSignalScan);
-  useEffect(()=>{runSignalRef.current=runSignalScan;},[runSignalScan]);
-
-  useEffect(()=>{
-    const t=setTimeout(()=>runSignalRef.current(),5000);
-    const iv=setInterval(()=>runSignalRef.current(),5*60*1000);
-    return()=>{clearTimeout(t);clearInterval(iv);};
-  },[]);// eslint-disable-line
-
-  // Live P&L — throttled
-  useEffect(()=>{
-    if(!trades.length)return;
-    const iv=setInterval(()=>{
-      setTrades(prev=>prev.map(t=>{
-        const p=prices?.[t.pair];if(!p)return t;
-        const cp=t.direction==="BUY"?p.bid:p.ask;
-        const isH=t.pair.includes("JPY")||t.pair.includes("NOK");
-        const pips=(t.direction==="BUY"?cp-t.entry:t.entry-cp)*(isH?100:10000);
-        const pnl=pips*(isH?10:0.10)*t.lotSize;
-        return{...t,currentPrice:cp,pips:Math.round(pips*10)/10,pnl:Math.round(pnl*100)/100};
-      }));
-    },2000); // 2s throttle for perf
-    return()=>clearInterval(iv);
-  },[trades.length,prices]); // use length not full array
-
-  function takeTrade(sig){setTrades(p=>[{...sig,status:"ACTIVE",openTime:new Date(),pips:0,pnl:0},...p]);setSignals(p=>p.filter(s=>s.id!==sig.id));setModal(null);toast_(`Opened: ${sig.direction} ${sig.pair} @ ${sig.entry}`,C.blue);}
-  function dismissSig(id){setSignals(p=>p.filter(s=>s.id!==id));}
-  function closeT(id,res){const t=trades.find(x=>x.id===id);if(!t)return;setHistory(p=>[{...t,status:res,closeTime:new Date(),finalPnl:t.pnl},...p]);setTrades(p=>p.filter(x=>x.id!==id));toast_(`${res}: ${t.pair}  ${t.pnl>=0?"+":""}$${t.pnl.toFixed(2)}`,res==="WIN"?C.green:C.red);}
-
-  async function sendAI(msg){
-    if(!msg||!msg.trim()||aiLoading)return;
-    const userMsg=msg.trim();
-    // Add user message immediately to UI
-    setAiMsgs(prev=>[...prev,{role:"user",content:userMsg}]);
-    setAiLoading(true);
-    setAiInput("");
-    const msgs=[...aiMsgs,{role:"user",content:userMsg}];
-    const openPnl=trades.reduce((a,t)=>a+t.pnl,0);
-    const liveP=prices?Object.entries(prices||{}).slice(0,14).map(([p,d])=>`${p}:${d.bid?.toFixed(d.bid>10?3:5)||"–"}/${d.ask?.toFixed(d.ask>10?3:5)||"–"}`).join(" "):"Prices connecting...";
-    const openSigs=signals.slice(0,5).map(s=>`${s.direction} ${s.pair} @${s.entry} SL:${s.sl} TP1:${s.tp1}`).join("; ");
-    const openTrades=trades.filter(t=>t.status==="OPEN").map(t=>`${t.direction} ${t.pair} @${t.entry} P&L:${t.pnl>=0?"+":""}$${t.pnl?.toFixed(2)}`).join("; ");
-    const now=new Date();
-    const todayDate=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
-    // Build macro regime dynamically from live CB rates
-    const activeCB=cbRates||{};
-    const getRateStr=(ccy)=>{
-      const r=activeCB[ccy]?.rate??null;
-      const o=activeCB[ccy]?.outlook??null;
-      return r!=null?`${r.toFixed(2)}%(${o||"Hold"})`:"–";
-    };
-    const macroLines=[
-  `- USD: ${getRateStr("USD")} · ${activeCB.USD?.bias||"Neutral"} · DXY ~100, tariff uncertainty, Jun cut prob ~38%`,
-  `- JPY: ${getRateStr("JPY")} · ${activeCB.JPY?.bias||"Hawkish"} · BOJ only G10 hiker, structural JPY bid, wage growth 3.1%+`,
-  `- EUR: ${getRateStr("EUR")} · ${activeCB.EUR?.bias||"Hawkish"} · ECB hawkish hold, German fiscal boost, JPM target 1.20`,
-  `- GBP: ${getRateStr("GBP")} · ${activeCB.GBP?.bias||"Neutral"} · BOE easing cycle, sticky services inflation 4.8%`,
-  `- AUD: ${getRateStr("AUD")} · ${activeCB.AUD?.bias||"Neutral"} · RBA hold, Bullock hawkish, China PMI supportive`,
-  `- NZD: ${getRateStr("NZD")} · ${activeCB.NZD?.bias||"Dovish"} · RBNZ cutting cycle, recession confirmed, sell rallies`,
-  `- CAD: ${getRateStr("CAD")} · ${activeCB.CAD?.bias||"Dovish"} · BOC cutting, USMCA risk, oil headwinds`,
-  `- CHF: ${getRateStr("CHF")} · ${activeCB.CHF?.bias||"Neutral"} · Safe haven bid, dollar debasement flow`,
-  `- NOK: ${getRateStr("NOK")} · ${activeCB.NOK?.bias||"Neutral"} · Oil-linked, Norges Bank hold`,
-  `- SEK: ${getRateStr("SEK")} · ${activeCB.SEK?.bias||"Neutral"} · Riksbank hold, EUR/SEK stable`,
-].join("\n");
-
-    const sys=`You are AXIOM — an institutional G10 FX trading AI embedded in a live trading terminal. Today is ${todayDate}. You are fully agentic and respond with precision to WHATEVER the user asks. Never give generic responses. Never say "I cannot" or "as an AI". Always use the live data below directly in your answers.
-
-LIVE ACCOUNT (right now):
-- Balance: $${settings.acct} | Style: ${style} | Risk: ${settings.risk||2}%/trade = $${(settings.acct*(settings.risk||2)/100).toFixed(0)} per trade
-- Open P&L: ${openPnl>=0?"+":""}$${openPnl.toFixed(2)} | Open trades: ${trades.length} | Signals pending: ${signals.length}
-- Positions: ${openTrades||"none open"}
-
-LIVE PRICES right now (bid/ask):
-${liveP}
-
-ACTIVE SIGNALS:
-${openSigs||"No signals pending — run a scan"}
-
-MACRO REGIME (${todayDate}):
-${macroLines}
-
-Respond with institutional precision. Give exact price levels, pip counts, lot sizes, R:R ratios where relevant. Be direct, specific, and data-driven like a senior FX strategist.`;
-    try{
-      const res=await fetch("/.netlify/functions/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:2500,system:sys,messages:msgs.map(m=>({role:m.role,content:m.content}))})});
-      const data=await res.json();
-      if(data.error)throw new Error(data.error.message);
-      setAiMsgs(p=>[...p,{role:"assistant",content:data.content?.[0]?.text||"Analysis unavailable."}]);
-    }catch(e){setAiMsgs(p=>[...p,{role:"assistant",content:`Error: ${e.message}`}]);}
-    setAiLoading(false);
+// ═══ MODULE PRICE HISTORY (sparklines) — pushed by the root price engine ════
+const priceHistory={};
+function pushPriceHistory(prices){
+  if(!prices) return;
+  for(const pair of ALL_PAIRS){
+    const m=prices[pair]&&prices[pair].mid;
+    if(m==null) continue;
+    if(!priceHistory[pair]) priceHistory[pair]=[];
+    const arr=priceHistory[pair];
+    arr.push(m);
+    if(arr.length>48) arr.shift();
   }
+}
 
-  const perf=useMemo(()=>{
-    const wins=history.filter(t=>t.status==="WIN"),loss=history.filter(t=>t.status==="LOSS");
-    const tP=history.reduce((a,t)=>a+(t.finalPnl||0),0);
-    const wr=history.length?wins.length/history.length*100:0;
-    const aW=wins.length?wins.reduce((a,t)=>a+(t.finalPnl||0),0)/wins.length:0;
-    const aL=loss.length?Math.abs(loss.reduce((a,t)=>a+(t.finalPnl||0),0)/loss.length):0;
-    const pf=aL>0?(aW*wins.length)/(aL*loss.length):0;
-    const bySt={};["scalp","day","swing"].forEach(s=>{const st=history.filter(t=>t.style===s),sw=st.filter(t=>t.status==="WIN");bySt[s]={n:st.length,w:sw.length,pnl:st.reduce((a,t)=>a+(t.finalPnl||0),0),wr:st.length?sw.length/st.length*100:0};});
-    return{wins:wins.length,loss:loss.length,n:history.length,tP,wr,aW,aL,pf,bySt};
-  },[history]);
+// ═══ MARKET PULSE (subscriber) ═══════════════════════════════════════════════
+const USD_PAIRS_FOR_IDX=["EUR/USD","GBP/USD","AUD/USD","NZD/USD","USD/JPY","USD/CAD","USD/CHF"];
+const RISK_PAIRS=["AUD/JPY","NZD/JPY","CAD/JPY"];
 
-  const openPnl=trades.reduce((a,t)=>a+t.pnl,0);
-  const acctVal=settings.acct+perf.tP+openPnl;
+const MarketPulse=memo(()=>{
+  const s=usePriceSnap();
+  const haveOpens=!!s.dailyOpens;
+  let usdIdx=null,risk=null,top=null;
+  if(s.prices&&haveOpens){
+    const usdParts=[];
+    for(const p of USD_PAIRS_FOR_IDX){
+      const d=dailyChg(p,s); if(!d) continue;
+      usdParts.push(p.startsWith("USD/")?d.pct:-d.pct);
+    }
+    if(usdParts.length>=4) usdIdx=usdParts.reduce((a,b)=>a+b,0)/usdParts.length;
+    const rp=[];
+    for(const p of RISK_PAIRS){ const d=dailyChg(p,s); if(d) rp.push(d.pct); }
+    if(rp.length>=2) risk=rp.reduce((a,b)=>a+b,0)/rp.length;
+    let best=null;
+    for(const p of ALL_PAIRS){ const d=dailyChg(p,s); if(d&&(!best||Math.abs(d.pct)>Math.abs(best.pct))) best={pair:p,...d}; }
+    top=best;
+  }
+  const riskLabel=risk==null?"—":risk>0.10?"RISK-ON":risk<-0.10?"RISK-OFF":"NEUTRAL";
+  const riskColor=risk==null?C.muted:risk>0.10?C.green:risk<-0.10?C.red:C.amber;
+  const Tile=({t,v,vc,sub})=>(
+    <div style={{flex:"1 1 140px",background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"4px",padding:"10px 12px"}}>
+      <div style={{fontSize:"8px",color:C.muted,letterSpacing:"1px",fontWeight:"700"}}>{t}</div>
+      <div style={{fontSize:"15px",fontWeight:"800",color:vc||C.text,marginTop:"3px"}}>{v}</div>
+      {sub&&<div style={{fontSize:"8.5px",color:C.muted,marginTop:"2px"}}>{sub}</div>}
+    </div>);
+  const eu=s.prices&&s.prices["EUR/USD"], uj=s.prices&&s.prices["USD/JPY"];
+  const euD=dailyChg("EUR/USD",s), ujD=dailyChg("USD/JPY",s);
+  return(
+    <div style={{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"12px"}}>
+      <Tile t="SYNTHETIC USD INDEX (DAILY)" v={usdIdx==null?"—":(usdIdx>=0?"+":"")+usdIdx.toFixed(2)+"%"} vc={usdIdx==null?C.muted:usdIdx>=0?C.green:C.red} sub={haveOpens?"vs 5pm-NY daily open":"awaiting daily opens"}/>
+      <Tile t="RISK GAUGE (JPY CROSSES)" v={riskLabel} vc={riskColor} sub={risk==null?"awaiting data":`avg ${risk>=0?"+":""}${risk.toFixed(2)}% daily`}/>
+      <Tile t="TOP MOVER" v={top?top.pair:"—"} vc={top?(top.pct>=0?C.green:C.red):C.muted} sub={top?`${top.pct>=0?"+":""}${top.pct.toFixed(2)}% · ${top.pips>=0?"+":""}${top.pips.toFixed(0)}p`:""}/>
+      <Tile t="EUR/USD" v={eu?fmtP("EUR/USD",eu.mid):"—"} vc={euD?(euD.pct>=0?C.green:C.red):C.text} sub={eu?`${fmtP("EUR/USD",eu.bid)} / ${fmtP("EUR/USD",eu.ask)}`:""}/>
+      <Tile t="USD/JPY" v={uj?fmtP("USD/JPY",uj.mid):"—"} vc={ujD?(ujD.pct>=0?C.green:C.red):C.text} sub={uj?`${fmtP("USD/JPY",uj.bid)} / ${fmtP("USD/JPY",uj.ask)}`:""}/>
+    </div>);
+});
 
-  // ── SIGNAL CARD (memoized) ──────────────────────────────────────────────
-  const SigCard=memo(function SigCard({sig,showDismiss}){
-    const dc=sig.direction==="BUY"?C.green:C.red;
-    const catBg=CATC[sig.primaryStrategy?.cat]||C.bg2;
-    return(
-      <div style={{background:C.bg1,border:`1px solid ${dc}22`,borderLeft:`3px solid ${dc}`,borderRadius:"5px",padding:"11px",marginBottom:"9px",contain:"content"}}>
-        <div style={{display:"flex",alignItems:"center",gap:"7px",marginBottom:"7px",flexWrap:"wrap"}}>
-          <Bdg label={sig.direction} color={dc} sz="10px"/>
-          <span style={{fontWeight:"700",color:C.gold,fontSize:"13px"}}>{sig.pair}</span>
-          <span style={{display:"inline-block",padding:"2px 7px",background:catBg+"55",color:"#dde3ee",border:`1px solid ${catBg}`,borderRadius:"2px",fontSize:"8px",fontWeight:"700"}}>{sig.primaryStrategy?.cat}</span>
-          <Bdg label={sig.style.toUpperCase()} color={SC[sig.style]} sz="8px"/>
-          <span style={{marginLeft:"auto",color:sig.probability>=68?C.green:sig.probability>=58?C.gold:C.amber,fontWeight:"700",fontSize:"11px"}}>{sig.probability}%</span>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:"4px",marginBottom:"7px"}}>
-          {[["ENTRY",sig.entry,C.text],["SL",sig.sl,C.red],["TP1",sig.tp1,C.green],["TP3",sig.tp3,C.gold],["LOTS",`${sig.lotSize}`,C.gold]].map(([l,v,c])=>(
-            <div key={l}><div style={{fontSize:"7px",color:C.muted,letterSpacing:"0.8px",marginBottom:"2px"}}>{l}</div><div style={{color:c,fontWeight:"700",fontSize:"9.5px"}}>{v}</div></div>
-          ))}
-        </div>
-        <div style={{fontSize:"9px",color:C.muted,marginBottom:"8px"}}>{sig.primaryStrategy?.name} · 1:{sig.rr1}/1:{sig.rr2}/1:{sig.rr3} · {sig.timeframe} · {sig.holdTime}</div>
-        <div style={{display:"flex",gap:"6px"}}>
-          <Btn label="TAKE TRADE" color={dc} onClick={()=>takeTrade(sig)} style={{flex:1,fontSize:"10px",padding:"5px 8px"}}/>
-          <Sm label="DETAILS" color={C.muted} onClick={()=>{setModal(sig);setModalTab("params");}}/>
-              <Sm label="📊" color={C.blue} onClick={()=>{setChartPair(sig.pair);setChartPairNavigated(true);setTab("chart");}}/>
-          {showDismiss&&<button onClick={()=>dismissSig(sig.id)} style={{padding:"4px 8px",background:"transparent",color:C.red,border:`1px solid ${C.red}33`,borderRadius:"2px",cursor:"pointer",fontSize:"9px",fontFamily:"inherit",fontWeight:"700",flexShrink:0}}>✕</button>}
-        </div>
+// ═══ 28-PAIR PRICE BOARD (subscriber) ════════════════════════════════════════
+const PriceTable28=memo(({cbRates,onGoPair})=>{
+  const s=usePriceSnap();
+  const th={padding:"6px 8px",fontSize:"8px",color:C.muted,letterSpacing:"1px",textAlign:"right",fontWeight:"700",borderBottom:`1px solid ${C.bdr}`};
+  const td={padding:"6px 8px",fontSize:"10.5px",textAlign:"right",borderBottom:`1px solid ${C.bdr}33`,fontVariantNumeric:"tabular-nums"};
+  const carryOf=(pair)=>{
+    if(!cbRates) return null;
+    const [b,q]=pair.split("/");
+    const rb=cbRates[b]&&cbRates[b].rate, rq=cbRates[q]&&cbRates[q].rate;
+    if(rb==null||rq==null) return null;
+    return rb-rq;
+  };
+  return(
+    <Card style={{padding:"0",overflow:"hidden"}}>
+      <div style={{padding:"10px 14px",borderBottom:`1px solid ${C.bdr}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{fontSize:"11px",fontWeight:"800",letterSpacing:"1.5px",color:C.gold}}>G10 BOARD — 28 PAIRS</span>
+        <span style={{fontSize:"8.5px",color:C.muted}}>{s.dailyOpens?`Δ vs ${s.opensDate||"today"}'s 5pm-NY open`:"daily opens loading…"}{cbRates?" · carry: live FRED":" · carry: load CB Rates tab"}</span>
       </div>
-    );
-  });
-
-  const TABS=[
-    {id:"dashboard",icon:"⬡",label:"Dashboard"},
-    {id:"signals",  icon:"◈",label:"Signals"},
-    {id:"chart",    icon:"📊",label:"Charts"},
-    {id:"trades",   icon:"◉",label:"Trades"},
-    {id:"perf",     icon:"▲",label:"Performance"},
-    {id:"analyzer", icon:"◎",label:"Analyzer"},
-    {id:"news",     icon:"◆",label:"News", badge:()=>{const h=liveArts.filter(n=>n.imp==="HIGH").length;return h>0?h:null;}},
-    {id:"calendar", icon:"◷",label:"Calendar"},
-    {id:"cb",       icon:"◈",label:"CB Rates"},
-    {id:"weekend",  icon:"◫",label:"Weekend"},
-    {id:"ai",       icon:"✦",label:"AXIOM AI"},
-    {id:"strategies",icon:"◎",label:"Strategies"},
-    {id:"sources",  icon:"📄",label:"Sources"},
-    {id:"settings", icon:"⚙",label:"Settings"},
-    {id:"deploy",   icon:"🚀",label:"Deploy"},
-  ];
-
-  // ─── DASHBOARD ────────────────────────────────────────────────────────
-  function Dashboard(){
-    // Market Pulse — derive from live prices
-    const usdJpy=prices?.["USD/JPY"];
-    const eurUsd=prices?.["EUR/USD"];
-    const dxyDir=usdJpy&&usdJpy.pct>0.05?"RISING ↑":usdJpy&&usdJpy.pct<-0.05?"FALLING ↓":"FLAT →";
-    const dxyColor=usdJpy&&usdJpy.pct>0.05?C.red:usdJpy&&usdJpy.pct<-0.05?C.green:C.muted; // DXY falls when USD/JPY falls
-    const vixRegime="RISK-OFF"; // April 2026 tariff environment
-    const topMover=prices?ALL_PAIRS.reduce((best,p)=>Math.abs((prices?.[p]?.pct||0))>Math.abs((prices?.[best]?.pct||0))?p:best,"EUR/USD"):"EUR/USD";
-    const topMoverPct=prices?.[topMover]?.pct||0;
-    return(
-      <div style={{minWidth:0}}>
-        {/* Market Pulse Bar */}
-        <div style={{background:`linear-gradient(90deg,#050d18,#0a1525)`,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"7px 12px",marginBottom:"8px",display:"flex",gap:"0",overflowX:"auto",scrollbarWidth:"none"}}>
-          {[
-            ["DXY",dxyDir,dxyColor],
-            ["REGIME",vixRegime,C.amber],
-            ["TOP MOVER",`${topMover} ${topMoverPct>=0?"+":""}${topMoverPct.toFixed(3)}%`,topMoverPct>=0?C.green:C.red],
-            ["EUR/USD",eurUsd?eurUsd.mid.toFixed(5):"–",eurUsd?.pct>=0?C.green:C.red],
-            ["USD/JPY",usdJpy?usdJpy.mid.toFixed(3):"–",usdJpy?.pct>=0?C.red:C.green],
-            ["STATUS",apiStatus==="live_oanda"?"OANDA LIVE":apiStatus==="error"?"✗ OANDA ERROR":"CONNECTING",apiStatus==="live_oanda"?C.green:apiStatus==="error"?C.red:C.muted],
-          ].map(([l,v,c],i,arr)=>(
-            <div key={l} style={{display:"flex",flexDirection:"column",paddingRight:"14px",marginRight:"14px",borderRight:i<arr.length-1?`1px solid ${C.bdr}`:"none",flexShrink:0}}>
-              <span style={{fontSize:"7px",color:C.muted,letterSpacing:"1.5px",fontWeight:"700",marginBottom:"2px"}}>{l}</span>
-              <span style={{fontSize:"10px",color:c,fontWeight:"700",fontFamily:"monospace",whiteSpace:"nowrap"}}>{v}</span>
-            </div>
-          ))}
-        </div>
-        <div style={{background:`linear-gradient(90deg,${C.bg2},#0a1e3a)`,border:`2px solid ${C.gold}`,borderRadius:"6px",padding:"10px 14px",marginBottom:"10px",display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}}>
-          <div>
-            <div style={{fontSize:"8px",color:C.gold,letterSpacing:"2px",fontWeight:"700",marginBottom:"2px"}}>💰 THEORETICAL ACCOUNT</div>
-            <div style={{fontSize:"22px",fontWeight:"700",color:C.gold,fontFamily:"monospace"}}>${acctVal.toFixed(2)}</div>
-            <div style={{fontSize:"8.5px",color:C.muted}}>Base ${settings.acct} · Closed ${perf.tP.toFixed(2)} · Open ${openPnl.toFixed(2)}</div>
-          </div>
-          <button onClick={()=>{setSettingsSaved(false);setTab("settings");}} style={{marginLeft:"auto",padding:"8px 14px",background:C.gold,color:C.bg,border:"none",borderRadius:"4px",cursor:"pointer",fontWeight:"700",fontSize:"10px",fontFamily:"inherit"}}>✏️ EDIT →</button>
-        </div>
-        {/* KPIs */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"8px",marginBottom:"10px"}}>
-          {[["OPEN P&L",`${openPnl>=0?"+":""}$${openPnl.toFixed(2)}`,openPnl>=0?C.green:C.red,`${trades.length} trades`],["WIN RATE",`${perf.wr.toFixed(1)}%`,perf.wr>=55?C.green:C.amber,`${perf.wins}W/${perf.loss}L`],["PROF FACTOR",`${perf.pf.toFixed(2)}x`,perf.pf>=1.5?C.green:perf.pf>=1?C.amber:C.red,""],["SIGNALS",String(signals.length),C.gold,"pending"]].map(([l,v,c,sub])=>(
-            <div key={l} style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"9px 10px"}}>
-              <div style={{fontSize:"7.5px",color:C.muted,letterSpacing:"1.5px",marginBottom:"3px"}}>{l}</div>
-              <div style={{fontSize:"16px",fontWeight:"700",color:c,marginBottom:"2px"}}>{v}</div>
-              <div style={{fontSize:"8.5px",color:C.muted}}>{sub}</div>
-            </div>
-          ))}
-        </div>
-        {/* Notice */}
-        <div style={{background:"#0a1a0a",border:`1px solid ${C.green}44`,borderRadius:"5px",padding:"8px 12px",marginBottom:"10px",display:"flex",gap:"8px",alignItems:"center"}}>
-          <span style={{color:C.green,fontSize:"12px",flexShrink:0}}>ℹ️</span>
-          <div style={{fontSize:"9px",color:C.muted,lineHeight:"1.6"}}>Prices below are reference-seeded real-time ticks. For guaranteed live prices, use <button onClick={()=>setTab("chart")} style={{background:"transparent",border:"none",color:C.gold,cursor:"pointer",fontFamily:"inherit",fontSize:"9px",fontWeight:"700",textDecoration:"underline",padding:0}}>📊 Charts</button> (TradingView live feed). Ref: ForexFactory Apr 7 ~11:55PM: EUR/USD 1.1669 · GBP/USD 1.3397 · USD/JPY 158.38</div>
-        </div>
-        {/* All 28 pairs — alphabetical */}
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"10px 12px",marginBottom:"10px"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>
-            <span style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px"}}>◈ 28 G10 PAIRS — ALPHABETICAL — REFERENCE PRICES</span>
-            <div style={{display:"flex",gap:"6px",alignItems:"center"}}>
-              <button onClick={()=>setTab("chart")} style={{padding:"3px 8px",background:C.gold+"22",color:C.gold,border:`1px solid ${C.gold}44`,borderRadius:"2px",cursor:"pointer",fontSize:"8px",fontWeight:"700",fontFamily:"inherit"}}>📊 LIVE CHARTS →</button>
-              <div style={{width:"5px",height:"5px",borderRadius:"50%",background:apiStatus==="live_oanda"?C.green:apiStatus==="error"?C.red:C.muted,animation:apiStatus==="live_oanda"?"pulse 2s infinite":"none"}}/>
-            </div>
-          </div>
-          <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",minWidth:"540px"}}>
-              <thead><tr>{["PAIR","BID","ASK","CHG","CHG%","SPARK","CARRY","📊"].map(h=><th key={h} style={{padding:"4px 6px",textAlign:"left",fontSize:"7.5px",color:C.muted,letterSpacing:"1px",borderBottom:`1px solid ${C.bdr}`,fontWeight:"700",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
-              <tbody>
-                {ALL_PAIRS.map(pair=>{
-                  const p=prices?.[pair];if(!p)return null;
-                  const isH=pair.includes("JPY")||pair.includes("NOK"),dec=isH?3:5;
-                  const pc=p.dir==="up"?C.green:p.dir==="down"?C.red:C.text;
-                  const [base,quote]=pair.split("/");
-                  const liveBase=cbRates?.[base]?.rate??null;
-                  const liveQuote=cbRates?.[quote]?.rate??null;
-                  const carry=(liveBase!=null&&liveQuote!=null)?(liveBase-liveQuote).toFixed(2):'—';
-                  return(
-                    <tr key={pair} onMouseEnter={e=>e.currentTarget.style.background=C.bg1} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                      <td style={{padding:"5px 6px",fontWeight:"700",color:C.gold,fontSize:"10.5px",whiteSpace:"nowrap"}}>{pair}</td>
-                      <td style={{padding:"5px 6px",color:pc,fontWeight:"700",fontFamily:"monospace",fontSize:"10px",whiteSpace:"nowrap"}}>{p.bid.toFixed(dec)}</td>
-                      <td style={{padding:"5px 6px",color:pc,fontFamily:"monospace",fontSize:"10px",whiteSpace:"nowrap"}}>{p.ask.toFixed(dec)}</td>
-                      
-                      <td style={{padding:"5px 6px",color:p.change>=0?C.green:C.red,fontFamily:"monospace",fontSize:"9.5px",whiteSpace:"nowrap"}}>{p.change>=0?"+":""}{p.change.toFixed(dec)}</td>
-                      <td style={{padding:"5px 6px",color:p.pct>=0?C.green:C.red,fontWeight:"600",fontSize:"9.5px",whiteSpace:"nowrap"}}>{p.pct>=0?"+":""}{p.pct.toFixed(3)}%</td>
-                      <td style={{padding:"3px 6px"}}><Spark data={p?.history||[]} color={p.pct>=0?C.green:C.red}/></td>
-                      <td style={{padding:"5px 6px",color:parseFloat(carry)>0?C.green:parseFloat(carry)<0?C.red:C.muted,fontWeight:"600",fontSize:"9.5px",whiteSpace:"nowrap"}}>{parseFloat(carry)>0?"+":""}{carry}%</td>
-                      <td style={{padding:"5px 6px"}}><button onClick={()=>{setChartPair(pair);setChartPairNavigated(true);setTab("chart");}} style={{padding:"2px 6px",background:C.blue+"22",color:C.blue,border:`1px solid ${C.blue}44`,borderRadius:"2px",cursor:"pointer",fontSize:"8px",fontFamily:"inherit",fontWeight:"700"}}>GO</button></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-        {/* G10 Currency Recap */}
-        <div style={{background:C.bg2,border:`1px solid ${C.gold}33`,borderRadius:"6px",padding:"10px 13px",marginBottom:"10px"}}>
-          <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"9px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>◈ G10 CURRENCY RECAP — LIVE CB RATES</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px"}}>
-            {[{ccy:"USD",dir:"BEARISH",c:C.red,   note:`Fed ${(cbRates?.USD?.rate!=null?cbRates.USD.rate.toFixed(2):'—')}% (${cbRates?.USD?.outlook??'—'}). DXY ~100. Tariff uncertainty.`},
-              {ccy:"JPY",dir:"BULLISH",c:C.green,  note:`BOJ ${(cbRates?.JPY?.rate!=null?cbRates.JPY.rate.toFixed(2):'—')}% — only G10 hiker. Structural JPY bid.`},
-              {ccy:"EUR",dir:"BULLISH",c:C.green,  note:`ECB ${(cbRates?.EUR?.rate!=null?cbRates.EUR.rate.toFixed(2):'—')}% (${cbRates?.EUR?.bias??'—'}). EUR/USD 1.16+.`},
-              {ccy:"GBP",dir:"NEUTRAL",c:C.gold,   note:`BOE ${(cbRates?.GBP?.rate!=null?cbRates.GBP.rate.toFixed(2):'—')}% (${cbRates?.GBP?.outlook??'—'}). Services CPI sticky.`},
-              {ccy:"AUD",dir:"BULLISH",c:C.green,  note:`RBA ${(cbRates?.AUD?.rate!=null?cbRates.AUD.rate.toFixed(2):'—')}% (${cbRates?.AUD?.outlook??'—'}). China PMI supportive.`},
-              {ccy:"NZD",dir:"BEARISH",c:C.red,    note:`RBNZ ${(cbRates?.NZD?.rate!=null?cbRates.NZD.rate.toFixed(2):'—')}% (${cbRates?.NZD?.outlook??'—'}). Recession confirmed.`},
-              {ccy:"CAD",dir:"BEARISH",c:C.red,    note:`BOC ${(cbRates?.CAD?.rate!=null?cbRates.CAD.rate.toFixed(2):'—')}% (${cbRates?.CAD?.outlook??'—'}). USMCA risk.`},
-              {ccy:"CHF",dir:"BULLISH",c:C.green,  note:`SNB ${(cbRates?.CHF?.rate!=null?cbRates.CHF.rate.toFixed(2):'—')}% (${cbRates?.CHF?.outlook??'—'}). Safe haven bid.`},
-              {ccy:"NOK",dir:"NEUTRAL",c:C.gold,   note:`Norges ${(cbRates?.NOK?.rate!=null?cbRates.NOK.rate.toFixed(2):'—')}% (${cbRates?.NOK?.outlook??'—'}). Oil-linked.`},
-              {ccy:"SEK",dir:"NEUTRAL",c:C.gold,   note:`Riksbank ${(cbRates?.SEK?.rate!=null?cbRates.SEK.rate.toFixed(2):'—')}% (${cbRates?.SEK?.outlook??'—'}). Stable.`},
-            ].map(({ccy,dir,c,note})=>(
-              <div key={ccy} style={{background:C.bg1,border:`1px solid ${c}22`,borderLeft:`3px solid ${c}`,borderRadius:"4px",padding:"7px 9px"}}>
-                <div style={{display:"flex",alignItems:"center",gap:"6px",marginBottom:"3px"}}>
-                  <span style={{fontWeight:"700",color:C.gold,fontSize:"12px",minWidth:"28px"}}>{ccy}</span>
-                  <Bdg label={dir} color={c} sz="7.5px"/>
-                </div>
-                <div style={{fontSize:"8.5px",color:"#9ab8cc",lineHeight:"1.4"}}>{note}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-        {/* Signals + News */}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px"}}>
-          <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"10px 12px",minWidth:0}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>
-              <span style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px"}}>◈ LATEST SIGNALS</span>
-              <Sm label="ALL →" onClick={()=>setTab("signals")}/>
-            </div>
-            {signals.slice(0,3).map(s=><SigCard key={s.id} sig={s}/>)}
-            {!signals.length&&<div style={{color:C.muted,textAlign:"center",padding:"16px",fontSize:"10px"}}>Generating signals...</div>}
-          </div>
-          <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"10px 12px",minWidth:0}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>
-              <span style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px"}}>◆ LATEST NEWS</span>
-              <Sm label="ALL →" onClick={()=>setTab("news")}/>
-            </div>
-            {liveArts.slice(0,5).map(n=>{
-              const ic=n.impact==="BULLISH"?C.green:n.impact==="BEARISH"?C.red:C.muted;
+      <div style={{overflowX:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>
+            <th style={{...th,textAlign:"left"}}>PAIR</th><th style={th}>BID</th><th style={th}>ASK</th><th style={th}>SPREAD</th>
+            <th style={{...th,color:C.gold}}>DAILY Δ</th><th style={{...th,color:C.gold}}>DAILY Δ%</th><th style={{...th,textAlign:"center"}}>TREND</th><th style={th}>CARRY</th><th style={th}></th>
+          </tr></thead>
+          <tbody>
+            {ALL_PAIRS.map(pair=>{
+              const p=s.prices&&s.prices[pair];
+              const d=dailyChg(pair,s);
+              const carry=carryOf(pair);
+              const hist=priceHistory[pair];
               return(
-                <div key={n.id} onClick={()=>window.open(n.url,"_blank","noopener")} style={{borderBottom:`1px solid ${C.bdr}22`,paddingBottom:"7px",marginBottom:"7px",cursor:"pointer"}}>
-                  <div style={{display:"flex",gap:"4px",alignItems:"center",marginBottom:"3px"}}>
-                    <Bdg label={n.ccy} color={ic}/><Bdg label={n.imp} color={n.imp==="HIGH"?C.amber:n.imp==="MED"?C.gold:C.muted}/>
-                    <span style={{fontSize:"8.5px",color:C.muted,marginLeft:"auto"}}>{n.dt.split(" ")[1]?.slice(0,5)}</span>
-                  </div>
-                  <div style={{fontSize:"10px",color:"#b8cde0",lineHeight:"1.45",fontWeight:n.imp==="HIGH"?"600":"400"}}>{n.hl.slice(0,100)}{n.hl.length>100?"...":""}<span style={{color:C.blue,marginLeft:"4px",fontSize:"8px"}}>↗</span></div>
-                </div>
-              );
+                <tr key={pair} style={{opacity:p&&p.tradeable===false?0.45:1}}>
+                  <td style={{...td,textAlign:"left",fontWeight:"800",color:C.text}}>{pair}{p&&p.tradeable===false&&<span style={{fontSize:"7px",color:C.amber,marginLeft:"5px"}}>CLOSED</span>}</td>
+                  <td style={td}>{p?fmtP(pair,p.bid):<span style={{color:C.dim}}>—</span>}</td>
+                  <td style={td}>{p?fmtP(pair,p.ask):<span style={{color:C.dim}}>—</span>}</td>
+                  <td style={{...td,color:C.muted}}>{p?(p.spread*pipMultOf(pair)).toFixed(1):"—"}</td>
+                  <td style={{...td,color:d?(d.pips>=0?C.green:C.red):C.dim,fontWeight:"700"}}>{d?`${d.pips>=0?"+":""}${d.pips.toFixed(0)}p`:"—"}</td>
+                  <td style={{...td,color:d?(d.pct>=0?C.green:C.red):C.dim}}>{d?`${d.pct>=0?"+":""}${d.pct.toFixed(2)}%`:"—"}</td>
+                  <td style={{...td,textAlign:"center"}}><Spark data={hist} color={d?(d.pct>=0?C.green:C.red):C.blue}/></td>
+                  <td style={{...td,color:carry==null?C.dim:carry>0?C.green:carry<0?C.red:C.muted}}>{carry==null?"n/a":`${carry>0?"+":""}${carry.toFixed(2)}%`}</td>
+                  <td style={td}><button onClick={()=>onGoPair&&onGoPair(pair)} style={{background:"transparent",border:`1px solid ${C.bdr}`,color:C.blue,borderRadius:"2px",cursor:"pointer",fontSize:"9px",padding:"2px 7px",fontFamily:"inherit"}}>▸</button></td>
+                </tr>);
             })}
-          </div>
-        </div>
+          </tbody>
+        </table>
       </div>
-    );
-  }
+    </Card>);
+});
 
-  // ─── SIGNALS TAB ──────────────────────────────────────────────────────
-  function SignalsTab(){
-    const cats=[...new Set(STRATEGIES.map(s=>s.cat))];
-    const filtered=sFilter==="ALL"?signals:signals.filter(s=>s.direction===sFilter||s.primaryStrategy?.cat===sFilter||s.style===sFilter);
-    return(
-      <div>
-        {/* Real Analysis Engine Status */}
-        <div style={{background:sigScanning?"#071407":"#0a0e1a",border:`1px solid ${sigScanning?C.green:C.gold}44`,borderRadius:"5px",padding:"10px 12px",marginBottom:"8px"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"4px"}}>
-            <div style={{display:"flex",alignItems:"center",gap:"7px"}}>
-              <div style={{width:"6px",height:"6px",borderRadius:"50%",background:sigScanning?C.green:C.gold,animation:sigScanning?"pulse 1s infinite":"none"}}/>
-              <span style={{fontSize:"8.5px",fontWeight:"700",color:sigScanning?C.green:C.gold,letterSpacing:"1.5px"}}>{sigScanning?"⚡ SCANNING 28 PAIRS — REAL TECHNICAL ANALYSIS":"◎ REAL SIGNAL ENGINE — NO RANDOM GENERATION"}</span>
-            </div>
-            <button onClick={runSignalScan} disabled={sigScanning} style={{padding:"4px 10px",background:C.gold+"22",color:sigScanning?C.muted:C.gold,border:`1px solid ${C.gold}44`,borderRadius:"3px",cursor:sigScanning?"not-allowed":"pointer",fontSize:"8px",fontWeight:"700",fontFamily:"inherit",opacity:sigScanning?0.5:1}}>{sigScanning?"SCANNING...":"▶ SCAN NOW"}</button>
+// ═══ MOMENTUM GRID (subscriber heat tiles) ═══════════════════════════════════
+const MomentumGrid=memo(({onSelect})=>{
+  const s=usePriceSnap();
+  return(
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(96px,1fr))",gap:"6px"}}>
+      {ALL_PAIRS.map(pair=>{
+        const d=dailyChg(pair,s);
+        const pct=d?d.pct:null;
+        const bg=pct==null?C.bg2:pct>=0?`rgba(0,229,160,${Math.min(0.55,0.10+Math.abs(pct)*0.55)})`:`rgba(255,69,96,${Math.min(0.55,0.10+Math.abs(pct)*0.55)})`;
+        return(
+          <div key={pair} onClick={()=>onSelect&&onSelect(pair)} style={{background:bg,border:`1px solid ${C.bdr}`,borderRadius:"3px",padding:"8px 6px",textAlign:"center",cursor:onSelect?"pointer":"default"}}>
+            <div style={{fontSize:"9px",fontWeight:"800",color:C.text}}>{pair}</div>
+            <div style={{fontSize:"10px",fontWeight:"700",marginTop:"2px",color:pct==null?C.dim:pct>=0?C.green:C.red}}>{pct==null?"—":`${pct>=0?"+":""}${pct.toFixed(2)}%`}</div>
+          </div>);
+      })}
+    </div>);
+});
+
+// ═══ CHARTS TAB — module-level cache + canvas painter ════════════════════════
+const chartCache=new Map(); // `${pair}|${tf}` → {ts,candles}
+async function getChartCandles(pair,tf){
+  const key=pair+"|"+tf;
+  const hit=chartCache.get(key);
+  if(hit&&Date.now()-hit.ts<60000) return hit.candles;
+  const res=await fetch(`/api/candles?pair=${encodeURIComponent(pair)}&tf=${tf}&count=160`);
+  if(!res.ok){ let msg="Candles "+res.status; try{const j=await res.json(); if(j.error)msg=j.error;}catch(_){} throw new Error(msg); }
+  const data=await res.json();
+  const candles=data.candles||[];
+  chartCache.set(key,{ts:Date.now(),candles});
+  return candles;
+}
+function drawChart(canvas,candles,pair){
+  if(!canvas) return;
+  const dpr=window.devicePixelRatio||1;
+  const W=canvas.clientWidth||640, H=canvas.clientHeight||360;
+  canvas.width=W*dpr; canvas.height=H*dpr;
+  const ctx=canvas.getContext("2d"); ctx.scale(dpr,dpr);
+  ctx.fillStyle=C.bg1; ctx.fillRect(0,0,W,H);
+  if(!candles||candles.length<2){ ctx.fillStyle=C.muted; ctx.font="10px monospace"; ctx.fillText("No candle data",14,20); return; }
+  const padL=8,padR=58,padT=10,padB=18;
+  const cw=(W-padL-padR)/candles.length;
+  const hi=Math.max(...candles.map(c=>c.h)), lo=Math.min(...candles.map(c=>c.l)), rg=hi-lo||1e-9;
+  const y=v=>padT+(1-(v-lo)/rg)*(H-padT-padB);
+  ctx.strokeStyle=C.bdr+"66"; ctx.fillStyle=C.muted; ctx.font="8.5px monospace"; ctx.textAlign="left";
+  for(let i=0;i<=4;i++){
+    const v=lo+rg*(i/4), yy=y(v);
+    ctx.beginPath(); ctx.moveTo(padL,yy); ctx.lineTo(W-padR,yy); ctx.stroke();
+    ctx.fillText(fmtP(pair,v),W-padR+5,yy+3);
+  }
+  candles.forEach((c,i)=>{
+    const x=padL+i*cw+cw/2, up=c.c>=c.o, col=up?C.green:C.red;
+    ctx.strokeStyle=col; ctx.beginPath(); ctx.moveTo(x,y(c.h)); ctx.lineTo(x,y(c.l)); ctx.stroke();
+    ctx.fillStyle=col;
+    const bt=y(Math.max(c.o,c.c)), bb=y(Math.min(c.o,c.c));
+    ctx.fillRect(x-Math.max(1,cw*0.32),bt,Math.max(2,cw*0.64),Math.max(1,bb-bt));
+  });
+  const last=candles[candles.length-1].c, ly=y(last);
+  ctx.strokeStyle=C.gold; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.moveTo(padL,ly); ctx.lineTo(W-padR,ly); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle=C.gold; ctx.fillText(fmtP(pair,last),W-padR+5,ly+3);
+}
+
+const CHART_TFS=[["M15","M15"],["H1","H1"],["H4","H4"],["D1","D"]];
+const ChartsTab=memo(({navigated})=>{
+  const [pair,setPair]=useState(navigated||"EUR/USD");
+  const [tf,setTf]=useState("H4");
+  const [candles,setCandles]=useState(null);
+  const [err,setErr]=useState(null);
+  const [loading,setLoading]=useState(false);
+  const canvasRef=useRef(null);
+  const snap=usePriceSnap();
+  useEffect(()=>{ if(navigated) setPair(navigated); },[navigated]);
+  useEffect(()=>{
+    let dead=false;
+    setLoading(true); setErr(null);
+    const apiTf=(CHART_TFS.find(t=>t[0]===tf)||["H4","H4"])[1];
+    getChartCandles(pair,apiTf)
+      .then(c=>{ if(!dead){ setCandles(c); setLoading(false);} })
+      .catch(e=>{ if(!dead){ setErr(e.message); setCandles(null); setLoading(false);} });
+    return()=>{dead=true;};
+  },[pair,tf]);
+  useEffect(()=>{ drawChart(canvasRef.current,candles,pair); },[candles,pair]);
+  useEffect(()=>{
+    const onR=()=>drawChart(canvasRef.current,candles,pair);
+    window.addEventListener("resize",onR);
+    return()=>window.removeEventListener("resize",onR);
+  },[candles,pair]);
+  const p=snap.prices&&snap.prices[pair], d=dailyChg(pair,snap);
+  return(
+    <div>
+      <Card style={{marginBottom:"10px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"8px"}}>
+          <div>
+            <span style={{fontSize:"16px",fontWeight:"900",color:C.text,letterSpacing:"1px"}}>{pair}</span>
+            <span style={{fontSize:"12px",marginLeft:"12px",color:C.text,fontWeight:"700"}}>{p?fmtP(pair,p.mid):"—"}</span>
+            {d&&<span style={{fontSize:"10px",marginLeft:"8px",color:d.pct>=0?C.green:C.red,fontWeight:"700"}}>{`${d.pct>=0?"+":""}${d.pct.toFixed(2)}% · ${d.pips>=0?"+":""}${d.pips.toFixed(0)}p today`}</span>}
           </div>
-          <div style={{fontSize:"8px",color:C.muted}}>{scanStatus}</div>
-          <div style={{fontSize:"7.5px",color:C.muted,marginTop:"2px"}}>Last scan: {lastScanTime?new Date(lastScanTime).toLocaleTimeString():"Never"} · Auto every 5 min · 51 strategies · EMA/RSI/MACD/ATR/Ichimoku/ADX/Swing</div>
-        </div>
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"10px 12px",marginBottom:"10px"}}>
-          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"8px"}}>
-            <span style={{fontSize:"9px",color:C.gold,fontWeight:"700"}}>FILTER:</span>
-            {["ALL","BUY","SELL","scalp","day","swing",...cats].map(f=><Sm key={f} label={f.toUpperCase()} active={sFilter===f} onClick={()=>setSFilter(f)}/>)}
-            <span style={{marginLeft:"auto",fontSize:"9.5px",color:C.muted}}>{filtered.length} signals</span>
+          <div style={{display:"flex",gap:"5px",alignItems:"center"}}>
+            {CHART_TFS.map(([k])=>(<Sm key={k} label={k} color={C.blue} active={tf===k} onClick={()=>setTf(k)}/>))}
+            <a href={tvUrl(pair,tf==="D1"?"D":tf.replace("H","")==="1"?"60":tf==="H4"?"240":"15")} target="_blank" rel="noreferrer" style={{fontSize:"9px",color:C.muted,marginLeft:"6px",textDecoration:"none"}}>TradingView ↗</a>
           </div>
-          <div style={{fontSize:"8.5px",color:C.muted,borderTop:`1px solid ${C.bdr}22`,paddingTop:"6px"}}>Signals persist until dismissed (✕) or 14 days. No limit on pairs. New signals every 15–90s.</div>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px"}}>
-          {filtered.map(s=><SigCard key={s.id} sig={s} showDismiss/>)}
+        <div style={{marginTop:"10px",position:"relative"}}>
+          <canvas ref={canvasRef} style={{width:"100%",height:"380px",display:"block",borderRadius:"3px"}}/>
+          {loading&&<div style={{position:"absolute",top:"8px",left:"10px",fontSize:"9px",color:C.muted}}>loading…</div>}
+          {err&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",background:C.bg1+"dd"}}>
+            <span style={{color:C.red,fontSize:"10px"}}>◈ CHART FEED ERROR — {err}</span>
+          </div>}
         </div>
-        {!filtered.length&&<div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"30px",textAlign:"center",color:C.muted}}>No signals for this filter. Generating continuously...</div>}
+        <div style={{fontSize:"8.5px",color:C.muted,marginTop:"6px"}}>OANDA mid candles · complete bars only · cached 60s</div>
+      </Card>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(88px,1fr))",gap:"5px"}}>
+        {ALL_PAIRS.map(pp=>(<Sm key={pp} label={pp} color={C.gold} active={pp===pair} onClick={()=>setPair(pp)}/>))}
       </div>
-    );
-  }
+    </div>);
+});
 
-  // ─── CHARTS TAB — Fixed ────────────────────────────────────────────────
-  function ChartsTab(){
-    const selectedTf=chartTf,setSelectedTf=setChartTf;
-    const TFS=[{v:"5",l:"5m"},{v:"15",l:"15m"},{v:"30",l:"30m"},{v:"60",l:"1H"},{v:"240",l:"4H"},{v:"D",l:"1D"},{v:"W",l:"1W"}];
-    const highlightRef=useRef(null);
-    useEffect(()=>{
-      // Only auto-scroll to highlighted pair when explicitly navigated from a signal card
-      // Never scroll on default tab open (which would jump to EUR/USD in the middle of the list)
-      if(chartPairNavigated && highlightRef.current){
-        highlightRef.current.scrollIntoView({behavior:"smooth",block:"center"});
-      }
-    },[chartPairNavigated]);
-    return(
-      <div>
-        <div style={{background:`linear-gradient(90deg,${C.bg2},#0a1a2a)`,border:`2px solid ${C.gold}`,borderRadius:"7px",padding:"14px 16px",marginBottom:"12px"}}>
-          <div style={{fontSize:"12px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"5px"}}>📊 AXIOM CHART LAUNCHER</div>
-          <div style={{fontSize:"9px",color:C.muted,lineHeight:"1.65",marginBottom:"10px"}}>Select a timeframe, then tap any pair to open the live TradingView chart — real candles, real prices, full drawing toolkit.</div>
-          {chartPair&&<div style={{fontSize:"8.5px",color:C.amber,marginBottom:"8px"}}>◈ Navigated from: <strong style={{color:C.gold}}>{chartPair}</strong> — highlighted below</div>}
-          <div style={{display:"flex",gap:"6px",flexWrap:"wrap"}}>
-            {TFS.map(t=>(
-              <button key={t.v} onClick={()=>setSelectedTf(t.v)}
-                style={{padding:"7px 14px",background:selectedTf===t.v?C.gold:"transparent",color:selectedTf===t.v?C.bg:C.muted,border:`1px solid ${selectedTf===t.v?C.gold:C.bdr}`,borderRadius:"4px",cursor:"pointer",fontWeight:"700",fontSize:"11px",fontFamily:"inherit"}}>
-                {t.l}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}}>
-          {ALL_PAIRS.map(pair=>{
-            const p=prices?.[pair];const isH=pair.includes("JPY"),dec=isH?3:5;
-            const isUp=p&&p.pct>=0;
-            const [base,quote]=pair.split("/");
-            const liveBase=cbRates?.[base]?.rate??null;
-            const liveQuote=cbRates?.[quote]?.rate??null;
-            const carry=liveBase-liveQuote;
-            const isSelected=pair===chartPair;
+// ═══ DASHBOARD ═══════════════════════════════════════════════════════════════
+const Dashboard=memo(({regimes,cbRates,cbAsOf,sigs,news,onGoTab,onOpenSig,onGoPair})=>{
+  const dirColor=d=>d==="BULLISH"?C.green:d==="BEARISH"?C.red:C.amber;
+  const dirArrow=d=>d==="BULLISH"?"▲":d==="BEARISH"?"▼":"◆";
+  const carryRank=useMemo(()=>{
+    if(!cbRates) return null;
+    const rows=G10.filter(c=>cbRates[c]&&cbRates[c].rate!=null).map(c=>({c,r:cbRates[c].rate})).sort((a,b)=>b.r-a.r);
+    const m={}; rows.forEach((x,i)=>{m[x.c]=i+1;}); return m;
+  },[cbRates]);
+  return(
+    <div>
+      <MarketPulse/>
+      <Card style={{marginBottom:"12px"}}>
+        <SecT t="G10 MACRO RECAP" sub={cbRates?"Regimes (Settings) + live FRED policy rates":"Regimes (Settings) — open CB RATES tab to load live policy rates"}/>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(168px,1fr))",gap:"8px"}}>
+          {G10.map(ccy=>{
+            const r=regimes[ccy]||{dir:"NEUTRAL",strength:"WEAK"};
+            const cb=cbRates&&cbRates[ccy];
             return(
-              <button key={pair} ref={isSelected&&chartPairNavigated?highlightRef:null}
-                onClick={()=>{setChartPair(pair);setChartPairNavigated(false);window.open(tvUrl(pair,selectedTf),"_blank","noopener");}}
-                style={{background:isSelected?C.bg3:C.bg2,border:`1px solid ${isSelected?C.gold:isUp?C.green+"33":C.red+"33"}`,borderRadius:"6px",padding:"11px 12px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",WebkitTapHighlightColor:"transparent",boxShadow:isSelected?`0 0 0 2px ${C.gold}44`:"none"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"5px"}}>
-                  <span style={{fontWeight:"700",color:isSelected?C.gold:C.gold,fontSize:"12px"}}>{pair}{isSelected&&<span style={{fontSize:"8px",color:C.gold,marginLeft:"5px"}}>◈</span>}</span>
-                  <span style={{fontSize:"13px",color:isUp?C.green:C.red}}>{isUp?"▲":"▼"}</span>
-                </div>
-                {p&&<div style={{display:"flex",alignItems:"baseline",gap:"5px",marginBottom:"4px"}}>
-                  <span style={{fontSize:"7.5px",color:C.muted}}>MID</span>
-                  <span style={{fontWeight:"700",color:C.text,fontSize:"13px",fontFamily:"monospace"}}>{p.mid.toFixed(dec)}</span>
-                  <span style={{fontSize:"9px",color:isUp?C.green:C.red}}>{isUp?"+":""}{p.pct.toFixed(3)}%</span>
-                </div>}
-                {p&&<div style={{marginBottom:"5px"}}><Spark data={p?.history||[]} color={isUp?C.green:C.red} w={110} h={20}/></div>}
+              <div key={ccy} style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"4px",padding:"9px 11px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{fontSize:"7.5px",color:carry>0?C.green:carry<0?C.red:C.muted}}>Carry {carry>=0?"+":""}{carry.toFixed(2)}%</span>
-                  <span style={{fontSize:"7.5px",color:C.blue,fontWeight:"700"}}>{TFS.find(t=>t.v===selectedTf)?.l} ↗</span>
+                  <span style={{fontSize:"13px",fontWeight:"900",color:C.text}}>{ccy}</span>
+                  <span style={{fontSize:"11px",color:dirColor(r.dir),fontWeight:"800"}}>{dirArrow(r.dir)} {r.dir}</span>
                 </div>
-              </button>
-            );
+                <div style={{marginTop:"4px"}}><Bdg label={r.strength} color={r.strength==="STRONG"?C.gold:r.strength==="MODERATE"?C.blue:C.muted}/></div>
+                <div style={{fontSize:"8.5px",color:C.muted,marginTop:"6px",lineHeight:"1.6"}}>
+                  {cb?(
+                    <span>{CB_NAMES[ccy]} <span style={{color:C.text,fontWeight:"700"}}>{cb.rate.toFixed(2)}%</span>{cb.outlook?<span style={{color:cb.outlook==="Hiking"?C.green:cb.outlook==="Cutting"?C.red:C.muted}}> · {cb.outlook}</span>:null}<br/>as of {cb.asOf}{carryRank&&carryRank[ccy]?` · carry #${carryRank[ccy]}`:""}</span>
+                  ):(<span style={{color:C.dim}}>rate: not loaded</span>)}
+                </div>
+              </div>);
           })}
         </div>
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"11px 13px",marginTop:"11px",fontSize:"9px",color:C.muted,lineHeight:"1.8"}}>
-          <strong style={{color:C.green}}>📊 About AXIOM Charts:</strong> Each tap opens a live TradingView chart — real interbank prices, full drawing tools, all indicators (RSI, MACD, Bollinger, Ichimoku). Use Themes tab for weekly bias → select pair → choose timeframe → tap = professional workflow.
+      </Card>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginBottom:"12px"}}>
+        <Card>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px"}}>
+            <SecT t="LATEST SIGNALS"/>
+            <Btn label="VIEW ALL" ghost color={C.blue} onClick={()=>onGoTab("signals")} style={{padding:"4px 9px",fontSize:"9px"}}/>
+          </div>
+          {(!sigs||sigs.length===0)?(
+            <div style={{fontSize:"9.5px",color:C.muted,padding:"12px 0"}}>No signals in memory. Open SIGNALS and RUN SCAN.</div>
+          ):sigs.slice(0,4).map(sg=>(
+            <div key={sg.id} onClick={()=>onOpenSig(sg)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${C.bdr}33`,cursor:"pointer"}}>
+              <span style={{fontSize:"11px",fontWeight:"800",color:C.text}}>{sg.pair} <span style={{color:sg.direction==="BUY"?C.green:C.red}}>{sg.direction}</span></span>
+              <span style={{fontSize:"9px",color:C.muted}}>{sg.probability}% · <SigAge ts={sg.ts}/></span>
+            </div>))}
+        </Card>
+        <Card>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px"}}>
+            <SecT t="LIVE HEADLINES"/>
+            <Btn label="NEWS" ghost color={C.blue} onClick={()=>onGoTab("news")} style={{padding:"4px 9px",fontSize:"9px"}}/>
+          </div>
+          {(!news||news.length===0)?(
+            <div style={{fontSize:"9.5px",color:C.muted,padding:"12px 0"}}>Open the NEWS tab to load live Finnhub headlines.</div>
+          ):news.slice(0,3).map((a,i)=>(
+            <div key={i} style={{padding:"6px 0",borderBottom:`1px solid ${C.bdr}33`}}>
+              <a href={a.url} target="_blank" rel="noreferrer" style={{fontSize:"10px",color:C.text,textDecoration:"none",fontWeight:"600",lineHeight:"1.4"}}>{a.hl}</a>
+              <div style={{fontSize:"8px",color:C.muted,marginTop:"2px"}}>{a.source} · {a.ts?timeAgo(a.ts):a.dt}</div>
+            </div>))}
+        </Card>
+      </div>
+      <PriceTable28 cbRates={cbRates} onGoPair={onGoPair}/>
+    </div>);
+});
+
+// ═══ SIGNAL CARD ═════════════════════════════════════════════════════════════
+const SignalCard=memo(({sig,onOpen,onTake})=>{
+  const dc=sig.direction==="BUY"?C.green:C.red;
+  const pc=sig.probability>=62?C.green:sig.probability>=55?C.gold:C.amber;
+  const styleColor=SC[sig.tradeStyle]||C.blue;
+  const lib=sig.lib;
+  return(
+    <div style={{background:C.bg1,border:`1px solid ${C.bdr}`,borderLeft:`3px solid ${dc}`,borderRadius:"4px",padding:"12px 14px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+        <div>
+          <span style={{fontSize:"15px",fontWeight:"900",color:C.text,letterSpacing:"0.5px"}}>{sig.pair}</span>
+          <span style={{fontSize:"12px",fontWeight:"800",color:dc,marginLeft:"9px"}}>{sig.direction}</span>
+          <div style={{marginTop:"5px",display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center"}}>
+            <Bdg label={(sig.tradeStyle||"day").toUpperCase()} color={styleColor}/>
+            <Bdg label={sig.timeframe||"H4"} color={C.blue}/>
+            <span style={{fontSize:"8.5px",color:C.muted}}>hold {sig.holdTime||"1-3 days"}</span>
+            {sig.isPureTASignal&&<Bdg label="PURE TA" color="#8f8fd0"/>}
+          </div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:"20px",fontWeight:"900",color:pc}}>{sig.probability}%</div>
+          <div style={{fontSize:"7.5px",color:C.muted,letterSpacing:"1px"}}>LIVE PROB</div>
+          <div style={{marginTop:"3px"}}><SigAge ts={sig.ts}/></div>
         </div>
       </div>
-    );
-  }
-
-  function NewsTab(){
-    const ccys=["ALL","USD","EUR","GBP","JPY","AUD","CAD","CHF","NZD","NOK","SEK"];
-    const imps=["ALL","HIGH","MED","LOW"];
-    const loading=newsLoading;
-    const hasLoaded=newsLoaded;
-
-    const displayed=liveArts.filter(n=>{
-      if(nCcy!=="ALL"&&n.ccy!==nCcy)return false;
-      if(nImp!=="ALL"&&n.imp!==nImp)return false;
-      return true;
-    });
-    const impC={HIGH:C.amber,MED:C.gold,LOW:C.muted};
-    const sourceLabel=newsSource==="finnhub"?"LIVE — Finnhub · Real Articles · Real URLs":newsSource==="error"?"✗ NEWS FEED UNAVAILABLE":newsSource===null?"⟳ Connecting to Finnhub...": "AI Analysis";
-    const sourceDot=newsSource==="finnhub"?C.green:newsSource==="error"?C.red:newsSource===null?C.muted:C.amber;
-
-    return(
-      <div>
-        {/* Source status bar */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:newsSource==="finnhub"?"#071407":C.bg2,border:`1px solid ${sourceDot}44`,borderRadius:"4px",padding:"6px 10px",marginBottom:"8px",fontSize:"8.5px"}}>
-          <div style={{display:"flex",alignItems:"center",gap:"6px"}}>
-            <div style={{width:"6px",height:"6px",borderRadius:"50%",background:sourceDot,animation:loading?"pulse 1s infinite":"none"}}/>
-            <span style={{color:sourceDot,fontWeight:"700"}}>{loading?"Loading news...":sourceLabel}</span>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"6px",marginTop:"10px"}}>
+        {[["ENTRY",fmtP(sig.pair,sig.entry),C.text],["STOP",fmtP(sig.pair,sig.sl),C.red],["TP1",fmtP(sig.pair,sig.tp1),C.green]].map(([k,v,vc])=>(
+          <div key={k} style={{background:C.bg2,borderRadius:"3px",padding:"6px 8px",textAlign:"center"}}>
+            <div style={{fontSize:"7px",color:C.muted,letterSpacing:"1px"}}>{k}</div>
+            <div style={{fontSize:"11px",fontWeight:"800",color:vc,marginTop:"2px"}}>{v}</div>
+          </div>))}
+      </div>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:"9px",color:C.muted,marginTop:"8px"}}>
+        <span>lot <span style={{color:C.text,fontWeight:"700"}}>{sig.lotSize}</span> · risk <span style={{color:C.amber,fontWeight:"700"}}>{fmtUsd(sig.riskAmount)}</span> · SL {sig.slPips}p · R:R {sig.rr1}</span>
+        <span>{sig.strategiesTriggered} strats · score {sig.technicalScore}</span>
+      </div>
+      {lib&&(
+        <div style={{marginTop:"8px",padding:"7px 9px",background:C.bg2,borderRadius:"3px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"6px"}}>
+            <span style={{fontSize:"9.5px",color:C.text,fontWeight:"700"}}>{lib.name}</span>
+            <span style={{display:"flex",gap:"4px",alignItems:"center",flexShrink:0}}>
+              <Bdg label={lib.tier} color={C.gold} sz="7.5px"/>
+              <span style={{fontSize:"7.5px",color:C.muted}}>RESEARCH WR {lib.wr}%</span>
+            </span>
           </div>
-          {newsSource==="finnhub"&&<span style={{fontSize:"7.5px",color:C.muted}}>↗ Click any article to open source</span>}
-          {newsSource==="error"&&<span style={{fontSize:"7.5px",color:C.red}}>Check Finnhub API key in Netlify env vars</span>}
+        </div>)}
+      {sig.confluences&&sig.confluences.length>0&&(
+        <div style={{marginTop:"7px",fontSize:"8.5px",color:C.muted,lineHeight:"1.7"}}>
+          {sig.confluences.slice(0,2).map((cf,i)=>(<div key={i}>◆ {cf}</div>))}
+        </div>)}
+      <div style={{display:"flex",gap:"7px",marginTop:"10px"}}>
+        <Btn label="DETAIL" ghost color={C.blue} onClick={()=>onOpen(sig)} style={{flex:1,padding:"6px"}}/>
+        <Btn label="TAKE TRADE" color={dc} onClick={()=>onTake(sig)} style={{flex:1,padding:"6px"}}/>
+      </div>
+    </div>);
+});
+
+// ═══ SIGNALS TAB ═════════════════════════════════════════════════════════════
+const SIG_CATS=["ALL","MACRO","TECHNICAL","MOMENTUM","CARRY","FLOW","MEAN REVERT","CORRELATION","RISK MGMT","PURE TECHNICAL"];
+const SignalsTab=memo(({sigs,scanning,scanStatus,scanPartial,scanUnscanned,scanErrors,scanEngineErr,onScan,onOpenSig,onTake,stratCount})=>{
+  const [cat,setCat]=useState("ALL");
+  const [sortBy,setSortBy]=useState("PROB");
+  const shown=useMemo(()=>{
+    let list=[...(sigs||[])];
+    if(cat!=="ALL") list=list.filter(s=>s.lib&&s.lib.cat===cat);
+    list.sort((a,b)=>sortBy==="PROB"?b.probability-a.probability:b.ts-a.ts);
+    return list;
+  },[sigs,cat,sortBy]);
+  return(
+    <div>
+      <Card style={{marginBottom:"10px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"8px"}}>
+          <div>
+            <div style={{fontSize:"11px",fontWeight:"800",letterSpacing:"1.5px",color:C.gold}}>SIGNAL ENGINE</div>
+            <div style={{fontSize:"8.5px",color:C.muted,marginTop:"3px"}}>{stratCount} strategies wired · auto-scan every 5 min while this tab is visible · manual scan any time</div>
+          </div>
+          <Btn label={scanning?"SCANNING…":"RUN SCAN"} color={C.gold} disabled={scanning} onClick={onScan}/>
         </div>
-        {/* Error */}
-        {newsError&&<div style={{background:"#1a0505",border:`1px solid ${C.red}44`,borderRadius:"4px",padding:"7px 10px",marginBottom:"8px",fontSize:"8.5px",color:C.red}}>{newsError}</div>}
-        {/* Filters */}
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"10px 12px",marginBottom:"8px"}}>
-          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"6px"}}>
-            <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"46px"}}>CURRENCY:</span>
-            {ccys.map(f=><Sm key={f} label={f} active={nCcy===f} onClick={()=>setNCcy(f)}/>)}
-          </div>
-          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center"}}>
-            <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"46px"}}>IMPACT:</span>
-            {imps.map(f=><Sm key={f} label={f} active={nImp===f} onClick={()=>setNImp(f)} color={f==="HIGH"?C.red:f==="MED"?C.amber:f==="LOW"?C.muted:C.gold}/>)}
-          </div>
-        </div>
+        {scanStatus&&<div style={{fontSize:"9px",color:C.muted,marginTop:"8px"}}>{scanStatus}</div>}
+      </Card>
+      <MarketClosedNote/>
+      {scanEngineErr&&(
+        <div style={{padding:"10px 12px",background:C.red+"14",border:`1px solid ${C.red}66`,borderRadius:"4px",fontSize:"10px",color:C.red,marginBottom:"10px",lineHeight:"1.6"}}>
+          ◈ ENGINE ERROR — {scanEngineErr.error}{scanEngineErr.action&&<div style={{color:C.amber,marginTop:"4px"}}>→ {scanEngineErr.action}</div>}
+        </div>)}
+      {scanPartial&&(
+        <div style={{padding:"9px 12px",background:C.amber+"14",border:`1px solid ${C.amber}55`,borderRadius:"4px",fontSize:"9.5px",color:C.amber,marginBottom:"10px"}}>
+          ◈ PARTIAL SCAN — time guard hit before {scanUnscanned&&scanUnscanned.length} pair(s): {(scanUnscanned||[]).join(", ")}. Re-run to cover them.
+        </div>)}
+      {scanErrors&&scanErrors.length>0&&(
+        <div style={{padding:"9px 12px",background:C.red+"10",border:`1px solid ${C.red}44`,borderRadius:"4px",fontSize:"9px",color:C.red,marginBottom:"10px",lineHeight:"1.7"}}>
+          ◈ {scanErrors.length} pair fetch error(s): {scanErrors.slice(0,4).join(" · ")}{scanErrors.length>4?" · …":""}
+        </div>)}
+      <div style={{display:"flex",gap:"5px",flexWrap:"wrap",marginBottom:"10px",alignItems:"center"}}>
+        {SIG_CATS.map(cc=>(<Sm key={cc} label={cc} color={cc==="PURE TECHNICAL"?"#8f8fd0":C.blue} active={cat===cc} onClick={()=>setCat(cc)}/>))}
+        <span style={{width:"10px"}}/>
+        <Sm label="↓ PROB" color={C.gold} active={sortBy==="PROB"} onClick={()=>setSortBy("PROB")}/>
+        <Sm label="↓ NEWEST" color={C.gold} active={sortBy==="TIME"} onClick={()=>setSortBy("TIME")}/>
+      </div>
+      {shown.length===0?(
+        <Card><div style={{fontSize:"10px",color:C.muted,textAlign:"center",padding:"22px 0"}}>{sigs&&sigs.length>0?"No signals match this filter.":"No signals yet — RUN SCAN to analyze all 28 pairs against the live engine."}</div></Card>
+      ):(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:"10px"}}>
+          {shown.map(sg=>(<SignalCard key={sg.id} sig={sg} onOpen={onOpenSig} onTake={onTake}/>))}
+        </div>)}
+    </div>);
+});
 
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"10px 12px"}}>
-          {/* Header */}
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>
+// ═══ STRATEGY LIBRARY TAB ════════════════════════════════════════════════════
+const StrategiesTab=memo(({onOpenStrat,enabledMap})=>{
+  const [tier,setTier]=useState("ALL");
+  const [cat,setCat]=useState("ALL");
+  const [pureOnly,setPureOnly]=useState(false);
+  const counts=useMemo(()=>{
+    const c={S:0,A:0,B:0,C:0};
+    STRATEGIES.forEach(s=>{c[s.tier]=(c[s.tier]||0)+1;});
+    return c;
+  },[]);
+  const cats=useMemo(()=>["ALL",...Object.keys(CATC)],[]);
+  const shown=STRATEGIES.filter(s=>
+    (tier==="ALL"||s.tier===tier)&&
+    (cat==="ALL"||s.cat===cat)&&
+    (!pureOnly||s.cat==="PURE TECHNICAL"));
+  return(
+    <div>
+      <Card style={{marginBottom:"10px"}}>
+        <SecT t="STRATEGY LIBRARY" sub={`${STRATEGIES.length} strategies — every entry is 1:1 wired to a live engine condition. Research WRs are literature-derived baselines, not live performance.`}/>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:"7px",marginTop:"8px"}}>
+          {[["TOTAL",STRATEGIES.length,C.gold],["S-TIER",counts.S,C.gold],["A-TIER",counts.A,C.blue],["B-TIER",counts.B,C.muted],["C-TIER (PURE TA)",counts.C,"#8f8fd0"]].map(([k,v,vc])=>(
+            <div key={k} style={{background:C.bg2,borderRadius:"3px",padding:"8px",textAlign:"center"}}>
+              <div style={{fontSize:"16px",fontWeight:"900",color:vc}}>{v}</div>
+              <div style={{fontSize:"7px",color:C.muted,letterSpacing:"1px",marginTop:"2px"}}>{k}</div>
+            </div>))}
+        </div>
+      </Card>
+      <div style={{display:"flex",gap:"5px",flexWrap:"wrap",marginBottom:"10px",alignItems:"center"}}>
+        {["ALL","S","A","B","C"].map(t=>(<Sm key={t} label={t} color={C.gold} active={tier===t} onClick={()=>setTier(t)}/>))}
+        <span style={{width:"8px"}}/>
+        {cats.map(cc=>(<Sm key={cc} label={cc} color={cc==="PURE TECHNICAL"?"#8f8fd0":C.blue} active={cat===cc} onClick={()=>setCat(cc)}/>))}
+        <span style={{width:"8px"}}/>
+        <Sm label="PURE TA ONLY" color="#8f8fd0" active={pureOnly} onClick={()=>setPureOnly(!pureOnly)}/>
+      </div>
+      <Card style={{padding:"0",overflow:"hidden"}}>
+        {shown.map((s,i)=>(
+          <div key={s.id} onClick={()=>onOpenStrat(s)} style={{display:"flex",alignItems:"center",gap:"10px",padding:"9px 14px",borderBottom:i<shown.length-1?`1px solid ${C.bdr}33`:"none",cursor:"pointer"}}>
+            <Bdg label={s.tier} color={s.tier==="S"?C.gold:s.tier==="A"?C.blue:s.tier==="C"?"#8f8fd0":C.muted}/>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:"flex",alignItems:"baseline",gap:"7px",flexWrap:"wrap"}}>
+                <span style={{fontSize:"10.5px",fontWeight:"800",color:C.text}}>{s.name}</span>
+                <span style={{fontSize:"7.5px",color:C.dim}}>{s.id}</span>
+                {enabledMap&&enabledMap[s.id]===false&&<Bdg label="OFF" color={C.dim} sz="7px"/>}
+              </div>
+              <div style={{fontSize:"8.5px",color:C.muted,marginTop:"2px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s.note}</div>
+            </div>
+            <Tag label={s.cat} color={CATC[s.cat]||C.muted}/>
+            <span style={{fontSize:"8.5px",color:C.muted,width:"52px",textAlign:"right",flexShrink:0}}>{s.tf}</span>
+            <span style={{fontSize:"9.5px",color:C.gold,fontWeight:"800",width:"64px",textAlign:"right",flexShrink:0}}>WR {s.wr}%</span>
+          </div>))}
+      </Card>
+    </div>);
+});
+
+// ═══ ANALYZER TAB — manual AI regime assessment, grounded + whitelisted ══════
+const AnalyzerTab=memo(({regimes,regimeAI,onGenerate,onCopyJSON}) =>{
+  const {cards,loading,error,generatedAt}=regimeAI;
+  const dirColor=d=>d==="BULLISH"?C.green:d==="BEARISH"?C.red:C.amber;
+  return(
+    <div>
+      <Card style={{marginBottom:"10px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"8px"}}>
+          <SecT t="AI REGIME ANALYZER" sub="Manual on-demand. The model receives ONLY live terminal data (FRED policy rates, prices, your current regimes) and may cite only official central-bank sources. Nothing runs automatically."/>
+          <Btn label={loading?"GENERATING…":"GENERATE ASSESSMENT"} color={C.gold} disabled={loading} onClick={onGenerate}/>
+        </div>
+        {generatedAt&&<div style={{fontSize:"8.5px",color:C.muted,marginTop:"6px"}}>Generated {timeAgo(generatedAt)} · pinned server-side model</div>}
+      </Card>
+      {error&&(
+        <div style={{padding:"10px 12px",background:C.red+"14",border:`1px solid ${C.red}66`,borderRadius:"4px",fontSize:"10px",color:C.red,marginBottom:"10px"}}>◈ ANALYZER ERROR — {error}</div>)}
+      <Card style={{marginBottom:"10px"}}>
+        <SecT t="CURRENT REGIMES (SETTINGS → ENGINE)" sub="These drive the live engine via the AXIOM_REGIMES env var. Edit in Settings."/>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:"6px"}}>
+          {G10.map(ccy=>{const r=regimes[ccy]||{dir:"NEUTRAL",strength:"WEAK"};
+            return(<div key={ccy} style={{background:C.bg2,borderRadius:"3px",padding:"7px 9px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span style={{fontSize:"10px",fontWeight:"800",color:C.text}}>{ccy}</span>
+              <span style={{fontSize:"8.5px",fontWeight:"700",color:dirColor(r.dir)}}>{r.dir.slice(0,4)} · {r.strength.slice(0,3)}</span>
+            </div>);})}
+        </div>
+      </Card>
+      {cards&&cards.length>0&&(
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px"}}>
+            <span style={{fontSize:"10px",fontWeight:"800",color:C.gold,letterSpacing:"1px"}}>AI SUGGESTED REGIMES</span>
+            <Btn label="COPY AXIOM_REGIMES JSON" ghost color={C.blue} onClick={onCopyJSON} style={{padding:"5px 10px",fontSize:"8.5px"}}/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:"10px"}}>
+            {cards.map(cd=>(
+              <Card key={cd.ccy}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontSize:"14px",fontWeight:"900",color:C.text}}>{cd.ccy}</span>
+                  <span style={{display:"flex",gap:"5px"}}>
+                    <Bdg label={cd.regime} color={dirColor(cd.regime)}/>
+                    <Bdg label={cd.strength} color={cd.strength==="STRONG"?C.gold:cd.strength==="MODERATE"?C.blue:C.muted}/>
+                  </span>
+                </div>
+                <div style={{fontSize:"9.5px",color:C.text,marginTop:"8px",lineHeight:"1.7"}}>{cd.detail}</div>
+                {cd.summary&&<div style={{fontSize:"8.5px",color:C.muted,marginTop:"6px",fontStyle:"italic"}}>{cd.summary}</div>}
+                {cd.best_strat&&cd.best_strat.length>0&&(
+                  <div style={{marginTop:"8px",fontSize:"8.5px",color:C.muted}}>Favors: {cd.best_strat.map(id=>(<Tag key={id} label={id} color={C.green}/>))}</div>)}
+                {cd.avoid&&cd.avoid.length>0&&(
+                  <div style={{marginTop:"5px",fontSize:"8.5px",color:C.muted}}>Avoid: {cd.avoid.map(id=>(<Tag key={id} label={id} color={C.red}/>))}</div>)}
+                {cd.url&&<a href={cd.url} target="_blank" rel="noreferrer" style={{display:"inline-block",marginTop:"9px",fontSize:"8.5px",color:C.blue,textDecoration:"none"}}>{cd.evidence||"Official source"} ↗</a>}
+              </Card>))}
+          </div>
+        </div>)}
+      {!cards&&!loading&&!error&&(
+        <Card><div style={{fontSize:"9.5px",color:C.muted,textAlign:"center",padding:"18px 0"}}>No assessment generated this session. GENERATE runs one grounded pass — review, then apply via Settings → Regime editor if you agree.</div></Card>)}
+      <div style={{marginTop:"12px"}}>
+        <SecT t="MOMENTUM MAP (DAILY Δ)"/>
+        <MomentumGrid/>
+      </div>
+    </div>);
+});
+
+// ═══ WEEKEND DESK — manual, grounded in live rates + calendar ════════════════
+const WeekendTab=memo(({weekend,onGenerate})=>{
+  const {themes,loading,error,generatedAt}=weekend;
+  return(
+    <div>
+      <Card style={{marginBottom:"10px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"8px"}}>
+          <SecT t="WEEKEND STRATEGY DESK" sub="Manual on-demand macro brief. Grounded exclusively in this terminal's live data: FRED policy rates (with as-of dates), your regimes, live prices, and THIS WEEK's high-impact calendar. Evidence links restricted to official central-bank sources."/>
+          <Btn label={loading?"GENERATING…":"GENERATE BRIEF"} color={C.gold} disabled={loading} onClick={onGenerate}/>
+        </div>
+        {generatedAt&&<div style={{fontSize:"8.5px",color:C.muted,marginTop:"6px"}}>Generated {timeAgo(generatedAt)}</div>}
+      </Card>
+      {error&&(<div style={{padding:"10px 12px",background:C.red+"14",border:`1px solid ${C.red}66`,borderRadius:"4px",fontSize:"10px",color:C.red,marginBottom:"10px",lineHeight:"1.6"}}>◈ WEEKEND DESK ERROR — {error}</div>)}
+      {!themes&&!loading&&!error&&(
+        <Card><div style={{fontSize:"9.5px",color:C.muted,textAlign:"center",padding:"18px 0"}}>No brief generated this session. GENERATE pulls live CB rates + this week's calendar first, then writes themes from that data only.</div></Card>)}
+      {themes&&themes.map((t,i)=>(
+        <Card key={i} style={{marginBottom:"10px",borderLeft:`3px solid ${t.color||C.gold}`}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:"8px",flexWrap:"wrap"}}>
             <div>
-              <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px"}}>◆ AXIOM NEWS FEED</div>
-              <div style={{fontSize:"7.5px",color:C.muted,marginTop:"2px"}}>{displayed.length} articles · {sourceLabel}</div>
-            </div>
-            <button onClick={()=>loadNews(true)} disabled={loading}
-              style={{padding:"4px 9px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}44`,borderRadius:"3px",cursor:loading?"not-allowed":"pointer",fontSize:"8.5px",fontWeight:"700",fontFamily:"inherit",opacity:loading?0.5:1}}>
-              {loading?"Loading...":"↺ Refresh"}
-            </button>
-          </div>
-
-          {/* Loading spinner */}
-          {loading&&!displayed.length&&(
-            <div style={{padding:"30px",textAlign:"center"}}>
-              <div style={{fontSize:"11px",color:C.gold,marginBottom:"6px"}}>⚡ Fetching live FX news...</div>
-              <div style={{fontSize:"8.5px",color:C.muted}}>Connecting to Finnhub · Real articles from Reuters, Bloomberg, FT</div>
-            </div>
-          )}
-
-          {/* Error empty state */}
-          {!loading&&hasLoaded&&displayed.length===0&&newsSource==="error"&&(
-            <div style={{background:"#1a0505",border:`1px solid ${C.red}44`,borderRadius:"6px",padding:"24px",textAlign:"center",margin:"8px 0"}}>
-              <div style={{color:C.red,fontWeight:"700",fontSize:"12px",marginBottom:"8px"}}>✗ NEWS FEED UNAVAILABLE</div>
-              <div style={{color:C.muted,fontSize:"9px",lineHeight:"1.7",marginBottom:"12px"}}>{newsError||"Finnhub unreachable — check FINNHUB_API_KEY in Netlify environment variables"}</div>
-              <button onClick={()=>loadNews(true)} style={{padding:"8px 16px",background:C.red+"22",color:C.red,border:`1px solid ${C.red}44`,borderRadius:"3px",cursor:"pointer",fontWeight:"700",fontSize:"10px",fontFamily:"inherit"}}>↺ RETRY CONNECTION</button>
-            </div>
-          )}
-
-          {/* Articles */}
-          {displayed.map(n=>{
-            const ic=n.impact==="BULLISH"?C.green:n.impact==="BEARISH"?C.red:C.muted;
-            const canClick=n.realSource&&n.url;
-            return(
-              <div key={n.id}
-                onClick={()=>canClick&&window.open(n.url,"_blank","noopener")}
-                style={{background:C.bg1,border:`1px solid ${ic}22`,borderLeft:`3px solid ${ic}`,borderRadius:"4px",padding:"9px 11px",marginBottom:"7px",cursor:canClick?"pointer":"default",transition:"all 0.1s"}}
-                onMouseEnter={e=>{if(canClick){e.currentTarget.style.background="#0d1e35";e.currentTarget.style.borderColor=ic+"55";}}}
-                onMouseLeave={e=>{e.currentTarget.style.background=C.bg1;e.currentTarget.style.borderColor=ic+"22";}}>
-                <div style={{display:"flex",gap:"5px",alignItems:"center",marginBottom:"4px",flexWrap:"wrap"}}>
-                  <Bdg label={n.ccy} color={ic}/>
-                  <Bdg label={n.imp||"MED"} color={impC[n.imp]||C.gold}/>
-                  <Bdg label={n.impact} color={ic}/>
-                  {n.source&&<Bdg label={n.source} color={C.blue}/>}
-                  {n.realSource&&<Bdg label="LIVE" color={C.green}/>}
-                  <span style={{marginLeft:"auto",fontSize:"8px",color:C.muted,fontFamily:"monospace"}}>{n.dt}</span>
-                  {canClick&&<span style={{fontSize:"8px",color:C.blue,fontWeight:"700"}}>↗</span>}
-                </div>
-                <div style={{fontSize:"11px",color:"#b8cde0",lineHeight:"1.5",fontWeight:n.imp==="HIGH"?"600":"400",marginBottom:n.detail?"4px":"0"}}>
-                  {n.hl}
-                </div>
-                {n.detail&&<div style={{fontSize:"9px",color:C.muted,lineHeight:"1.45"}}>{n.detail}</div>}
-                {!n.realSource&&n.source&&<div style={{fontSize:"7.5px",color:C.dim,marginTop:"4px",fontStyle:"italic"}}>Source: {n.source}</div>}
+              <span style={{fontSize:"13px",fontWeight:"900",color:C.text}}>{t.ccy} — {t.title}</span>
+              <div style={{marginTop:"4px",display:"flex",gap:"5px"}}>
+                <Bdg label={t.dir} color={t.dir==="BULLISH"?C.green:t.dir==="BEARISH"?C.red:C.amber}/>
+                {t.priority&&<Bdg label={t.priority+" PRIORITY"} color={t.priority==="HIGH"?C.red:C.amber}/>}
               </div>
-            );
-          })}
-
-          {loading&&displayed.length>0&&(
-            <div style={{padding:"10px",textAlign:"center",color:C.gold,fontSize:"10px"}}>⚡ Loading more...</div>
-          )}
-          {!loading&&hasLoaded&&(
-            <button onClick={()=>loadNews(false)}
-              style={{width:"100%",padding:"11px",background:C.bg1,color:C.gold,border:`1px solid ${C.gold}44`,borderRadius:"4px",cursor:"pointer",fontSize:"11px",fontWeight:"700",fontFamily:"inherit",marginTop:"4px"}}>
-              ↓ LOAD MORE — fetch next batch from Finnhub
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
-  function CalendarTab(){
-    const now=new Date();
-    // FIX: Use local date string, NOT toISOString() which uses UTC and shows wrong date for US users
-    const todayStr=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
-    const ccys=["ALL","USD","EUR","GBP","JPY","AUD","CAD","CHF","NZD","NOK","SEK"];
-    const imps=["ALL","HIGH","MED","LOW"];
-    const types=["ALL","CB Decision","CB Speech","Inflation","Employment","GDP","PMI","Sentiment","Trade","Manufacturing","Retail","Housing","Indicator","Monetary","Inventory","Income"];
-    const views=["TODAY","THIS WEEK","THIS MONTH","NEXT MONTH"];
-
-    // Use live calEvents (seeded with static, replaced with live ForexFactory data)
-    const filtered=calEvents.filter(e=>{
-      const eDate=e.dt.slice(0,10);
-      if(calView==="TODAY"&&eDate!==todayStr)return false;
-      if(calView==="THIS WEEK"){
-        // Build week range using string arithmetic — avoids timezone issues
-        const day=now.getDay(); // 0=Sun, 1=Mon...
-        const mondayOffset=day===0?-6:1-day; // days back to Monday
-        const monday=new Date(now);monday.setHours(0,0,0,0);monday.setDate(now.getDate()+mondayOffset);
-        const sunday=new Date(monday);sunday.setDate(monday.getDate()+7);
-        const mondayStr=monday.getFullYear()+"-"+String(monday.getMonth()+1).padStart(2,"0")+"-"+String(monday.getDate()).padStart(2,"0");
-        const sundayStr=sunday.getFullYear()+"-"+String(sunday.getMonth()+1).padStart(2,"0")+"-"+String(sunday.getDate()).padStart(2,"0");
-        if(eDate<mondayStr||eDate>=sundayStr)return false;
-      }
-      if(calView==="THIS MONTH"&&eDate.slice(0,7)!==todayStr.slice(0,7))return false;
-      if(calView==="NEXT MONTH"){
-        const nm=new Date(now.getFullYear(),now.getMonth()+1,1);
-        const nmStr=nm.getFullYear()+"-"+String(nm.getMonth()+1).padStart(2,"0");
-        if(eDate.slice(0,7)!==nmStr)return false;
-      }
-      if(calCcy!=="ALL"&&e.ccy!==calCcy)return false;
-      if(calImp!=="ALL"&&e.imp!==calImp)return false;
-      if(calType!=="ALL"&&e.type!==calType)return false;
-      return true;
-    });
-
-    const impColor={HIGH:C.red,MED:C.amber,LOW:C.muted};
-    const byDate={};
-    filtered.forEach(e=>{const d=e.dt.slice(0,10);if(!byDate[d])byDate[d]=[];byDate[d].push(e);});
-    const sortedDates=Object.keys(byDate).sort();
-
-    return(
-      <div>
-        {/* Status bar */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:calLoaded?C.bg2:"#0a1200",border:`1px solid ${calLoaded?C.green+"44":C.bdr}`,borderRadius:"4px",padding:"6px 10px",marginBottom:"8px",fontSize:"8.5px"}}>
-          <span style={{color:calLoaded?C.green:C.amber}}>
-            {calLoading?"⟳ Fetching live ForexFactory data...":calLoaded?"✓ LIVE — ForexFactory feed · "+calEvents.length+" events":"◎ Static calendar — tap refresh for live data"}
-          </span>
-          <button onClick={()=>{setCalLoaded(false);loadCalendar();}} disabled={calLoading}
-            style={{padding:"3px 8px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}44`,borderRadius:"3px",cursor:calLoading?"not-allowed":"pointer",fontSize:"8px",fontWeight:"700",fontFamily:"inherit",opacity:calLoading?0.5:1}}>
-            ↺ Refresh
-          </button>
-        </div>
-        {/* Controls */}
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"10px 12px",marginBottom:"8px"}}>
-          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"8px"}}>
-            <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"38px"}}>VIEW:</span>
-            {views.map(v=><Sm key={v} label={v} active={calView===v} onClick={()=>setCalView(v)}/>)}
-            <span style={{marginLeft:"auto",fontSize:"8px",color:C.muted,fontFamily:"monospace"}}>Today: {todayStr}</span>
-          </div>
-          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"6px"}}>
-            <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"38px"}}>CCY:</span>
-            {ccys.map(c=><Sm key={c} label={c} active={calCcy===c} onClick={()=>setCalCcy(c)}/>)}
-          </div>
-          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"6px"}}>
-            <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"38px"}}>IMPACT:</span>
-            {imps.map(i=><Sm key={i} label={i} active={calImp===i} onClick={()=>setCalImp(i)} color={i==="HIGH"?C.red:i==="MED"?C.amber:i==="LOW"?C.muted:C.gold}/>)}
-          </div>
-          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center"}}>
-            <span style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",minWidth:"38px"}}>TYPE:</span>
-            {types.map(t=><Sm key={t} label={t} active={calType===t} onClick={()=>setCalType(t)}/>)}
-          </div>
-        </div>
-
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"10px 12px"}}>
-          <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>
-            ◷ ECONOMIC CALENDAR — {calView} · {filtered.length} EVENTS · {calCcy==="ALL"?"All Currencies":calCcy} · {calImp==="ALL"?"All Impacts":calImp}
-          </div>
-          {!sortedDates.length&&(
-            <div style={{color:C.muted,textAlign:"center",padding:"20px"}}>
-              {calView==="TODAY"
-                ? `No events on ${todayStr}. Try "THIS WEEK" or refresh for live data.`
-                : 'No events for this filter. Try broadening your selection.'}
             </div>
-          )}
-          {sortedDates.map(date=>(
-            <div key={date}>
-              <div style={{background:C.bg3,padding:"6px 10px",marginBottom:"4px",marginTop:"8px",borderRadius:"3px",display:"flex",alignItems:"center",gap:"8px"}}>
-                <span style={{color:date===todayStr?C.gold:C.text,fontWeight:"700",fontSize:"10px"}}>
-                  {date===todayStr?"📅 TODAY — ":""}
-                  {new Date(date+"T12:00:00Z").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric"})}
-                </span>
-                <span style={{fontSize:"8.5px",color:C.muted}}>{byDate[date].filter(e=>e.imp==="HIGH").length} HIGH · {byDate[date].filter(e=>e.imp==="MED").length} MED</span>
-              </div>
-              {byDate[date].map((e,i)=>{
-                const et=new Date(e.dt),past=et<now,soon=!past&&(et-now)<7200000;
-                const ic=impColor[e.imp];
-                const isReleased=e.actual&&e.actual!=="–";
-                return(
-                  <div key={i} style={{display:"flex",alignItems:"flex-start",gap:"8px",padding:"7px 4px",borderBottom:`1px solid ${C.bdr}22`,opacity:past?0.55:1,background:soon?"#ff9f1c05":"transparent"}}>
-                    <div style={{minWidth:"45px",fontSize:"9.5px",color:soon?C.amber:C.muted,fontFamily:"monospace",flexShrink:0}}>{e.dt.split(" ")[1]?.slice(0,5)||"--:--"}{soon?" ⚡":""}</div>
-                    <div style={{minWidth:"36px",flexShrink:0}}><Bdg label={e.ccy} color={ic}/></div>
-                    <div style={{width:"8px",height:"8px",borderRadius:"50%",background:ic,flexShrink:0,marginTop:"3px"}}/>
-                    <div style={{flex:1,fontSize:"10.5px",fontWeight:e.imp==="HIGH"?"700":"400",color:e.imp==="HIGH"?C.text:"#b8cde0",lineHeight:"1.4"}}>{e.ev}</div>
-                    <div style={{minWidth:"52px",textAlign:"right",flexShrink:0}}>
-                      <div style={{fontSize:"8.5px",color:C.muted}}>F: <span style={{color:C.gold,fontWeight:"700"}}>{e.fc}</span></div>
-                      <div style={{fontSize:"8.5px",color:C.muted}}>P: {e.pr}</div>
-                      {isReleased&&<div style={{fontSize:"8.5px",color:C.green,fontWeight:"700"}}>A: {e.actual}</div>}
-                    </div>
-                    <div style={{minWidth:"50px",textAlign:"right",flexShrink:0}}><Bdg label={isReleased?"ACTUAL":soon?"SOON ⚡":past?"DONE":"UPCOMING"} color={isReleased?C.green:soon?C.amber:past?C.muted:C.dim} sz="7.5px"/></div>
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
+            {(t.pairs||[]).length>0&&(
+              <div style={{display:"flex",gap:"5px",flexWrap:"wrap"}}>
+                {t.pairs.map((p,j)=>(<Bdg key={p} label={`${p} ${(t.dirs&&t.dirs[j])||""}`} color={(t.dirs&&t.dirs[j])==="BUY"?C.green:(t.dirs&&t.dirs[j])==="SELL"?C.red:C.blue}/>))}
+              </div>)}
+          </div>
+          <div style={{fontSize:"10px",color:C.text,marginTop:"9px",lineHeight:"1.8"}}>{t.detail}</div>
+          {t.deepAnalysis&&<div style={{fontSize:"9px",color:C.muted,marginTop:"7px",lineHeight:"1.8"}}>{t.deepAnalysis}</div>}
+          {(t.support||t.resistance||t.pivot)&&(
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"6px",marginTop:"9px"}}>
+              {[["SUPPORT",t.support,C.green],["PIVOT",t.pivot,C.gold],["RESISTANCE",t.resistance,C.red]].map(([k,v,vc])=>(
+                <div key={k} style={{background:C.bg2,borderRadius:"3px",padding:"6px",textAlign:"center"}}>
+                  <div style={{fontSize:"7px",color:C.muted,letterSpacing:"1px"}}>{k}</div>
+                  <div style={{fontSize:"10.5px",fontWeight:"800",color:vc,marginTop:"2px"}}>{v||"—"}</div>
+                </div>))}
+            </div>)}
+          {t.watchFor&&<div style={{fontSize:"9px",color:C.amber,marginTop:"8px"}}>◈ WATCH: {t.watchFor}</div>}
+          {t.evidence&&t.evidence.length>0&&(
+            <div style={{marginTop:"9px",display:"flex",gap:"10px",flexWrap:"wrap"}}>
+              {t.evidence.map((e,j)=>(<a key={j} href={e.url} target="_blank" rel="noreferrer" style={{fontSize:"8.5px",color:C.blue,textDecoration:"none"}}>{e.source||e.title} ↗</a>))}
+            </div>)}
+        </Card>))}
+    </div>);
+});
 
-  // ─── ACTIVE TRADES ────────────────────────────────────────────────────
-  function ActiveTrades(){
-    return(
-      <div>
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"9px 12px",marginBottom:"10px",display:"flex",alignItems:"center",gap:"10px"}}>
-          <span style={{fontSize:"9px",color:C.gold,fontWeight:"700",letterSpacing:"2px"}}>◉ ACTIVE TRADES</span>
-          <span style={{fontSize:"9.5px",color:C.muted}}>{trades.length} open</span>
-          <span style={{marginLeft:"auto",fontWeight:"700",fontSize:"13px",color:openPnl>=0?C.green:C.red}}>{openPnl>=0?"+":""}${openPnl.toFixed(2)}</span>
+// ═══ CALENDAR TAB — server-parsed feed, local-time render ════════════════════
+const CAL_TYPES=["ALL","CB Decision","CB Speech","Inflation","Employment","GDP","PMI","Retail","Trade","Housing","Sentiment","Manufacturing","Other"];
+const CalendarTab=memo(({calThis,calNext,calError,calLoading,onReload})=>{
+  const [view,setView]=useState("THIS WEEK");
+  const [ccy,setCcy]=useState("ALL");
+  const [typ,setTyp]=useState("ALL");
+  const [impOnly,setImpOnly]=useState(false);
+  const source=view==="NEXT WEEK"?calNext:calThis;
+  const events=useMemo(()=>{
+    if(!source) return null;
+    let ev=source.map(e=>({...e,local:new Date(e.utc)}));
+    if(view==="TODAY"){ const today=localDateKey(new Date()); ev=ev.filter(e=>localDateKey(e.local)===today); }
+    if(ccy!=="ALL") ev=ev.filter(e=>e.ccy===ccy);
+    if(typ!=="ALL") ev=ev.filter(e=>e.type===typ);
+    if(impOnly) ev=ev.filter(e=>e.imp==="HIGH");
+    return ev;
+  },[source,view,ccy,typ,impOnly]);
+  const grouped=useMemo(()=>{
+    if(!events) return [];
+    const g={};
+    events.forEach(e=>{const k=localDateKey(e.local); (g[k]=g[k]||[]).push(e);});
+    return Object.entries(g).sort((a,b)=>a[0].localeCompare(b[0]));
+  },[events]);
+  const impColor=i=>i==="HIGH"?C.red:i==="MED"?C.amber:C.muted;
+  return(
+    <div>
+      <Card style={{marginBottom:"10px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"8px"}}>
+          <SecT t="ECONOMIC CALENDAR" sub={source?`✓ LIVE — ForexFactory feed · ${source.length} events this ${view==="NEXT WEEK"?"(next) week":"week"} · all times local`:calLoading?"loading…":"feed not loaded"}/>
+          <div style={{display:"flex",gap:"5px"}}>
+            {["TODAY","THIS WEEK","NEXT WEEK"].map(v=>(<Sm key={v} label={v} color={C.gold} active={view===v} onClick={()=>setView(v)}/>))}
+            <Sm label="↻" color={C.blue} onClick={()=>onReload(view==="NEXT WEEK"?"next":"this")}/>
+          </div>
         </div>
-        {!trades.length?<div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"30px",textAlign:"center",color:C.muted}}>No active trades.</div>:trades.map(t=>{
-          const dc=t.direction==="BUY"?C.green:C.red,pc=t.pnl>=0?C.green:C.red;
-          const prog=t.pips>0&&t.tp1Pips?Math.min(100,(t.pips/t.tp1Pips)*100):0;
-          const isH=t.pair.includes("JPY")||t.pair.includes("NOK");
+      </Card>
+      {calError&&(
+        <div style={{padding:"12px 14px",background:C.red+"14",border:`1px solid ${C.red}66`,borderRadius:"4px",marginBottom:"10px"}}>
+          <div style={{fontSize:"11px",color:C.red,fontWeight:"800"}}>◈ CALENDAR FEED DOWN</div>
+          <div style={{fontSize:"9.5px",color:C.text,marginTop:"5px",lineHeight:"1.7"}}>{calError}</div>
+          <div style={{fontSize:"9px",color:C.muted,marginTop:"5px"}}>No cached or substituted events are shown. Retry, or check the ForexFactory feed status.</div>
+        </div>)}
+      <div style={{display:"flex",gap:"5px",flexWrap:"wrap",marginBottom:"10px",alignItems:"center"}}>
+        {["ALL",...G10.filter(c=>c!=="NOK"&&c!=="SEK"),"CNY"].map(cc=>(<Sm key={cc} label={cc} color={C.blue} active={ccy===cc} onClick={()=>setCcy(cc)}/>))}
+        <span style={{width:"8px"}}/>
+        <Sm label="HIGH ONLY" color={C.red} active={impOnly} onClick={()=>setImpOnly(!impOnly)}/>
+      </div>
+      <div style={{display:"flex",gap:"5px",flexWrap:"wrap",marginBottom:"10px"}}>
+        {CAL_TYPES.map(t=>(<Sm key={t} label={t} color="#8f8fd0" active={typ===t} onClick={()=>setTyp(t)}/>))}
+      </div>
+      {!calError&&events&&events.length===0&&(
+        <Card><div style={{fontSize:"10px",color:C.muted,textAlign:"center",padding:"18px 0"}}>No events match the current filters{view==="TODAY"?" today":""}.</div></Card>)}
+      {grouped.map(([day,evs])=>(
+        <Card key={day} style={{marginBottom:"10px",padding:"0",overflow:"hidden"}}>
+          <div style={{padding:"8px 14px",background:C.bg2,fontSize:"9.5px",fontWeight:"800",color:C.gold,letterSpacing:"1px"}}>
+            {new Date(evs[0].local).toLocaleDateString([],{weekday:"long",month:"short",day:"numeric"})}
+          </div>
+          {evs.map((e,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:"10px",padding:"8px 14px",borderBottom:i<evs.length-1?`1px solid ${C.bdr}33`:"none"}}>
+              <span style={{fontSize:"9.5px",color:C.muted,width:"58px",flexShrink:0,fontVariantNumeric:"tabular-nums"}}>{e.allDay?"All day":e.local.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</span>
+              <span style={{fontSize:"10px",fontWeight:"800",color:C.text,width:"36px",flexShrink:0}}>{e.ccy}</span>
+              <Tag label={e.type} color="#3a3a5a"/>
+              <span style={{fontSize:"10px",color:C.text,flex:1}}>{e.ev}</span>
+              <Bdg label={e.imp} color={impColor(e.imp)} sz="7.5px"/>
+              <span style={{fontSize:"8.5px",color:C.muted,width:"110px",textAlign:"right",flexShrink:0}}>{e.fc?`F: ${e.fc}`:""}{e.fc&&e.pr?" · ":""}{e.pr?`P: ${e.pr}`:""}</span>
+            </div>))}
+        </Card>))}
+    </div>);
+});
+
+// ═══ NEWS TAB — live Finnhub only ════════════════════════════════════════════
+const NewsTab=memo(({articles,newsError,newsLoading,onRefresh,onLoadMore})=>{
+  const [ccy,setCcy]=useState("ALL");
+  const [impOnly,setImpOnly]=useState(false);
+  const shown=useMemo(()=>{
+    let a=articles||[];
+    if(ccy!=="ALL") a=a.filter(x=>x.ccy===ccy);
+    if(impOnly) a=a.filter(x=>x.imp==="HIGH");
+    return a;
+  },[articles,ccy,impOnly]);
+  return(
+    <div>
+      <Card style={{marginBottom:"10px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"8px"}}>
+          <SecT t="FX NEWS WIRE" sub={articles?`✓ LIVE — Finnhub forex feed · ${articles.length} articles · real sources only, no AI-generated content`:newsLoading?"loading…":"feed not loaded"}/>
+          <div style={{display:"flex",gap:"6px"}}>
+            <Btn label={newsLoading?"…":"REFRESH"} ghost color={C.blue} disabled={newsLoading} onClick={onRefresh} style={{padding:"5px 10px",fontSize:"9px"}}/>
+            <Btn label="LOAD MORE" ghost color={C.muted} disabled={newsLoading} onClick={onLoadMore} style={{padding:"5px 10px",fontSize:"9px"}}/>
+          </div>
+        </div>
+      </Card>
+      {newsError&&(
+        <div style={{padding:"12px 14px",background:C.red+"14",border:`1px solid ${C.red}66`,borderRadius:"4px",marginBottom:"10px"}}>
+          <div style={{fontSize:"11px",color:C.red,fontWeight:"800"}}>◈ NEWS FEED DOWN</div>
+          <div style={{fontSize:"9.5px",color:C.text,marginTop:"5px",lineHeight:"1.7"}}>{newsError}</div>
+          <div style={{fontSize:"9px",color:C.muted,marginTop:"5px"}}>Nothing substituted. Check FINNHUB_API_KEY in Netlify env vars, then REFRESH.</div>
+        </div>)}
+      <div style={{display:"flex",gap:"5px",flexWrap:"wrap",marginBottom:"10px",alignItems:"center"}}>
+        {["ALL",...G10,"FX"].map(cc=>(<Sm key={cc} label={cc} color={C.blue} active={ccy===cc} onClick={()=>setCcy(cc)}/>))}
+        <span style={{width:"8px"}}/>
+        <Sm label="HIGH IMPACT" color={C.red} active={impOnly} onClick={()=>setImpOnly(!impOnly)}/>
+      </div>
+      {articles&&shown.length===0&&(<Card><div style={{fontSize:"10px",color:C.muted,textAlign:"center",padding:"18px 0"}}>No articles match this filter.</div></Card>)}
+      {shown.map((a,i)=>(
+        <Card key={a.id||i} style={{marginBottom:"8px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:"10px",alignItems:"flex-start"}}>
+            <a href={a.url} target="_blank" rel="noreferrer" style={{fontSize:"11px",fontWeight:"700",color:C.text,textDecoration:"none",lineHeight:"1.5",flex:1}}>{a.hl}</a>
+            <div style={{display:"flex",gap:"4px",flexShrink:0}}>
+              {a.ccy&&<Bdg label={a.ccy} color={C.blue} sz="7.5px"/>}
+              {a.imp&&<Bdg label={a.imp} color={a.imp==="HIGH"?C.red:a.imp==="MED"?C.amber:C.muted} sz="7.5px"/>}
+            </div>
+          </div>
+          {a.detail&&<div style={{fontSize:"9px",color:C.muted,marginTop:"6px",lineHeight:"1.7"}}>{a.detail}</div>}
+          <div style={{fontSize:"8px",color:C.dim,marginTop:"6px"}}>{a.source} · {a.ts?timeAgo(a.ts):a.dt} · <a href={a.url} target="_blank" rel="noreferrer" style={{color:C.blue,textDecoration:"none"}}>read ↗</a></div>
+        </Card>))}
+    </div>);
+});
+
+// ═══ CB RATES TAB — live FRED, derived outlook/bias, as-of transparency ══════
+const CBRatesTab=memo(({cbRates,cbSource,cbErrors,cbLoading,onOpenCB,onReload})=>{
+  const loaded=cbRates?Object.keys(cbRates).length:0;
+  return(
+    <div>
+      <Card style={{marginBottom:"10px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"8px"}}>
+          <SecT t="CENTRAL BANK POLICY RATES" sub={cbRates?`✓ LIVE — FRED · ${loaded}/10 currencies · outlook & bias are DERIVED from each series' 12-month history (change ≤8 months → trajectory), not editorial claims`:cbLoading?"loading…":"feed not loaded"}/>
+          <Btn label={cbLoading?"…":"RELOAD"} ghost color={C.blue} disabled={cbLoading} onClick={onReload} style={{padding:"5px 10px",fontSize:"9px"}}/>
+        </div>
+      </Card>
+      {cbSource==="FRED_PARTIAL"&&(
+        <div style={{padding:"9px 12px",background:C.amber+"14",border:`1px solid ${C.amber}55`,borderRadius:"4px",fontSize:"9.5px",color:C.amber,marginBottom:"10px"}}>
+          ◈ PARTIAL — {loaded}/10 loaded. Missing: {(cbErrors||[]).map(e=>e.split(":")[0]).join(", ")}. Carry strategies treat missing legs as unavailable (never guessed).
+        </div>)}
+      {cbSource==="error"&&(
+        <div style={{padding:"12px 14px",background:C.red+"14",border:`1px solid ${C.red}66`,borderRadius:"4px",marginBottom:"10px"}}>
+          <div style={{fontSize:"11px",color:C.red,fontWeight:"800"}}>◈ CB RATES FEED DOWN</div>
+          <div style={{fontSize:"9.5px",color:C.text,marginTop:"5px"}}>{(cbErrors&&cbErrors[0])||"FRED unreachable"}</div>
+          <div style={{fontSize:"9px",color:C.muted,marginTop:"5px"}}>All carry-family strategies are inert until this recovers. Check FRED_API_KEY.</div>
+        </div>)}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(230px,1fr))",gap:"10px"}}>
+        {G10.map(ccy=>{
+          const r=cbRates&&cbRates[ccy];
+          if(!r) return(
+            <Card key={ccy} style={{opacity:0.55}}>
+              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:"13px",fontWeight:"900",color:C.text}}>{ccy}</span><Bdg label="NO DATA" color={C.red} sz="7.5px"/></div>
+              <div style={{fontSize:"8.5px",color:C.muted,marginTop:"8px"}}>{CB_NAMES[ccy]} — series unavailable this load.</div>
+            </Card>);
+          const delta=r.prev!=null?r.rate-r.prev:null;
           return(
-            <div key={t.id} style={{background:C.bg1,border:`1px solid ${dc}22`,borderRadius:"6px",padding:"12px",marginBottom:"10px",contain:"content"}}>
-              <div style={{display:"flex",alignItems:"center",gap:"7px",marginBottom:"9px",flexWrap:"wrap"}}>
-                <Bdg label={t.direction} color={dc} sz="10px"/>
-                <span style={{fontWeight:"700",color:C.gold,fontSize:"15px"}}>{t.pair}</span>
-                <Bdg label={t.style.toUpperCase()} color={SC[t.style]}/>
-                <span style={{fontSize:"9px",color:C.muted}}>@ {t.entry}</span>
-                <div style={{marginLeft:"auto",display:"flex",gap:"10px"}}>
-                  <span style={{fontWeight:"700",color:t.pips>=0?C.green:C.red,fontSize:"11px"}}>{t.pips>=0?"+":""}{t.pips}p</span>
-                  <span style={{fontWeight:"700",color:pc,fontSize:"16px"}}>{t.pnl>=0?"+":""}${t.pnl.toFixed(2)}</span>
+            <Card key={ccy} style={{cursor:"pointer"}} >
+              <div onClick={()=>onOpenCB(ccy)}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontSize:"13px",fontWeight:"900",color:C.text}}>{ccy}</span>
+                  <span style={{fontSize:"17px",fontWeight:"900",color:C.gold}}>{r.rate.toFixed(2)}%</span>
                 </div>
+                <div style={{fontSize:"8.5px",color:C.muted,marginTop:"3px"}}>{CB_NAMES[ccy]}{delta!=null&&delta!==0?<span style={{color:delta>0?C.green:C.red}}> · last Δ {delta>0?"+":""}{(delta*100).toFixed(0)}bp</span>:null}</div>
+                <div style={{display:"flex",gap:"5px",marginTop:"8px",flexWrap:"wrap"}}>
+                  {r.outlook&&<Bdg label={r.outlook.toUpperCase()} color={r.outlook==="Hiking"?C.green:r.outlook==="Cutting"?C.red:C.muted} sz="7.5px"/>}
+                  {r.bias&&<Bdg label={r.bias.toUpperCase()} color={r.bias==="Hawkish"?C.green:r.bias==="Dovish"?C.red:C.muted} sz="7.5px"/>}
+                  {r.freq&&<Bdg label={r.freq==="monthly"?"MONTHLY SERIES":"DAILY SERIES"} color={C.dim} sz="7px"/>}
+                </div>
+                <div style={{marginTop:"9px"}}><Spark data={(r.hist||[]).map(h=>h.r)} w={180} h={26} color={C.gold}/></div>
+                <div style={{fontSize:"8px",color:C.muted,marginTop:"6px"}}>as of {r.asOf}</div>
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:"5px",marginBottom:"8px"}}>
-                {[["SL",t.sl,C.red],[`TP1`,t.tp1,C.green],[`TP2`,t.tp2,C.green],[`TP3`,t.tp3,C.gold]].map(([l,v,c])=>(
-                  <div key={l} style={{background:C.bg2,borderRadius:"3px",padding:"5px 7px",border:`1px solid ${c}22`}}>
-                    <div style={{fontSize:"7.5px",color:C.muted,marginBottom:"1px"}}>{l}</div>
-                    <div style={{fontSize:"10px",color:c,fontWeight:"700"}}>{v}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{marginBottom:"7px"}}>
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:"8px",color:C.muted,marginBottom:"2px"}}><span>TP1 progress</span><span style={{color:prog>=100?C.gold:C.text}}>{Math.round(prog)}%</span></div>
-                <div style={{height:"3px",background:C.bdr,borderRadius:"2px"}}><div style={{height:"100%",width:`${prog}%`,background:prog>=100?C.gold:C.green,borderRadius:"2px",transition:"width 0.8s"}}/></div>
-              </div>
-              <div style={{fontSize:"8.5px",color:C.muted,marginBottom:"8px"}}>Strategy: <span style={{color:C.gold}}>{t.primaryStrategy?.name}</span> · {t.lotSize} std lots · $${t.riskAmount} risk · R:R 1:{t.rr1}/1:{t.rr2}/1:{t.rr3}</div>
-              <div style={{display:"flex",gap:"7px"}}>
-                <Btn label="✓ WIN"  color={C.green} onClick={()=>closeT(t.id,"WIN")}  style={{flex:1,fontSize:"10px",padding:"6px"}}/>
-                <Btn label="✗ LOSS" color={C.red}   onClick={()=>closeT(t.id,"LOSS")} style={{flex:1,fontSize:"10px",padding:"6px"}}/>
-                <Btn label="MKT" color={C.muted} ghost onClick={()=>closeT(t.id,t.pnl>=0?"WIN":"LOSS")} style={{minWidth:"48px",fontSize:"10px",padding:"6px"}}/>
-              </div>
-            </div>
-          );
+              <a href={CB_SOURCE_URLS[ccy]} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{display:"inline-block",marginTop:"7px",fontSize:"8.5px",color:C.blue,textDecoration:"none"}}>Official {CB_NAMES[ccy]} ↗</a>
+            </Card>);
         })}
       </div>
-    );
-  }
+    </div>);
+});
 
-  // ─── PERFORMANCE ─────────────────────────────────────────────────────
-  function Performance(){
-    return(
-      <div>
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"12px",marginBottom:"10px"}}>
-          <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>▲ ALL-TIME PERFORMANCE</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"7px"}}>
-            {[["NET P&L",`${perf.tP>=0?"+":""}$${perf.tP.toFixed(2)}`,perf.tP>=0?C.green:C.red],["RETURN",`${(perf.tP/settings.acct*100).toFixed(2)}%`,perf.tP>=0?C.green:C.red],["WIN RATE",`${perf.wr.toFixed(1)}%`,perf.wr>=55?C.green:C.amber],["PROF FACTOR",`${perf.pf.toFixed(2)}x`,perf.pf>=1.5?C.green:perf.pf>=1?C.amber:C.red],["TOTAL",String(perf.n),C.text],["AVG WIN",`$${perf.aW.toFixed(2)}`,C.green],["AVG LOSS",`$${perf.aL.toFixed(2)}`,C.red],["W/L",`${perf.wins}/${perf.loss}`,C.text]].map(([l,v,c])=>(
-              <div key={l} style={{background:C.bg1,border:`1px solid ${C.bdr}`,borderRadius:"4px",padding:"8px 10px",textAlign:"center"}}>
-                <div style={{fontSize:"7.5px",color:C.muted,letterSpacing:"1px",marginBottom:"3px"}}>{l}</div>
-                <div style={{fontSize:"15px",fontWeight:"700",color:c||C.text}}>{v}</div>
-              </div>
-            ))}
+// ═══ AI TAB (messages view — input is fixed at root) ═════════════════════════
+const AITabView=memo(({msgs,sending})=>{
+  const endRef=useRef(null);
+  useEffect(()=>{ if(endRef.current) endRef.current.scrollIntoView({behavior:"smooth",block:"end"}); },[msgs,sending]);
+  return(
+    <div style={{paddingBottom:"64px"}}>
+      <Card style={{marginBottom:"10px"}}>
+        <SecT t="AXIOM AI DESK" sub="Grounded assistant: every message carries a live snapshot (prices, regimes, FRED rates, your open trades). It is instructed to say 'unavailable' rather than invent any number. Model pinned server-side."/>
+      </Card>
+      {(!msgs||msgs.length===0)&&(
+        <Card><div style={{fontSize:"9.5px",color:C.muted,textAlign:"center",padding:"16px 0"}}>Ask about live carry rankings, a pair's regime setup, or an open trade. The desk sees exactly what the terminal sees — nothing more.</div></Card>)}
+      {(msgs||[]).map((m,i)=>(
+        <div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start",marginBottom:"8px"}}>
+          <div style={{maxWidth:"78%",background:m.role==="user"?C.bg3:C.bg1,border:`1px solid ${m.role==="user"?C.blue+"44":C.bdr}`,borderRadius:"6px",padding:"9px 12px"}}>
+            <div style={{fontSize:"7.5px",color:m.role==="user"?C.blue:C.gold,fontWeight:"800",letterSpacing:"1px",marginBottom:"4px"}}>{m.role==="user"?"YOU":"AXIOM"}</div>
+            <div style={{fontSize:"10.5px",color:C.text,lineHeight:"1.75",whiteSpace:"pre-wrap"}}>{m.content}</div>
+          </div>
+        </div>))}
+      {sending&&<div style={{fontSize:"9px",color:C.muted}}>AXIOM is thinking…</div>}
+      <div ref={endRef}/>
+    </div>);
+});
+
+// ═══ TRADES TAB — paper positions, live P&L from the same math as the engine ═
+const TradesTab=memo(({trades,history,onBE,onCloseHalf,onClose,acct})=>{
+  const openPnl=(trades||[]).reduce((a,t)=>a+(t.pnl||0),0);
+  return(
+    <div>
+      <Card style={{marginBottom:"10px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"8px"}}>
+          <SecT t="OPEN PAPER TRADES" sub={`P&L uses live mid + the engine's pip-value model (USD conversion legs) — the same math that sized the position. Account ${fmtUsd(acct)}.`}/>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:"16px",fontWeight:"900",color:openPnl>=0?C.green:C.red}}>{fmtUsd(openPnl)}</div>
+            <div style={{fontSize:"7.5px",color:C.muted,letterSpacing:"1px"}}>OPEN P&L</div>
           </div>
         </div>
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"12px",marginBottom:"10px"}}>
-          <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>▲ BY STYLE</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px"}}>
-            {["scalp","day","swing"].map(s=>{const d=perf.bySt[s],c=SC[s];return(
-              <div key={s} style={{background:C.bg1,border:`1px solid ${c}44`,borderRadius:"4px",padding:"10px"}}>
-                <div style={{color:c,fontWeight:"700",fontSize:"11px",letterSpacing:"2px",marginBottom:"8px"}}>{s.toUpperCase()}</div>
-                <Kv k="Trades" v={String(d.n)}/><Kv k="Win %" v={`${d.wr.toFixed(1)}%`} vc={d.wr>=55?C.green:C.amber}/><Kv k="P&L" v={`${d.pnl>=0?"+":""}$${d.pnl.toFixed(2)}`} vc={d.pnl>=0?C.green:C.red}/>
-                <div style={{height:"3px",background:C.bdr,borderRadius:"2px",marginTop:"7px"}}><div style={{height:"100%",width:`${Math.min(100,d.wr)}%`,background:c,borderRadius:"2px"}}/></div>
+      </Card>
+      {(!trades||trades.length===0)&&(
+        <Card style={{marginBottom:"12px"}}><div style={{fontSize:"10px",color:C.muted,textAlign:"center",padding:"18px 0"}}>No open trades. TAKE a signal from the Signals tab to paper-trade it here.</div></Card>)}
+      {(trades||[]).map(t=>{
+        const dc=t.direction==="BUY"?C.green:C.red;
+        const atBE=Math.abs(t.sl-t.entry)<1e-9;
+        return(
+          <Card key={t.id} style={{marginBottom:"10px",borderLeft:`3px solid ${dc}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:"8px"}}>
+              <div>
+                <span style={{fontSize:"14px",fontWeight:"900",color:C.text}}>{t.pair}</span>
+                <span style={{fontSize:"11px",fontWeight:"800",color:dc,marginLeft:"8px"}}>{t.direction}</span>
+                <span style={{fontSize:"9px",color:C.muted,marginLeft:"8px"}}>{t.lotSize} lot · {t.strategyName||t.strategyId}</span>
+                {atBE&&<Bdg label="SL @ BE" color={C.blue} sz="7px"/>}
+                {t.partialTaken&&<Bdg label="50% BANKED" color={C.gold} sz="7px"/>}
               </div>
-            );})}
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:"15px",fontWeight:"900",color:(t.pnl||0)>=0?C.green:C.red}}>{fmtUsd(t.pnl)}</div>
+                <div style={{fontSize:"8px",color:C.muted}}>{(t.pips||0)>=0?"+":""}{(t.pips||0).toFixed(1)} pips</div>
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"6px",marginTop:"9px"}}>
+              {[["ENTRY",fmtP(t.pair,t.entry),C.text],["STOP",fmtP(t.pair,t.sl),atBE?C.blue:C.red],["TP1",fmtP(t.pair,t.tp1),C.green],["RISK",fmtUsd(atBE?0:t.riskAmount),atBE?C.blue:C.amber]].map(([k,v,vc])=>(
+                <div key={k} style={{background:C.bg2,borderRadius:"3px",padding:"5px",textAlign:"center"}}>
+                  <div style={{fontSize:"6.5px",color:C.muted,letterSpacing:"1px"}}>{k}</div>
+                  <div style={{fontSize:"10px",fontWeight:"800",color:vc,marginTop:"2px"}}>{v}</div>
+                </div>))}
+            </div>
+            <div style={{display:"flex",gap:"6px",marginTop:"10px"}}>
+              <Btn label="SL → BE" ghost color={C.blue} disabled={atBE} onClick={()=>onBE(t.id)} style={{flex:1,padding:"6px",fontSize:"9px"}}/>
+              <Btn label="CLOSE 50%" ghost color={C.gold} disabled={t.lotSize<0.02} onClick={()=>onCloseHalf(t.id)} style={{flex:1,padding:"6px",fontSize:"9px"}}/>
+              <Btn label="CLOSE" color={C.red} onClick={()=>onClose(t.id)} style={{flex:1,padding:"6px",fontSize:"9px"}}/>
+            </div>
+            <div style={{fontSize:"8px",color:C.dim,marginTop:"7px"}}>opened {timeAgo(t.openTime)} · pip value {fmtUsd((t.pipValuePerLot||0)*t.lotSize)}/pip</div>
+          </Card>);
+      })}
+      {history&&history.length>0&&(
+        <Card style={{padding:"0",overflow:"hidden"}}>
+          <div style={{padding:"9px 14px",borderBottom:`1px solid ${C.bdr}`,fontSize:"10px",fontWeight:"800",color:C.gold,letterSpacing:"1px"}}>RECENT CLOSES</div>
+          {history.slice(0,8).map(hh=>(
+            <div key={hh.id+String(hh.closeTime)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 14px",borderBottom:`1px solid ${C.bdr}22`,fontSize:"9.5px"}}>
+              <span style={{color:C.text,fontWeight:"700"}}>{hh.pair} <span style={{color:hh.direction==="BUY"?C.green:C.red}}>{hh.direction}</span>{hh.partial&&<span style={{color:C.gold,fontSize:"7.5px"}}> · PARTIAL</span>}</span>
+              <span style={{color:C.muted}}>{(hh.finalPips||0)>=0?"+":""}{(hh.finalPips||0).toFixed(1)}p</span>
+              <span style={{color:(hh.finalPnl||0)>=0?C.green:C.red,fontWeight:"800"}}>{fmtUsd(hh.finalPnl)}</span>
+            </div>))}
+        </Card>)}
+    </div>);
+});
+
+// ═══ PERFORMANCE TAB ═════════════════════════════════════════════════════════
+const PerformanceTab=memo(({history,onExport})=>{
+  const [range,setRange]=useState("ALL");
+  const filtered=useMemo(()=>{
+    const h=history||[];
+    if(range==="ALL") return h;
+    const days=range==="7D"?7:range==="30D"?30:90;
+    const cut=Date.now()-days*864e5;
+    return h.filter(x=>(x.closeTime||0)>=cut);
+  },[history,range]);
+  const stats=useMemo(()=>{
+    const h=filtered;
+    if(!h.length) return null;
+    const wins=h.filter(x=>(x.finalPnl||0)>0), losses=h.filter(x=>(x.finalPnl||0)<=0);
+    const totalPnl=h.reduce((a,x)=>a+(x.finalPnl||0),0);
+    const gw=wins.reduce((a,x)=>a+x.finalPnl,0), gl=Math.abs(losses.reduce((a,x)=>a+x.finalPnl,0));
+    const sorted=[...h].sort((a,b)=>(a.closeTime||0)-(b.closeTime||0));
+    let eq=0,peak=0,maxDD=0,consecL=0,maxConsecL=0;
+    const curve=sorted.map(x=>{eq+=(x.finalPnl||0);peak=Math.max(peak,eq);maxDD=Math.max(maxDD,peak-eq);
+      if((x.finalPnl||0)<=0){consecL++;maxConsecL=Math.max(maxConsecL,consecL);}else consecL=0;
+      return eq;});
+    const wr=wins.length/h.length*100;
+    const avgW=wins.length?gw/wins.length:0, avgL=losses.length?gl/losses.length:0;
+    const byStyle={}, byStrat={};
+    h.forEach(x=>{
+      const st=x.style||"day"; (byStyle[st]=byStyle[st]||{n:0,pnl:0,w:0}); byStyle[st].n++; byStyle[st].pnl+=(x.finalPnl||0); if((x.finalPnl||0)>0)byStyle[st].w++;
+      const sg=x.strategyId||"?"; (byStrat[sg]=byStrat[sg]||{n:0,pnl:0,w:0}); byStrat[sg].n++; byStrat[sg].pnl+=(x.finalPnl||0); if((x.finalPnl||0)>0)byStrat[sg].w++;
+    });
+    return{n:h.length,wins:wins.length,losses:losses.length,wr,totalPnl,pf:gl>0?gw/gl:gw>0?99:0,avgW,avgL,
+      expectancy:(wr/100)*avgW-(1-wr/100)*avgL,maxDD,maxConsecL,curve,byStyle,byStrat};
+  },[filtered]);
+  const Stat=({k,v,vc})=>(
+    <div style={{background:C.bg2,borderRadius:"3px",padding:"9px",textAlign:"center"}}>
+      <div style={{fontSize:"14px",fontWeight:"900",color:vc||C.text}}>{v}</div>
+      <div style={{fontSize:"6.5px",color:C.muted,letterSpacing:"1px",marginTop:"3px"}}>{k}</div>
+    </div>);
+  return(
+    <div>
+      <Card style={{marginBottom:"10px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"8px"}}>
+          <SecT t="PAPER PERFORMANCE" sub="Closed paper trades only. Partial closes count as separate history entries at their banked P&L."/>
+          <div style={{display:"flex",gap:"5px"}}>
+            {["7D","30D","90D","ALL"].map(r=>(<Sm key={r} label={r} color={C.gold} active={range===r} onClick={()=>setRange(r)}/>))}
+            <Sm label="EXPORT CSV" color={C.blue} onClick={onExport}/>
           </div>
         </div>
-        {history.length>0&&(
-          <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"12px"}}>
-            <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>▲ TRADE HISTORY</div>
-            <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",minWidth:"500px"}}>
-                <thead><tr>{["PAIR","DIR","STYLE","STRATEGY","ENTRY","P&L","PIPS","RESULT"].map(h=><th key={h} style={{padding:"5px 7px",textAlign:"left",fontSize:"7.5px",color:C.muted,letterSpacing:"1px",borderBottom:`1px solid ${C.bdr}`,fontWeight:"700"}}>{h}</th>)}</tr></thead>
-                <tbody>{history.map((t,i)=>(
-                  <tr key={i} onMouseEnter={e=>e.currentTarget.style.background=C.bg1} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                    <td style={{padding:"6px 7px",color:C.gold,fontWeight:"700",fontSize:"10.5px"}}>{t.pair}</td>
-                    <td style={{padding:"6px 7px"}}><Bdg label={t.direction} color={t.direction==="BUY"?C.green:C.red}/></td>
-                    <td style={{padding:"6px 7px",color:SC[t.style]||C.muted,fontSize:"9px",fontWeight:"700"}}>{t.style?.toUpperCase()}</td>
-                    <td style={{padding:"6px 7px",fontSize:"9px",color:C.muted,maxWidth:"120px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.primaryStrategy?.name}</td>
-                    <td style={{padding:"6px 7px",fontFamily:"monospace",fontSize:"10px"}}>{t.entry}</td>
-                    <td style={{padding:"6px 7px",color:t.finalPnl>=0?C.green:C.red,fontWeight:"700"}}>{t.finalPnl>=0?"+":""}${t.finalPnl?.toFixed(2)}</td>
-                    <td style={{padding:"6px 7px",color:t.pips>=0?C.green:C.red,fontSize:"10px"}}>{t.pips>=0?"+":""}{t.pips}</td>
-                    <td style={{padding:"6px 7px"}}><Bdg label={t.status} color={t.status==="WIN"?C.green:C.red}/></td>
-                  </tr>
-                ))}</tbody>
-              </table>
+      </Card>
+      {!stats?(
+        <Card><div style={{fontSize:"10px",color:C.muted,textAlign:"center",padding:"22px 0"}}>No closed trades in this range yet.</div></Card>
+      ):(
+        <div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(105px,1fr))",gap:"7px",marginBottom:"12px"}}>
+            <Stat k="TRADES" v={stats.n}/>
+            <Stat k="WIN RATE" v={stats.wr.toFixed(0)+"%"} vc={stats.wr>=50?C.green:C.red}/>
+            <Stat k="TOTAL P&L" v={fmtUsd(stats.totalPnl)} vc={stats.totalPnl>=0?C.green:C.red}/>
+            <Stat k="PROFIT FACTOR" v={stats.pf.toFixed(2)} vc={stats.pf>=1.5?C.green:stats.pf>=1?C.amber:C.red}/>
+            <Stat k="AVG WIN" v={fmtUsd(stats.avgW)} vc={C.green}/>
+            <Stat k="AVG LOSS" v={fmtUsd(-stats.avgL)} vc={C.red}/>
+            <Stat k="EXPECTANCY/TRADE" v={fmtUsd(stats.expectancy)} vc={stats.expectancy>=0?C.green:C.red}/>
+            <Stat k="MAX DRAWDOWN" v={fmtUsd(-stats.maxDD)} vc={C.red}/>
+            <Stat k="MAX CONSEC L" v={stats.maxConsecL} vc={C.amber}/>
+          </div>
+          <Card style={{marginBottom:"12px"}}>
+            <SecT t="EQUITY CURVE"/>
+            {stats.curve.length>=2?(
+              <svg width="100%" height="120" viewBox={`0 0 600 120`} preserveAspectRatio="none" style={{display:"block"}}>
+                {(()=>{const mn=Math.min(0,...stats.curve),mx=Math.max(0,...stats.curve),rg=(mx-mn)||1;
+                  const pts=stats.curve.map((v,i)=>`${(i/(stats.curve.length-1))*600},${110-((v-mn)/rg)*100}`).join(" ");
+                  const zy=110-((0-mn)/rg)*100;
+                  return(<g>
+                    <line x1="0" y1={zy} x2="600" y2={zy} stroke={C.bdr} strokeDasharray="4,3"/>
+                    <polyline points={pts} fill="none" stroke={stats.totalPnl>=0?C.green:C.red} strokeWidth="1.8"/>
+                  </g>);})()}
+              </svg>
+            ):(<div style={{fontSize:"9px",color:C.muted}}>Need 2+ closes for a curve.</div>)}
+          </Card>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px"}}>
+            <Card>
+              <SecT t="BY STYLE"/>
+              {Object.entries(stats.byStyle).map(([st,v])=>(
+                <div key={st} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.bdr}22`,fontSize:"10px"}}>
+                  <span style={{color:SC[st]||C.text,fontWeight:"800"}}>{st.toUpperCase()}</span>
+                  <span style={{color:C.muted}}>{v.n} · {((v.w/v.n)*100).toFixed(0)}% WR</span>
+                  <span style={{color:v.pnl>=0?C.green:C.red,fontWeight:"800"}}>{fmtUsd(v.pnl)}</span>
+                </div>))}
+            </Card>
+            <Card>
+              <SecT t="BY STRATEGY (TOP)"/>
+              {Object.entries(stats.byStrat).sort((a,b)=>b[1].pnl-a[1].pnl).slice(0,7).map(([sg,v])=>(
+                <div key={sg} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.bdr}22`,fontSize:"9.5px"}}>
+                  <span style={{color:C.text,fontWeight:"700"}}>{(STRAT_BY_ID[sg]&&STRAT_BY_ID[sg].name)||sg}</span>
+                  <span style={{color:C.muted}}>{v.n}</span>
+                  <span style={{color:v.pnl>=0?C.green:C.red,fontWeight:"800"}}>{fmtUsd(v.pnl)}</span>
+                </div>))}
+            </Card>
+          </div>
+        </div>)}
+    </div>);
+});
+
+// ═══ SETTINGS TAB ════════════════════════════════════════════════════════════
+const REG_DIRS=["BULLISH","NEUTRAL","BEARISH"];
+const REG_STR=["STRONG","MODERATE","WEAK"];
+const SettingsTab=memo(({settings,setSettings,regimes,setRegimes,onSaveRegimes,systemStatus,onTestAI,aiTest,onClear})=>{
+  const snap=usePriceSnap();
+  const set=(k,v)=>setSettings(s=>({...s,[k]:v}));
+  const togglePair=(p)=>set("pairs",settings.pairs.includes(p)?settings.pairs.filter(x=>x!==p):[...settings.pairs,p]);
+  const toggleStrat=(id)=>set("strategies",{...settings.strategies,[id]:!settings.strategies[id]});
+  const setTier=(tier,on)=>{
+    const patch={...settings.strategies};
+    STRATEGIES.filter(s=>s.tier===tier).forEach(s=>{patch[s.id]=on;});
+    set("strategies",patch);
+  };
+  const enabledCount=STRATEGIES.filter(s=>settings.strategies[s.id]).length;
+  const regJSON=JSON.stringify(regimes);
+  const dirColor=d=>d==="BULLISH"?C.green:d==="BEARISH"?C.red:C.amber;
+  const Row=({label,ok,detail,warn})=>(
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${C.bdr}22`}}>
+      <span style={{fontSize:"9.5px",color:C.text}}>{label}</span>
+      <span style={{fontSize:"9px",fontWeight:"800",color:ok===true?C.green:ok===false?C.red:warn?C.amber:C.muted}}>{detail}</span>
+    </div>);
+  return(
+    <div>
+      <Card style={{marginBottom:"12px"}}>
+        <SecT t="RISK & ACCOUNT" sub="These values are sent to the engine on every scan (clamped server-side: account ≥ $100, risk 0.1–5%). They size every signal's lot."/>
+        <div style={{display:"flex",gap:"12px",flexWrap:"wrap",marginTop:"6px"}}>
+          <div>
+            <div style={{fontSize:"8px",color:C.muted,letterSpacing:"1px",marginBottom:"4px"}}>ACCOUNT (USD)</div>
+            <input type="number" value={settings.acct} min="100" step="500"
+              onChange={e=>set("acct",e.target.value===""?"":Number(e.target.value))}
+              onBlur={e=>set("acct",Math.max(100,Math.min(10000000,Number(e.target.value)||10000)))}
+              style={{background:C.bg2,border:`1px solid ${C.bdr}`,color:C.text,padding:"8px 10px",borderRadius:"3px",fontFamily:"inherit",fontSize:"12px",width:"130px"}}/>
+          </div>
+          <div>
+            <div style={{fontSize:"8px",color:C.muted,letterSpacing:"1px",marginBottom:"4px"}}>RISK PER TRADE (%)</div>
+            <input type="number" value={settings.riskPct} min="0.1" max="5" step="0.1"
+              onChange={e=>set("riskPct",e.target.value===""?"":Number(e.target.value))}
+              onBlur={e=>set("riskPct",Math.max(0.1,Math.min(5,Number(e.target.value)||2)))}
+              style={{background:C.bg2,border:`1px solid ${C.bdr}`,color:C.text,padding:"8px 10px",borderRadius:"3px",fontFamily:"inherit",fontSize:"12px",width:"100px"}}/>
+          </div>
+          <div>
+            <div style={{fontSize:"8px",color:C.muted,letterSpacing:"1px",marginBottom:"4px"}}>TRADE STYLE (engine timeframe)</div>
+            <div style={{display:"flex",gap:"5px"}}>
+              {[["scalp","SCALP · H1"],["day","DAY · H4"],["swing","SWING · D1"]].map(([k,l])=>(
+                <Sm key={k} label={l} color={SC[k]} active={settings.style===k} onClick={()=>set("style",k)}/>))}
             </div>
           </div>
-        )}
-      </div>
-    );
-  }
-
-  // ─── ANALYZER ─────────────────────────────────────────────────────────
-  function Analyzer(){
-    // analyzerTab lifted to root — no reset on price tick
-    const byStr={};
-    history.forEach(t=>{
-      const k=t.primaryStrategy?.id||"UNK";
-      const nm=t.primaryStrategy?.name||"Unknown";
-      const tier=t.primaryStrategy?.tier||"B";
-      if(!byStr[k])byStr[k]={name:nm,tier,n:0,w:0,l:0,pnl:0,pips:0,avgR:0,rrs:[]};
-      byStr[k].n++;
-      if(t.status==="WIN"){byStr[k].w++;byStr[k].rrs.push(t.rr3||1);}
-      else byStr[k].l++;
-      byStr[k].pnl+=(t.finalPnl||0);
-      byStr[k].pips+=(t.finalPips||0);
-    });
-    Object.values(byStr).forEach(s=>{s.avgR=s.rrs.length?s.rrs.reduce((a,b)=>a+b,0)/s.rrs.length:0;});
-    const stList=Object.values(byStr).sort((a,b)=>b.pnl-a.pnl);
-
-    // Use AI-generated regime data
-    const REGIMES=regimeData||[];
-    const REGIMECOLOR={BULLISH:C.green,BEARISH:C.red,NEUTRAL:C.gold};
-    const STRENGTHCOLOR={STRONG:C.green,MOD:C.gold,WEAK:C.muted};
-    const ATABS=[{id:"regime",l:"Regime"},{id:"pairs",l:"Pair Matrix"},{id:"performance",l:"Strategy Perf"},{id:"risk",l:"Risk Metrics"}];
-
-    // Pair performance
-    const byPair={};
-    history.forEach(t=>{
-      const k=t.pair;if(!byPair[k])byPair[k]={n:0,w:0,pnl:0};
-      byPair[k].n++;if(t.status==="WIN")byPair[k].w++;byPair[k].pnl+=(t.finalPnl||0);
-    });
-
-    // Risk metrics
-    const totalTrades=history.length;
-    const wins=history.filter(t=>t.status==="WIN").length;
-    const totalPnl=history.reduce((a,t)=>a+(t.finalPnl||0),0);
-    const winPnl=history.filter(t=>t.status==="WIN").reduce((a,t)=>a+(t.finalPnl||0),0);
-    const lossPnl=Math.abs(history.filter(t=>t.status==="LOSS").reduce((a,t)=>a+(t.finalPnl||0),0));
-    const profitFactor=lossPnl>0?(winPnl/lossPnl).toFixed(2):"∞";
-    const avgWin=wins>0?(winPnl/wins).toFixed(2):"0";
-    const avgLoss=(totalTrades-wins)>0?(lossPnl/(totalTrades-wins)).toFixed(2):"0";
-    const maxDD=history.reduce((state,t)=>{
-      state.running+=(t.finalPnl||0);
-      if(state.running>state.peak)state.peak=state.running;
-      const dd=state.peak-state.running;
-      if(dd>state.maxDD)state.maxDD=dd;
-      return state;
-    },{running:0,peak:0,maxDD:0}).maxDD;
-
-    return(
-      <div>
-        {/* Tab bar */}
-        <div style={{display:"flex",gap:"4px",marginBottom:"12px",overflowX:"auto",scrollbarWidth:"none"}}>
-          {ATABS.map(t=>(
-            <button key={t.id} onClick={()=>setAnalyzerTab(t.id)} style={{padding:"8px 14px",background:analyzerTab===t.id?C.gold+"22":"transparent",color:analyzerTab===t.id?C.gold:C.muted,border:`1px solid ${analyzerTab===t.id?C.gold:C.bdr}`,borderRadius:"5px",cursor:"pointer",fontSize:"10px",fontWeight:"700",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
-              {t.l}
-            </button>
-          ))}
         </div>
+        <div style={{fontSize:"9px",color:C.muted,marginTop:"10px"}}>Risk per trade at current settings: <span style={{color:C.amber,fontWeight:"800"}}>{fmtUsd((Number(settings.acct)||0)*(Number(settings.riskPct)||0)/100)}</span></div>
+      </Card>
 
-        {/* REGIME ASSESSMENT */}
-        {analyzerTab==="regime"&&(
-          <div>
-            {/* Status + Refresh */}
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:regimeLoaded&&REGIMES.length>0?"#071407":C.bg2,border:`1px solid ${regimeLoaded&&REGIMES.length>0?C.green+"44":C.amber+"44"}`,borderRadius:"4px",padding:"6px 10px",marginBottom:"10px",fontSize:"8.5px"}}>
-              <div style={{display:"flex",alignItems:"center",gap:"6px"}}>
-                <div style={{width:"6px",height:"6px",borderRadius:"50%",background:regimeLoaded&&REGIMES.length>0?C.green:C.amber,animation:regimeLoading?"pulse 1s infinite":"none"}}/>
-                <span style={{color:regimeLoaded&&REGIMES.length>0?C.green:C.amber,fontWeight:"700"}}>
-                  {regimeLoading?"⟳ Generating regime analysis...":regimeLoaded&&REGIMES.length>0?"✓ AI-GENERATED · Live regime assessment from current CB rates":"Press Refresh to generate regime analysis"}
+      <Card style={{marginBottom:"12px"}}>
+        <SecT t={`SCAN UNIVERSE — ${settings.pairs.length}/28 PAIRS`} sub="Selected pairs are passed to the engine on each scan. Pricing legs for the other pairs are still fetched (needed for pip-value and triangle math)."/>
+        <div style={{display:"flex",gap:"6px",marginBottom:"8px"}}>
+          <Sm label="ALL" color={C.gold} onClick={()=>set("pairs",[...ALL_PAIRS])}/>
+          <Sm label="MAJORS" color={C.blue} onClick={()=>set("pairs",["EUR/USD","GBP/USD","USD/JPY","USD/CHF","USD/CAD","AUD/USD","NZD/USD"])}/>
+          <Sm label="NONE" color={C.muted} onClick={()=>set("pairs",[])}/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(88px,1fr))",gap:"5px"}}>
+          {ALL_PAIRS.map(p=>(<Sm key={p} label={p} color={C.green} active={settings.pairs.includes(p)} onClick={()=>togglePair(p)}/>))}
+        </div>
+      </Card>
+
+      <Card style={{marginBottom:"12px"}}>
+        <SecT t={`STRATEGY TOGGLES — ${enabledCount}/${STRATEGIES.length} ENABLED`} sub="Every toggle is wired: disabled strategies are excluded from the engine's confluence evaluation on the next scan."/>
+        {["S","A","B","C"].map(tier=>{
+          const list=STRATEGIES.filter(s=>s.tier===tier);
+          const on=list.filter(s=>settings.strategies[s.id]).length;
+          return(
+            <div key={tier} style={{marginBottom:"12px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"6px"}}>
+                <span style={{fontSize:"9.5px",fontWeight:"800",color:tier==="S"?C.gold:tier==="A"?C.blue:tier==="C"?"#8f8fd0":C.muted,letterSpacing:"1px"}}>{tier}-TIER {tier==="C"?"(PURE TA)":""} · {on}/{list.length}</span>
+                <span style={{display:"flex",gap:"5px"}}>
+                  <Sm label="ALL ON" color={C.green} onClick={()=>setTier(tier,true)}/>
+                  <Sm label="ALL OFF" color={C.red} onClick={()=>setTier(tier,false)}/>
                 </span>
               </div>
-              <button onClick={()=>{setRegimeData(null);setRegimeLoaded(false);loadRegime();}} disabled={regimeLoading}
-                style={{padding:"3px 8px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}44`,borderRadius:"3px",cursor:regimeLoading?"not-allowed":"pointer",fontSize:"8px",fontWeight:"700",fontFamily:"inherit",opacity:regimeLoading?0.5:1}}>
-                ↺ Refresh
-              </button>
-            </div>
-
-            {/* Loading */}
-            {regimeLoading&&(
-              <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"30px",textAlign:"center"}}>
-                <div style={{fontSize:"11px",color:C.gold,marginBottom:"6px"}}>⚡ Analyzing current macro regime...</div>
-                <div style={{fontSize:"9px",color:C.muted}}>Evaluating CB divergence, price action, and strategy alignment</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:"4px"}}>
+                {list.map(s=>(
+                  <div key={s.id} onClick={()=>toggleStrat(s.id)} title={s.name}
+                    style={{padding:"5px 8px",background:settings.strategies[s.id]?C.green+"14":C.bg2,border:`1px solid ${settings.strategies[s.id]?C.green+"55":C.bdr}`,borderRadius:"2px",cursor:"pointer",fontSize:"8px",color:settings.strategies[s.id]?C.text:C.muted,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                    {settings.strategies[s.id]?"●":"○"} {s.id}
+                  </div>))}
               </div>
-            )}
+            </div>);
+        })}
+      </Card>
 
-            {/* Empty state */}
-            {!regimeLoading&&!regimeLoaded&&(
-              <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"24px",textAlign:"center"}}>
-                <div style={{fontSize:"9px",color:C.muted,marginBottom:"12px"}}>AI generates live G10 regime assessment using current CB rates and price data.</div>
-                <button onClick={loadRegime} style={{padding:"8px 16px",background:C.gold,color:C.bg,border:"none",borderRadius:"4px",cursor:"pointer",fontWeight:"700",fontSize:"10px",fontFamily:"inherit"}}>▶ Generate Regime Analysis</button>
-              </div>
-            )}
-
-            {/* Regimes */}
-            {!regimeLoading&&REGIMES.length>0&&REGIMES.map((r,i)=>(
-              <div key={i} style={{background:C.bg2,border:`1px solid ${REGIMECOLOR[r.regime]||C.gold}33`,borderLeft:`4px solid ${REGIMECOLOR[r.regime]||C.gold}`,borderRadius:"6px",padding:"11px 13px",marginBottom:"8px"}}>
-                <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"6px",flexWrap:"wrap"}}>
-                  <span style={{fontWeight:"700",color:C.gold,fontSize:"14px"}}>{r.ccy}</span>
-                  <Bdg label={r.regime} color={REGIMECOLOR[r.regime]||C.gold}/>
-                  <Bdg label={r.strength} color={STRENGTHCOLOR[r.strength]||C.muted} sz="8px"/>
-                  {r.summary&&<span style={{fontSize:"9px",color:"#9ab8cc",fontStyle:"italic",flex:1}}>{r.summary}</span>}
-                </div>
-                <div style={{fontSize:"10px",color:"#b8cde0",lineHeight:"1.6",marginBottom:"7px"}}>{r.detail}</div>
-                <div style={{display:"flex",gap:"6px",alignItems:"center",flexWrap:"wrap",marginBottom:"6px"}}>
-                  <span style={{fontSize:"7.5px",color:C.muted,fontWeight:"700"}}>BEST STRATEGIES:</span>
-                  {(r.best_strat||[]).map(id=>{const s=STRATEGIES.find(x=>x.id===id);return s?<span key={id} style={{padding:"2px 6px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}33`,borderRadius:"3px",fontSize:"8px",fontWeight:"700"}}>{s.name.split(" ").slice(0,3).join(" ")}</span>:null;})}
-                </div>
-                {(r.avoid||[]).length>0&&(
-                  <div style={{display:"flex",gap:"6px",alignItems:"center",flexWrap:"wrap",marginBottom:"6px"}}>
-                    <span style={{fontSize:"7.5px",color:C.muted,fontWeight:"700"}}>AVOID:</span>
-                    {r.avoid.map(id=>{const s=STRATEGIES.find(x=>x.id===id);return s?<span key={id} style={{padding:"2px 6px",background:C.red+"22",color:C.red,border:`1px solid ${C.red}33`,borderRadius:"3px",fontSize:"8px",fontWeight:"700"}}>{s.name.split(" ").slice(0,2).join(" ")}</span>:null;})}
-                  </div>
-                )}
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",borderTop:`1px solid ${C.bdr}22`,paddingTop:"6px"}}>
-                  <span style={{fontSize:"8px",color:C.muted}}>{r.evidence}</span>
-                  {r.url&&<a href={r.url} target="_blank" rel="noopener noreferrer" style={{fontSize:"8px",color:C.blue,fontWeight:"700",textDecoration:"none",flexShrink:0}}>Source ↗</a>}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* PAIR MATRIX */}
-        {analyzerTab==="pairs"&&(
-          <div>
-            <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"11px 13px",marginBottom:"10px"}}>
-              <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"8px"}}>◎ PAIR PERFORMANCE MATRIX</div>
-              {Object.keys(byPair).length===0
-                ? <div style={{color:C.muted,fontSize:"10px",textAlign:"center",padding:"20px"}}>No closed trades yet — take signals and close them to see pair performance</div>
-                : <table style={{width:"100%",borderCollapse:"collapse"}}>
-                    <thead><tr>{["PAIR","TRADES","WIN %","NET P&L"].map(h=><th key={h} style={{padding:"5px 7px",textAlign:"left",fontSize:"7.5px",color:C.muted,borderBottom:`1px solid ${C.bdr}`,fontWeight:"700"}}>{h}</th>)}</tr></thead>
-                    <tbody>{Object.entries(byPair).sort((a,b)=>b[1].pnl-a[1].pnl).map(([pair,d])=>{
-                      const wr=d.n?d.w/d.n*100:0;
-                      return(<tr key={pair}>
-                        <td style={{padding:"6px 7px",color:C.gold,fontWeight:"700"}}>{pair}</td>
-                        <td style={{padding:"6px 7px",color:C.text}}>{d.n}</td>
-                        <td style={{padding:"6px 7px",color:wr>=55?C.green:C.amber,fontWeight:"700"}}>{wr.toFixed(1)}%</td>
-                        <td style={{padding:"6px 7px",color:d.pnl>=0?C.green:C.red,fontWeight:"700"}}>{d.pnl>=0?"+":""}${d.pnl.toFixed(2)}</td>
-                      </tr>);
-                    })}</tbody>
-                  </table>
-              }
-            </div>
-            {/* Live pair analysis based on current prices */}
-            <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"11px 13px"}}>
-              <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"8px"}}>◎ CURRENT PAIR MOMENTUM — LIVE</div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px"}}>
-                {ALL_PAIRS.map(pair=>{
-                  const p=prices?.[pair];if(!p)return null;
-                  const isH=pair.includes("JPY"),dec=isH?3:5;
-                  const bull=p.pct>=0;
-                  return(<div key={pair} style={{background:C.bg1,border:`1px solid ${bull?C.green:C.red}22`,borderRadius:"4px",padding:"7px 9px"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                      <span style={{fontWeight:"700",color:C.gold,fontSize:"11px"}}>{pair}</span>
-                      <span style={{fontSize:"9px",color:bull?C.green:C.red,fontWeight:"700"}}>{bull?"+":""}{p.pct.toFixed(3)}%</span>
-                    </div>
-                    <div style={{fontSize:"9.5px",color:C.text,fontFamily:"monospace"}}>{p.mid.toFixed(dec)}</div>
-                  </div>);
-                })}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* STRATEGY PERFORMANCE */}
-        {analyzerTab==="performance"&&(
-          <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"12px"}}>
-            <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>◎ STRATEGY PERFORMANCE</div>
-            {stList.length===0
-              ? <div style={{color:C.muted,fontSize:"10px",textAlign:"center",padding:"20px"}}>No closed trades yet. Take signals, close them, and performance data will appear here.</div>
-              : <div style={{overflowX:"auto"}}>
-                  <table style={{width:"100%",borderCollapse:"collapse",minWidth:"500px"}}>
-                    <thead><tr>{["STRATEGY","TIER","TRADES","WIN%","AVG R","NET P&L","RATING"].map(h=><th key={h} style={{padding:"5px 7px",textAlign:"left",fontSize:"7.5px",color:C.muted,letterSpacing:"1px",borderBottom:`1px solid ${C.bdr}`,fontWeight:"700"}}>{h}</th>)}</tr></thead>
-                    <tbody>{stList.map((s,i)=>{
-                      const wr=s.n?s.w/s.n*100:0;
-                      const rating=s.pnl>0&&wr>58?"STRONG":s.pnl>0?"POSITIVE":wr>50?"MARGINAL":"LAGGING";
-                      const rc=rating==="STRONG"?C.green:rating==="POSITIVE"?C.gold:rating==="MARGINAL"?C.amber:C.red;
-                      const tc={S:C.gold,A:C.green,B:C.blue,C:C.muted}[s.tier]||C.muted;
-                      return(<tr key={i} onMouseEnter={e=>e.currentTarget.style.background=C.bg1} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                        <td style={{padding:"6px 7px",color:C.gold,fontWeight:"600",fontSize:"10px"}}>{s.name}</td>
-                        <td style={{padding:"6px 7px"}}><Bdg label={s.tier} color={tc} sz="8px"/></td>
-                        <td style={{padding:"6px 7px",color:C.text}}>{s.n}</td>
-                        <td style={{padding:"6px 7px",color:wr>=55?C.green:C.amber,fontWeight:"700"}}>{wr.toFixed(1)}%</td>
-                        <td style={{padding:"6px 7px",color:C.text,fontFamily:"monospace"}}>{s.avgR.toFixed(1)}R</td>
-                        <td style={{padding:"6px 7px",color:s.pnl>=0?C.green:C.red,fontWeight:"700"}}>{s.pnl>=0?"+":""}${s.pnl.toFixed(2)}</td>
-                        <td style={{padding:"6px 7px"}}><Bdg label={rating} color={rc} sz="7.5px"/></td>
-                      </tr>);
-                    })}</tbody>
-                  </table>
-                </div>
-            }
-          </div>
-        )}
-
-        {/* RISK METRICS */}
-        {analyzerTab==="risk"&&(
-          <div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"9px",marginBottom:"10px"}}>
-              {[["TOTAL TRADES",totalTrades,C.text],["WIN RATE",totalTrades>0?(wins/totalTrades*100).toFixed(1)+"%":"-",totalTrades===0?C.muted:wins/totalTrades>=0.55?C.green:C.amber],["NET P&L",totalPnl>=0?"+$"+totalPnl.toFixed(2):"−$"+Math.abs(totalPnl).toFixed(2),totalPnl>=0?C.green:C.red],["PROFIT FACTOR",profitFactor,parseFloat(profitFactor)>=1.5?C.green:parseFloat(profitFactor)>=1?C.gold:C.red],["AVG WIN","$"+avgWin,C.green],["AVG LOSS","−$"+avgLoss,C.red],["MAX DRAWDOWN","−$"+maxDD.toFixed(2),maxDD>500?C.red:maxDD>200?C.amber:C.green],["OPEN TRADES",trades.length,C.text]].map(([l,v,c])=>(
-                <div key={l} style={{background:C.bg2,border:`1px solid ${c}33`,borderRadius:"5px",padding:"11px",textAlign:"center"}}>
-                  <div style={{fontSize:"8px",color:C.muted,letterSpacing:"1px",marginBottom:"4px",fontWeight:"700"}}>{l}</div>
-                  <div style={{fontSize:"18px",fontWeight:"700",color:c,fontFamily:"monospace"}}>{v}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"11px 13px"}}>
-              <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"9px"}}>◎ RISK MANAGEMENT RULES — INSTITUTIONAL</div>
-              {[["Max 2% risk per trade","Each signal auto-calculates lot size for your account balance and 2% risk. Never manually increase position size.","MANDATORY"],["Max 6% portfolio heat","No more than 3 open trades at once at 2% each. Correlated pairs (EUR/USD + GBP/USD) count double.","MANDATORY"],["Always use stop loss","Every signal includes a hard SL level. No exceptions. No averaging down into losers.","MANDATORY"],["Trail to breakeven at TP1","When TP1 is hit, move stop to entry immediately. Lock in risk-free position.","BEST PRACTICE"],["Exit before high-impact news","Close or reduce positions before HIGH-impact calendar events (check Calendar tab).","BEST PRACTICE"],["Maximum daily loss 6%","If down 6% in a day, stop trading. Protect capital. Reset tomorrow.","MANDATORY"]].map(([rule,detail,type],i)=>(
-                <div key={i} style={{borderBottom:`1px solid ${C.bdr}22`,paddingBottom:"8px",marginBottom:"8px"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:"7px",marginBottom:"3px"}}>
-                    <Bdg label={type} color={type==="MANDATORY"?C.red:C.gold} sz="7.5px"/>
-                    <span style={{fontWeight:"700",color:C.text,fontSize:"10.5px"}}>{rule}</span>
-                  </div>
-                  <div style={{fontSize:"9px",color:C.muted,lineHeight:"1.5"}}>{detail}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-
-  // ─── CB RATES ─────────────────────────────────────────────────────────
-  function CBRates(){
-    // Use live data from FRED if loaded, otherwise show loading state
-    const activeCB = cbRates || {};
-    const CB_SOURCE_URLS={
-      USD:"https://www.federalreserve.gov/monetarypolicy/openmarket.htm",
-      EUR:"https://www.ecb.europa.eu/mopo/decisions/html/index.en.html",
-      GBP:"https://www.bankofengland.co.uk/monetary-policy-summary-and-minutes",
-      JPY:"https://www.boj.or.jp/en/mopo/mpmdeci/",
-      AUD:"https://www.rba.gov.au/monetary-policy/rba-board-minutes/",
-      CAD:"https://www.bankofcanada.ca/core-functions/monetary-policy/key-interest-rate/",
-      CHF:"https://www.snb.ch/en/monetary-policy/monetary-policy-decisions",
-      NZD:"https://www.rbnz.govt.nz/monetary-policy/official-cash-rate-decisions",
-      NOK:"https://www.norges-bank.no/en/topics/Monetary-policy/monetary-policy-meetings/",
-      SEK:"https://www.riksbank.se/en-gb/monetary-policy/the-policy-rate/",
-    };
-
-    // Build display CB object — live FRED data only, no static fallback
-    // If cbRates is null (FRED unavailable), displayCB is empty and error banner handles it
-    const displayCB={};
-    if(cbRates){
-      Object.entries(cbRates).forEach(([ccy,live])=>{
-        displayCB[ccy]={
-          bank: live.bank||ccy,
-          rate: live.rate,
-          prev: live.prev,
-          outlook: live.outlook||"Unknown",
-          bias: live.bias||"Unknown",
-          next: live.next||"Unknown",
-          hist: live.hist||null,
-          sourceUrl: CB_SOURCE_URLS[ccy]||live.sourceUrl,
-          fredSeries: live.fredSeries,
-          source: live.source||"FRED",
-        };
-      });
-    }
-
-    return(
-      <div>
-        {/* FRED Status Bar */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:cbRatesSource==="FRED"?"#071407":cbRatesSource==="error"?"#1a0505":C.bg2,border:`1px solid ${cbRatesSource==="FRED"?C.green+"44":cbRatesSource==="error"?C.red+"44":C.amber+"44"}`,borderRadius:"4px",padding:"6px 10px",marginBottom:"10px",fontSize:"8.5px"}}>
-          <div style={{display:"flex",alignItems:"center",gap:"6px"}}>
-            <div style={{width:"6px",height:"6px",borderRadius:"50%",background:cbRatesSource==="FRED"?C.green:cbRatesSource==="error"?C.red:C.muted,animation:cbRatesLoading?"pulse 1s infinite":"none"}}/>
-            <span style={{color:cbRatesSource==="FRED"?C.green:cbRatesSource==="error"?C.red:C.amber,fontWeight:"700"}}>
-              {cbRatesLoading?"⟳ Fetching from FRED...":cbRatesSource==="FRED"?`✓ LIVE — FRED St. Louis Fed · Updated ${cbRatesUpdated?.slice(0,10)||"today"}`:cbRatesSource==="error"?"✗ FRED UNAVAILABLE — add FRED_API_KEY to Netlify env vars":"⟳ Connecting to FRED..."}
-            </span>
-          </div>
-          <div style={{display:"flex",gap:"6px",alignItems:"center"}}>
-            {cbRatesSource!=="FRED"&&<a href="https://fred.stlouisfed.org" target="_blank" rel="noopener noreferrer" style={{fontSize:"7.5px",color:C.blue,fontWeight:"700",textDecoration:"none"}}>Get Free Key ↗</a>}
-            <button onClick={()=>{setCbRates(null);setCbRatesSource("loading");loadCBRates();}} disabled={cbRatesLoading}
-              style={{padding:"3px 8px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}44`,borderRadius:"3px",cursor:cbRatesLoading?"not-allowed":"pointer",fontSize:"8px",fontWeight:"700",fontFamily:"inherit",opacity:cbRatesLoading?0.5:1}}>
-              ↺ Refresh
-            </button>
-          </div>
-        </div>
-
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"8px 10px",marginBottom:"10px",fontSize:"8.5px",color:C.muted}}>
-          📈 <strong style={{color:C.text}}>Tap any central bank card</strong> to view the full rate history chart and decision timeline. Rates sourced from FRED (St. Louis Fed) and each central bank's official website.
-        </div>
-
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:"9px",marginBottom:"12px"}}>
-          {Object.keys(displayCB).length===0?(
-            <div style={{background:"#1a0505",border:`1px solid ${C.red}44`,borderRadius:"6px",padding:"28px",textAlign:"center",gridColumn:"1/-1"}}>
-              <div style={{color:C.red,fontWeight:"700",fontSize:"12px",marginBottom:"8px"}}>✗ CB RATES UNAVAILABLE</div>
-              <div style={{color:C.muted,fontSize:"9px",lineHeight:"1.7",marginBottom:"12px"}}>FRED API unreachable. Add FRED_API_KEY to Netlify environment variables — free at fred.stlouisfed.org</div>
-              <button onClick={loadCBRates} style={{padding:"8px 16px",background:C.red+"22",color:C.red,border:`1px solid ${C.red}44`,borderRadius:"3px",cursor:"pointer",fontWeight:"700",fontSize:"10px",fontFamily:"inherit"}}>↺ RETRY</button>
-            </div>
-          ):Object.entries(displayCB).map(([ccy,cb])=>{
-            const bc=cb.bias==="Hawkish"?C.green:cb.bias==="Dovish"?C.red:C.gold;
-            const hist=cb.hist||[];
-            const rates=hist.map(h=>h.r);
-            const mn=hist.length?Math.min(...rates):0;
-            const mx=hist.length?Math.max(...rates):cb.rate;
-            const rng=mx-mn||0.5;
-            const sw=120,sh=32;
-            const sx=(i)=>(i/(Math.max(hist.length-1,1)))*sw;
-            const sy=(r)=>sh-((r-mn)/rng)*(sh-4)-2;
-            const spts=hist.map((d,i)=>`${sx(i)},${sy(d.r)}`).join(" ");
-
-            return(
-              <div key={ccy} onClick={()=>setSelCB([ccy,cb])}
-                style={{background:C.bg2,border:`1px solid ${bc}33`,borderRadius:"5px",padding:"11px",cursor:"pointer",transition:"all 0.12s"}}
-                onMouseEnter={e=>{e.currentTarget.style.borderColor=bc+"77";e.currentTarget.style.background=C.bg1;}}
-                onMouseLeave={e=>{e.currentTarget.style.borderColor=bc+"33";e.currentTarget.style.background=C.bg2;}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"4px"}}>
-                  <span style={{fontWeight:"700",color:C.gold,fontSize:"17px"}}>{ccy}</span>
-                  <div style={{display:"flex",gap:"5px",alignItems:"center"}}>
-                    <Bdg label={cb.bias.toUpperCase()} color={bc}/>
-                    <a href={cb.sourceUrl} target="_blank" rel="noopener noreferrer"
-                      onClick={e=>e.stopPropagation()}
-                      style={{fontSize:"7.5px",color:C.blue,fontWeight:"700",textDecoration:"none"}}>SRC ↗</a>
-                  </div>
-                </div>
-                <div style={{fontSize:"9px",color:C.muted,marginBottom:"4px"}}>{cb.bank}</div>
-                <div style={{display:"flex",alignItems:"baseline",gap:"6px",marginBottom:"6px"}}>
-                  <span style={{fontSize:"22px",fontWeight:"700",color:C.text,fontFamily:"monospace"}}>{cb.rate.toFixed(2)}%</span>
-                  <span style={{fontSize:"9px",color:cb.rate>cb.prev?C.green:cb.rate<cb.prev?C.red:C.muted}}>prev {cb.prev.toFixed(2)}%</span>
-                </div>
-                {hist.length>=2&&(
-                  <svg width={sw} height={sh} style={{display:"block",marginBottom:"6px",overflow:"visible"}}>
-                    <polyline points={`${sx(0)},${sh} ${spts} ${sx(hist.length-1)},${sh}`} fill={bc+"22"}/>
-                    <polyline points={spts} fill="none" stroke={bc} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                )}
-                <div style={{display:"flex",gap:"5px",alignItems:"center",marginBottom:"4px"}}>
-                  <Bdg label={cb.outlook.toUpperCase()} color={cb.outlook==="Hiking"?C.green:cb.outlook==="Cutting"?C.red:C.muted}/>
-                  <span style={{fontSize:"8px",color:C.muted}}>Next: {cb.next}</span>
-                </div>
-                {cb.fredSeries&&<div style={{fontSize:"7px",color:C.dim}}>FRED: {cb.fredSeries}</div>}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Detail modal */}
-        {selCB&&(()=>{
-          const [ccy,cb]=selCB;
-          const bc=cb.bias==="Hawkish"?C.green:cb.bias==="Dovish"?C.red:C.gold;
-          const hist=cb.hist||[];
-          const rates=hist.map(h=>h.r);
-          const mn=hist.length?Math.min(...rates):0;
-          const mx=hist.length?Math.max(...rates):cb.rate;
-          const rng=mx-mn||0.5;
-          const W=300,H=130,pad=18;
-          const x=(i)=>pad+(i/(Math.max(hist.length-1,1)))*(W-pad*2);
-          const y=(r)=>H-pad-((r-mn)/rng)*(H-pad*2);
-          const pts=hist.map((d,i)=>`${x(i)},${y(d.r)}`).join(" ");
+      <Card style={{marginBottom:"12px"}}>
+        <SecT t="MACRO REGIME EDITOR" sub="The ENGINE reads regimes from the AXIOM_REGIMES env var in Netlify (single source of truth for scans). This editor drives the terminal UI + AI grounding, and produces the exact JSON to paste into Netlify."/>
+        {G10.map(ccy=>{
+          const r=regimes[ccy]||{dir:"NEUTRAL",strength:"WEAK"};
           return(
-            <div onClick={()=>setSelCB(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(4px)"}}>
-              <div onClick={e=>e.stopPropagation()} style={{background:C.bg2,border:`2px solid ${bc}`,borderRadius:"8px",padding:"18px",maxWidth:"380px",width:"calc(100% - 32px)",maxHeight:"80vh",overflowY:"auto"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px"}}>
-                  <div>
-                    <div style={{fontSize:"20px",fontWeight:"700",color:C.gold}}>{ccy} — {cb.bank}</div>
-                    <div style={{fontSize:"8.5px",color:C.muted}}>Rate History · Current: {cb.rate.toFixed(2)}% · Tap outside to close</div>
-                  </div>
-                  <button onClick={()=>setSelCB(null)} style={{background:"transparent",border:`1px solid ${C.bdr}`,borderRadius:"3px",color:C.muted,cursor:"pointer",padding:"4px 8px",fontSize:"11px",fontFamily:"inherit"}}>✕</button>
-                </div>
-
-                {hist.length>=2&&(
-                  <div style={{background:C.bg1,borderRadius:"6px",padding:"12px",marginBottom:"12px"}}>
-                    <div style={{fontSize:"8px",color:C.gold,fontWeight:"700",letterSpacing:"2px",marginBottom:"8px"}}>POLICY RATE HISTORY (%)</div>
-                    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{display:"block",overflow:"visible"}}>
-                      {[0,0.25,0.5,0.75,1].map((p,i)=>{
-                        const yp=pad+(p*(H-pad*2));
-                        const rv=(mn+rng*(1-p)).toFixed(2);
-                        return(<g key={i}><line x1={pad} y1={yp} x2={W-pad} y2={yp} stroke={C.bdr} strokeWidth="0.5" strokeDasharray="3,3"/><text x={pad-3} y={yp+3} fontSize="7" fill={C.muted} textAnchor="end">{rv}%</text></g>);
-                      })}
-                      <polyline points={`${x(0)},${H-pad} ${pts} ${x(hist.length-1)},${H-pad}`} fill={bc+"22"}/>
-                      <polyline points={pts} fill="none" stroke={bc} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-                      {hist.map((d,i)=>(<g key={i}><circle cx={x(i)} cy={y(d.r)} r={i===hist.length-1?5:3} fill={i===hist.length-1?bc:C.bg2} stroke={bc} strokeWidth="1.5"/>{(i===0||i===hist.length-1)&&<text x={x(i)} y={H-4} fontSize="6.5" fill={C.muted} textAnchor="middle">{d.d}</text>}</g>))}
-                    </svg>
-                  </div>
-                )}
-
-                {hist.length>0&&(
-                  <div style={{background:C.bg1,borderRadius:"5px",padding:"10px",marginBottom:"12px"}}>
-                    <div style={{fontSize:"8px",color:C.gold,fontWeight:"700",letterSpacing:"2px",marginBottom:"7px"}}>DECISION HISTORY</div>
-                    <div style={{maxHeight:"150px",overflowY:"auto"}}>
-                      {[...hist].reverse().map((d,i,arr)=>{
-                        const prev=arr[i+1];const chg=prev?d.r-prev.r:0;
-                        return(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:`1px solid ${C.bdr}22`,fontSize:"10px"}}>
-                          <span style={{color:C.muted,fontFamily:"monospace",minWidth:"70px"}}>{d.d}</span>
-                          <span style={{fontWeight:"700",color:C.text,fontFamily:"monospace"}}>{d.r.toFixed(2)}%</span>
-                          <span style={{fontSize:"9px",color:chg>0?C.green:chg<0?C.red:C.muted,fontFamily:"monospace",minWidth:"45px",textAlign:"right"}}>{chg!==0?(chg>0?"+":"")+chg.toFixed(2)+"%":"—"}</span>
-                        </div>);
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"7px",marginBottom:"12px"}}>
-                  {[["Current Rate",`${cb.rate.toFixed(2)}%`,bc],["Outlook",cb.outlook,cb.outlook==="Hiking"?C.green:cb.outlook==="Cutting"?C.red:C.muted],["Next Meeting",cb.next,C.muted],["Bias",cb.bias,bc]].map(([l,v,c])=>(
-                    <div key={l} style={{background:C.bg,border:`1px solid ${c}33`,borderRadius:"4px",padding:"8px"}}>
-                      <div style={{fontSize:"7.5px",color:C.muted,marginBottom:"3px"}}>{l}</div>
-                      <div style={{fontSize:"12px",fontWeight:"700",color:c}}>{v}</div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Source link */}
-                <a href={cb.sourceUrl} target="_blank" rel="noopener noreferrer"
-                  style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 11px",background:C.bg1,border:`1px solid ${C.blue}33`,borderRadius:"4px",textDecoration:"none",marginBottom:"8px"}}>
-                  <div>
-                    <div style={{fontSize:"9.5px",color:C.text,fontWeight:"600"}}>{cb.bank} — Official Rate Decisions</div>
-                    <div style={{fontSize:"8px",color:C.blue,marginTop:"2px"}}>
-                      {cb.fredSeries?`FRED Series: ${cb.fredSeries} · `:""}Source: {cb.bank}
-                    </div>
-                  </div>
-                  <span style={{fontSize:"16px",color:C.blue,flexShrink:0}}>↗</span>
-                </a>
-                {cb.fredSeries&&(
-                  <a href={`https://fred.stlouisfed.org/series/${cb.fredSeries}`} target="_blank" rel="noopener noreferrer"
-                    style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 11px",background:C.bg1,border:`1px solid ${C.green}33`,borderRadius:"4px",textDecoration:"none"}}>
-                    <div>
-                      <div style={{fontSize:"9.5px",color:C.text,fontWeight:"600"}}>FRED Database — {cb.fredSeries}</div>
-                      <div style={{fontSize:"8px",color:C.green,marginTop:"2px"}}>Federal Reserve Bank of St. Louis · Free data</div>
-                    </div>
-                    <span style={{fontSize:"16px",color:C.green,flexShrink:0}}>↗</span>
-                  </a>
-                )}
+            <div key={ccy} style={{display:"flex",alignItems:"center",gap:"10px",padding:"7px 0",borderBottom:`1px solid ${C.bdr}22`,flexWrap:"wrap"}}>
+              <span style={{fontSize:"11px",fontWeight:"900",color:C.text,width:"38px"}}>{ccy}</span>
+              <div style={{display:"flex",gap:"4px"}}>
+                {REG_DIRS.map(d=>(<Sm key={d} label={d.slice(0,4)} color={dirColor(d)} active={r.dir===d} onClick={()=>setRegimes(rr=>({...rr,[ccy]:{...(rr[ccy]||{strength:"MODERATE"}),dir:d}}))}/>))}
               </div>
-            </div>
-          );
-        })()}
-
-        {/* Carry Matrix — derives from live rates */}
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"12px"}}>
-          <div style={{fontSize:"9px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"8px",paddingBottom:"6px",borderBottom:`1px solid ${C.bdr}`}}>◈ CARRY DIFFERENTIAL MATRIX (%) — LIVE RATES</div>
-          <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",minWidth:"600px"}}>
-              <thead><tr>
-                <th style={{padding:"5px 8px",fontSize:"8px",color:C.gold,borderBottom:`1px solid ${C.bdr}`,fontWeight:"700",textAlign:"left"}}>↓ BASE / QUOTE →</th>
-                {Object.keys(displayCB).map(q=><th key={q} style={{padding:"5px 8px",fontSize:"8px",color:C.muted,borderBottom:`1px solid ${C.bdr}`,fontWeight:"700",textAlign:"center"}}>{q}</th>)}
-              </tr></thead>
-              <tbody>
-                {Object.entries(displayCB).map(([base,bd])=>(
-                  <tr key={base}>
-                    <td style={{padding:"6px 8px",color:C.gold,fontWeight:"700",fontSize:"10.5px"}}>{base}</td>
-                    {Object.entries(displayCB).map(([q,qd])=>{
-                      if(base===q)return(<td key={q} style={{padding:"6px 8px",background:C.bg1,color:C.dim,textAlign:"center"}}>—</td>);
-                      const diff=bd.rate-qd.rate;
-                      return(<td key={q} style={{padding:"6px 8px",color:diff>0?C.green:diff<0?C.red:C.muted,fontWeight:Math.abs(diff)>2?"700":"400",textAlign:"center",fontSize:"10px",fontFamily:"monospace"}}>{diff>0?"+":""}{diff.toFixed(2)}</td>);
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              <div style={{display:"flex",gap:"4px"}}>
+                {REG_STR.map(st=>(<Sm key={st} label={st.slice(0,3)} color={st==="STRONG"?C.gold:st==="MODERATE"?C.blue:C.muted} active={r.strength===st} onClick={()=>setRegimes(rr=>({...rr,[ccy]:{...(rr[ccy]||{dir:"NEUTRAL"}),strength:st}}))}/>))}
+              </div>
+            </div>);
+        })}
+        <div style={{display:"flex",gap:"8px",marginTop:"12px",alignItems:"center",flexWrap:"wrap"}}>
+          <Btn label="SAVE REGIMES (LOCAL)" color={C.gold} onClick={onSaveRegimes}/>
+          <Btn label="COPY JSON FOR NETLIFY" ghost color={C.blue} onClick={()=>{try{navigator.clipboard.writeText(regJSON);}catch(_){}}}/>
         </div>
+        <div style={{marginTop:"10px",background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"3px",padding:"9px",fontSize:"8.5px",color:C.muted,wordBreak:"break-all",lineHeight:"1.7"}}>
+          <span style={{color:C.gold,fontWeight:"800"}}>AXIOM_REGIMES = </span>{regJSON}
+        </div>
+        <div style={{fontSize:"8.5px",color:C.amber,marginTop:"7px",lineHeight:"1.7"}}>◈ After pasting into Netlify → Site settings → Environment variables, redeploy (or wait for the next deploy) for the engine to pick it up. The engine hard-fails with a clear 503 if this variable is missing or malformed — by design.</div>
+      </Card>
+
+      <Card style={{marginBottom:"12px"}}>
+        <SecT t="SYSTEM STATUS" sub="Live health of every feed this terminal depends on."/>
+        <Row label="OANDA prices (3s poll)" ok={snap.status==="live"} warn={snap.status==="connecting"} detail={snap.status==="live"?(snap.marketClosed?"LIVE · MARKET CLOSED":"LIVE"):snap.status==="connecting"?"CONNECTING":"DOWN — "+(snap.error||"")}/>
+        <Row label="Daily opens (5pm-NY)" ok={!!snap.dailyOpens} detail={snap.dailyOpens?`LOADED · ${snap.opensDate||""}`:"NOT LOADED"}/>
+        <Row label="FRED CB policy rates" ok={systemStatus.cb==="FRED"} warn={systemStatus.cb==="FRED_PARTIAL"} detail={systemStatus.cb==="FRED"?"LIVE 10/10":systemStatus.cb==="FRED_PARTIAL"?`PARTIAL ${systemStatus.cbLoaded||"?"}/10`:systemStatus.cb==="error"?"DOWN":"NOT LOADED"}/>
+        <Row label="Finnhub news wire" ok={systemStatus.news==="finnhub"} detail={systemStatus.news==="finnhub"?"LIVE":systemStatus.news==="error"?"DOWN":"NOT LOADED"}/>
+        <Row label="Calendar (ForexFactory)" ok={systemStatus.cal==="ok"} detail={systemStatus.cal==="ok"?"LIVE":systemStatus.cal==="error"?"DOWN":"NOT LOADED"}/>
+        <Row label="Signal engine (last scan)" ok={systemStatus.scan==="ok"} warn={systemStatus.scan==="partial"} detail={systemStatus.scan==="ok"?`OK · ${systemStatus.scanInfo||""}`:systemStatus.scan==="partial"?"PARTIAL":systemStatus.scan==="error"?"ERROR":"NOT RUN"}/>
+        <Row label="CFTC COT (via engine)" ok={systemStatus.cot===true} detail={systemStatus.cot===true?`LIVE · as of ${systemStatus.cotAsOf||"?"}`:systemStatus.cot===false?"DOWN — COT strategies inert":"UNKNOWN (run a scan)"}/>
+        <div style={{display:"flex",gap:"8px",marginTop:"12px",alignItems:"center"}}>
+          <Btn label={aiTest.testing?"TESTING…":"TEST AI PROXY"} ghost color={C.blue} disabled={aiTest.testing} onClick={onTestAI}/>
+          {aiTest.result&&<span style={{fontSize:"9px",color:aiTest.ok?C.green:C.red}}>{aiTest.result}</span>}
+        </div>
+      </Card>
+
+      <Card style={{borderColor:C.red+"44"}}>
+        <SecT t="DANGER ZONE"/>
+        <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
+          <Btn label="CLEAR SIGNALS" ghost color={C.amber} onClick={()=>onClear("signals")}/>
+          <Btn label="CLEAR TRADES + HISTORY" ghost color={C.red} onClick={()=>onClear("trades")}/>
+          <Btn label="FACTORY RESET (ALL LOCAL DATA)" color={C.red} onClick={()=>onClear("all")}/>
+        </div>
+      </Card>
+    </div>);
+});
+
+// ═══ DEPLOY TAB — accurate runbook ═══════════════════════════════════════════
+const ENV_VARS=[
+  ["OANDA_API_KEY","REQUIRED","OANDA v20 REST token. Live: fxTrade → Manage API Access."],
+  ["OANDA_ACCOUNT_ID","REQUIRED","OANDA account ID (format 000-000-0000000-000). Used for the bulk pricing endpoint."],
+  ["OANDA_ENV","optional","live (default) or practice — selects api-fxtrade vs api-fxpractice hosts across all functions."],
+  ["ANTHROPIC_API_KEY","REQUIRED for AI","Powers AI Desk, Analyzer, Weekend Desk via the server proxy."],
+  ["ANTHROPIC_MODEL","optional","Server-side model pin override. Default claude-sonnet-4-5. Client requests can never change it."],
+  ["FINNHUB_API_KEY","REQUIRED","News wire + economic-surprise inputs to the engine."],
+  ["FRED_API_KEY","REQUIRED","Live CB policy rates + 10Y yield spreads. Without it, carry/yield strategies are inert and the CB Rates tab errors."],
+  ["AXIOM_REGIMES","REQUIRED","JSON regime map — copy from Settings → Regime editor. Engine 503s without it (no silent defaults)."],
+  ["AXIOM_ACCT / AXIOM_RISK","optional","Server-side default account/risk if the UI omits params. UI values win."],
+  ["AXIOM_ALLOWED_ORIGIN","optional","If set (e.g. https://your-site.netlify.app), functions reject other origins — locks your keys to your deployment."],
+  ["CAL_SOURCE_TZ","optional","Calendar source wall-clock TZ. Default America/New_York (correct for the ForexFactory feed)."],
+];
+const DeployTab=memo(()=>{
+  const Sec=({t,children})=>(<Card style={{marginBottom:"12px"}}><SecT t={t}/>{children}</Card>);
+  return(
+    <div>
+      <Sec t="WHAT IS LIVE IN v7.2">
+        <div style={{fontSize:"9.5px",color:C.text,lineHeight:"2"}}>
+          ✓ Prices/candles: OANDA v20 (env-selectable live/practice) · per-instrument tradeable flags → MARKET CLOSED handling<br/>
+          ✓ Daily change vs the true 5pm-NY open · ✓ CB policy rates: live FRED with derived outlook/bias · ✓ COT: live CFTC (Socrata TFF)<br/>
+          ✓ News: Finnhub live wire (no AI fallback exists) · ✓ Calendar: ForexFactory parsed server-side, rendered in your local time<br/>
+          ✓ Money math: pip-value USD conversion legs, engine + UI identical · ✓ 77 strategies wired incl. real triangular check<br/>
+          ✓ AI (Desk / Analyzer / Weekend): manual, grounded in live terminal data, CB-source whitelist, model pinned server-side<br/>
+          ◈ Notifications: in-app only while the page is open (no push service) · ◈ Trades are paper — nothing is sent to a broker
+        </div>
+      </Sec>
+      <Sec t="NETLIFY ENVIRONMENT VARIABLES">
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <tbody>
+              {ENV_VARS.map(([k,req,d])=>(
+                <tr key={k}>
+                  <td style={{padding:"6px 8px",fontSize:"9.5px",color:C.gold,fontWeight:"800",whiteSpace:"nowrap",borderBottom:`1px solid ${C.bdr}22`,verticalAlign:"top"}}>{k}</td>
+                  <td style={{padding:"6px 8px",fontSize:"8px",color:req.startsWith("REQ")?C.red:C.muted,whiteSpace:"nowrap",borderBottom:`1px solid ${C.bdr}22`,verticalAlign:"top"}}>{req}</td>
+                  <td style={{padding:"6px 8px",fontSize:"9px",color:C.text,lineHeight:"1.6",borderBottom:`1px solid ${C.bdr}22`}}>{d}</td>
+                </tr>))}
+            </tbody>
+          </table>
+        </div>
+        <div style={{fontSize:"8.5px",color:C.amber,marginTop:"8px"}}>◈ Netlify Pro raises the function timeout to 26s (Site configuration → Functions). The engine also self-guards at 20s and returns PARTIAL results rather than timing out.</div>
+      </Sec>
+      <Sec t="DEPLOY PIPELINE (GITHUB → NETLIFY)">
+        <div style={{fontSize:"9.5px",color:C.text,lineHeight:"2"}}>
+          1. Repo layout: <span style={{color:C.gold}}>index.html · SAL_FX_BOT_INPUT.jsx · netlify.toml · netlify/functions/*.js</span> (7 functions)<br/>
+          2. Push to <span style={{color:C.gold}}>SGalvan15/sal-fx-bot</span> main — Netlify auto-builds (no build step; functions deploy from netlify.toml)<br/>
+          3. Set every REQUIRED env var above → trigger a redeploy so functions pick them up<br/>
+          4. Verify: Settings → SYSTEM STATUS all green · run one scan · open Calendar/News/CB Rates tabs
+        </div>
+      </Sec>
+      <Sec t="IPHONE (PWA)">
+        <div style={{fontSize:"9.5px",color:C.text,lineHeight:"2"}}>
+          Safari → open your Netlify URL → Share → <span style={{color:C.gold}}>Add to Home Screen</span>. Full-screen app with the AXIOM icon. Prices pause automatically when the app is backgrounded and resume instantly on focus.
+        </div>
+      </Sec>
+      <Sec t="BROKER ENDPOINTS">
+        <div style={{fontSize:"9.5px",color:C.text,lineHeight:"2"}}>
+          Live: <span style={{color:C.gold}}>api-fxtrade.oanda.com</span> · Practice: <span style={{color:C.gold}}>api-fxpractice.oanda.com</span> — switch with <span style={{color:C.gold}}>OANDA_ENV=practice</span> (the account ID must belong to the matching environment).
+        </div>
+      </Sec>
+    </div>);
+});
+
+// ═══ SOURCES TAB ═════════════════════════════════════════════════════════════
+const SOURCES=[
+  ["OANDA v20","Prices (3s), candles, tradeable flags","Live REST — the only price source; no synthetic or cached substitution"],
+  ["FRED (St. Louis Fed)","CB policy rates (10 ccy) + 10Y yields","Live — outlook/bias DERIVED from series history; per-ccy as-of shown"],
+  ["CFTC — Socrata","Traders in Financial Futures (futures-only) weekly","Live public API — leveraged-funds net % of OI, z-scored vs trailing 26 reports"],
+  ["Finnhub","Forex news wire + economic calendar (surprises)","Live — sentiment intentionally NOT displayed (feed provides none; nothing is fabricated)"],
+  ["ForexFactory (nfs.faireconomy.media)","Weekly economic calendar XML","Parsed server-side to JSON with source-TZ→UTC conversion; rendered in your local time"],
+  ["Anthropic API (server proxy)","AI Desk · Analyzer · Weekend Desk","Model pinned server-side; prompts grounded in live terminal data; CB-source citation whitelist"],
+];
+const SourcesTab=memo(()=>(
+  <div>
+    <Card style={{marginBottom:"12px"}}>
+      <SecT t="DATA SOURCES & ROLES" sub="Every feed is live. When a feed fails you see a red error — never stale numbers wearing a live badge."/>
+      {SOURCES.map(([name,role,note])=>(
+        <div key={name} style={{padding:"9px 0",borderBottom:`1px solid ${C.bdr}22`}}>
+          <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:"6px"}}>
+            <span style={{fontSize:"10.5px",fontWeight:"800",color:C.gold}}>{name}</span>
+            <span style={{fontSize:"9px",color:C.text}}>{role}</span>
+          </div>
+          <div style={{fontSize:"8.5px",color:C.muted,marginTop:"3px",lineHeight:"1.6"}}>{note}</div>
+        </div>))}
+    </Card>
+    <Card>
+      <SecT t="DISCLAIMER"/>
+      <div style={{fontSize:"9px",color:C.muted,lineHeight:"1.9"}}>
+        AXIOM is a personal research terminal. Trades placed here are paper simulations — no orders reach any broker. Strategy "research WR" figures are literature-derived baselines from the cited papers, not this system's live performance; live probabilities are engine confluence outputs, and the Performance tab tracks actual paper results, which is the number that matters. Live prices, rates, positioning, and calendar data come from the sources above and can be delayed, revised, or wrong at the source. Nothing here is investment advice.
       </div>
-    );
-  }
-  function Weekend(){
-    const now=new Date();
-    const todayDate=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
-    const themes=weekendThemes||[];
-    const REGIMECOLOR={BULLISH:C.green,BEARISH:C.red,NEUTRAL:C.gold};
-    const views=[{id:"current",l:"This Week"},{id:"prev",l:"Previous Week"}];
+    </Card>
+  </div>));
 
-    // Previous week themes come from AI too — filtered from weekendThemes by a "week" field if present
-    // wkView toggles which subset to show; both are AI-generated
-    const displayed=themes.length>0?themes:[];
+// ═══ MODALS ══════════════════════════════════════════════════════════════════
+const Overlay=({onClose,children,maxWidth="560px"})=>(
+  <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(3,6,10,0.82)",zIndex:200,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"36px 14px",overflowY:"auto"}}>
+    <div onClick={e=>e.stopPropagation()} style={{background:C.bg1,border:`1px solid ${C.bdr}`,borderRadius:"6px",width:"100%",maxWidth,padding:"16px"}}>{children}</div>
+  </div>);
 
-    return(
-      <div>
-        {/* Status + Refresh */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:weekendLoaded&&themes.length>0?"#071407":C.bg2,border:`1px solid ${weekendLoaded&&themes.length>0?C.green+"44":C.amber+"44"}`,borderRadius:"4px",padding:"6px 10px",marginBottom:"10px",fontSize:"8.5px"}}>
-          <div style={{display:"flex",alignItems:"center",gap:"6px"}}>
-            <div style={{width:"6px",height:"6px",borderRadius:"50%",background:weekendLoaded&&themes.length>0?C.green:C.amber,animation:weekendLoading?"pulse 1s infinite":"none"}}/>
-            <span style={{color:weekendLoaded&&themes.length>0?C.green:C.amber,fontWeight:"700"}}>
-              {weekendLoading?"⟳ Generating current week analysis...":weekendLoaded&&themes.length>0?"✓ AI-GENERATED · Live macro themes with sources":"Press Refresh to generate current week analysis"}
-            </span>
-          </div>
-          <button onClick={()=>{setWeekendThemes(null);setWeekendLoaded(false);setWeekendLoading(false);setTimeout(loadWeekendThemes,50);}} disabled={weekendLoading}
-            style={{padding:"3px 8px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}44`,borderRadius:"3px",cursor:weekendLoading?"not-allowed":"pointer",fontSize:"8px",fontWeight:"700",fontFamily:"inherit",opacity:weekendLoading?0.5:1}}>
-            ↺ Refresh
-          </button>
-        </div>
-
-        {/* Loading */}
-        {weekendLoading&&(
-          <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"30px",textAlign:"center"}}>
-            <div style={{fontSize:"12px",color:C.gold,marginBottom:"8px"}}>⚡ Generating institutional FX themes...</div>
-            <div style={{fontSize:"9px",color:C.muted}}>Analyzing current CB rates, price action, and macro drivers</div>
-          </div>
-        )}
-
-        {/* Empty state */}
-        {!weekendLoading&&!weekendLoaded&&(
-          <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"30px",textAlign:"center"}}>
-            <div style={{fontSize:"12px",color:C.gold,marginBottom:"8px"}}>◈ WEEKLY THEMES</div>
-            <div style={{fontSize:"9px",color:C.muted,marginBottom:"14px"}}>AI generates current-week G10 currency themes using live CB rates and price data. Press Refresh to generate.</div>
-            <button onClick={loadWeekendThemes} style={{padding:"9px 18px",background:C.gold,color:C.bg,border:"none",borderRadius:"4px",cursor:"pointer",fontWeight:"700",fontSize:"11px",fontFamily:"inherit"}}>▶ Generate This Week's Themes</button>
-          </div>
-        )}
-
-        {/* Themes */}
-        {!weekendLoading&&displayed.length>0&&(
-          <div>
-            <div style={{background:`linear-gradient(90deg,${C.bg2},#0a1a2a)`,border:`2px solid ${C.gold}`,borderRadius:"6px",padding:"12px 14px",marginBottom:"12px"}}>
-              <div style={{fontSize:"12px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"3px"}}>◈ G10 WEEKLY MACRO THEMES — {todayDate}</div>
-              <div style={{fontSize:"8.5px",color:C.muted}}>AI-generated from current CB rates and live price data. Sources linked per theme. Tap a theme to expand full analysis.</div>
-            </div>
-            {displayed.map((t,idx)=>{
-              const key=`wk_${t.ccy}`;
-              const isExpanded=expandedTheme===key;
-              const tc=t.color||REGIMECOLOR[t.dir]||C.gold;
-              const dirColor=t.dir==="BULLISH"?C.green:t.dir==="BEARISH"?C.red:C.gold;
-              return(
-                <div key={idx} style={{background:C.bg2,border:`1px solid ${tc}33`,borderLeft:`4px solid ${tc}`,borderRadius:"6px",padding:"12px 14px",marginBottom:"10px"}}>
-                  {/* Header */}
-                  <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"6px",flexWrap:"wrap"}}>
-                    <span style={{fontWeight:"700",color:C.gold,fontSize:"15px"}}>{t.ccy}</span>
-                    <Bdg label={t.dir} color={dirColor}/>
-                    {t.priority&&<Bdg label={t.priority+" PRIORITY"} color={t.priority==="HIGH"?C.red:C.amber} sz="7.5px"/>}
-                    <span style={{fontSize:"10px",fontWeight:"700",color:tc,flex:1}}>{t.title}</span>
-                    <button onClick={e=>{e.stopPropagation();setExpandedTheme(isExpanded?null:key);}}
-                      style={{padding:"5px 10px",background:tc+"22",color:tc,border:`1px solid ${tc}44`,borderRadius:"3px",cursor:"pointer",fontSize:"8.5px",fontWeight:"700",fontFamily:"inherit",flexShrink:0,display:"flex",alignItems:"center",gap:"4px"}}>
-                      {isExpanded?"▲ COLLAPSE":"▼ EXPAND"}
-                    </button>
-                  </div>
-                  {/* Summary */}
-                  <div style={{fontSize:"10px",color:"#b8cde0",lineHeight:"1.6",marginBottom:"6px"}}>{t.detail}</div>
-                  {/* Key levels */}
-                  {(t.support||t.resistance||t.pivot)&&(
-                    <div style={{display:"flex",gap:"10px",marginBottom:"8px",flexWrap:"wrap"}}>
-                      {t.support&&<span style={{fontSize:"8.5px",color:C.green}}>S: {t.support}</span>}
-                      {t.pivot&&<span style={{fontSize:"8.5px",color:C.gold}}>Pivot: {t.pivot}</span>}
-                      {t.resistance&&<span style={{fontSize:"8.5px",color:C.red}}>R: {t.resistance}</span>}
-                    </div>
-                  )}
-                  {/* Pairs */}
-                  {t.pairs?.length>0&&(
-                    <div style={{display:"flex",gap:"5px",flexWrap:"wrap",marginBottom:"8px"}}>
-                      {t.pairs.map((p,pi)=>(
-                        <div key={pi} style={{display:"flex",gap:"3px",alignItems:"center"}}>
-                          <Bdg label={t.dirs?.[pi]||"WATCH"} color={t.dirs?.[pi]==="BUY"?C.green:t.dirs?.[pi]==="SELL"?C.red:C.muted} sz="7.5px"/>
-                          <span style={{fontSize:"9px",fontWeight:"700",color:C.gold}}>{p}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {/* Expanded detail */}
-                  {isExpanded&&(
-                    <div style={{marginTop:"10px",borderTop:`1px solid ${C.bdr}22`,paddingTop:"10px"}}>
-                      {t.deepAnalysis&&(
-                        <div style={{background:C.bg1,border:`1px solid ${tc}22`,borderRadius:"4px",padding:"10px 12px",marginBottom:"10px",fontSize:"10px",color:"#b8cde0",lineHeight:"1.75"}}>{t.deepAnalysis}</div>
-                      )}
-                      {t.watchFor&&(
-                        <div style={{background:"#0a1200",border:`1px solid ${C.green}33`,borderRadius:"4px",padding:"8px 11px",marginBottom:"10px"}}>
-                          <div style={{fontSize:"7.5px",color:C.green,fontWeight:"700",letterSpacing:"1.5px",marginBottom:"4px"}}>⚡ WATCH THIS WEEK</div>
-                          <div style={{fontSize:"9.5px",color:"#b8cde0",lineHeight:"1.6"}}>{t.watchFor}</div>
-                        </div>
-                      )}
-                      {/* Sources */}
-                      {t.evidence?.length>0&&(
-                        <div>
-                          <div style={{fontSize:"7.5px",color:C.muted,fontWeight:"700",letterSpacing:"1px",marginBottom:"6px"}}>INSTITUTIONAL SOURCES</div>
-                          <div style={{display:"flex",flexDirection:"column",gap:"5px"}}>
-                            {t.evidence.map((ev,ei)=>(
-                              <a key={ei} href={ev.url} target="_blank" rel="noopener noreferrer"
-                                style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"4px",textDecoration:"none",WebkitTapHighlightColor:"transparent"}}>
-                                <div>
-                                  <div style={{fontSize:"9.5px",color:C.text,fontWeight:"600",lineHeight:"1.3"}}>{ev.title}</div>
-                                  <div style={{fontSize:"8px",color:C.blue,marginTop:"2px"}}>{ev.source}</div>
-                                </div>
-                                <span style={{fontSize:"14px",color:C.blue,flexShrink:0,marginLeft:"8px"}}>↗</span>
-                              </a>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    );
-  }
-  // ─── AI TAB ───────────────────────────────────────────────────────────
-  function AITab(){
-    const quickQ=["Analyze my open trades","Best USD/JPY setup","Optimal strategy for regime","RBNZ trade plan","Review risk exposure","Top 3 ideas","AUD/JPY with BOJ hike","BOJ impact on crosses"];
-    return(
-      <div style={{display:"flex",flexDirection:"column",gap:"8px",height:"calc(100vh - 185px)"}}>
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"10px 12px",flexShrink:0}}>
-          <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
-            <div style={{width:"38px",height:"38px",background:`linear-gradient(135deg,${C.gold},${C.amber})`,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"16px",fontWeight:"900",color:C.bg,flexShrink:0}}>A</div>
-            <div>
-              <div style={{fontWeight:"700",color:C.gold,fontSize:"13px",letterSpacing:"3px"}}>AXIOM AI</div>
-              <div style={{fontSize:"8px",color:C.green,letterSpacing:"1px"}}>✓ ACTIVE — CLAUDE SONNET · SERVER-SIDE KEY</div>
-            </div>
-            <div style={{marginLeft:"auto",display:"flex",gap:"4px",flexWrap:"wrap",justifyContent:"flex-end",maxWidth:"50%"}}>
-              {quickQ.slice(0,4).map(q=><Sm key={q} label={q} color="#7a4fc0" onClick={()=>sendAI(q)}/>)}
-            </div>
-          </div>
-        </div>
-        <div ref={aiScrollRef} style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",flex:1,overflow:"auto",WebkitOverflowScrolling:"touch",padding:"10px 12px",display:"flex",flexDirection:"column",gap:"9px"}}>
-          {aiMsgs.map((m,i)=>(
-            <div key={i} style={{display:"flex",gap:"8px",alignItems:"flex-start"}}>
-              <div style={{width:"26px",height:"26px",flexShrink:0,borderRadius:"50%",background:m.role==="assistant"?`linear-gradient(135deg,${C.gold},${C.amber})`:C.bg3,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"9.5px",fontWeight:"700",color:m.role==="assistant"?C.bg:C.gold}}>{m.role==="assistant"?"A":"S"}</div>
-              <div style={{flex:1,background:m.role==="assistant"?C.bg1:C.bg,border:`1px solid ${m.role==="assistant"?C.bdr:C.bdr+"33"}`,borderRadius:"5px",padding:"9px 11px",lineHeight:"1.7",fontSize:"11px",color:"#b8cde0",whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{m.content}</div>
-            </div>
-          ))}
-          {aiLoading&&<div style={{display:"flex",gap:"8px",alignItems:"center"}}><div style={{width:"26px",height:"26px",borderRadius:"50%",background:`linear-gradient(135deg,${C.gold},${C.amber})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"9.5px",fontWeight:"700",color:C.bg}}>A</div><div style={{color:C.muted,fontSize:"10.5px"}}>Analyzing...</div></div>}
-        </div>
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"7px 10px",flexShrink:0,display:"flex",gap:"5px",flexWrap:"wrap"}}>
-          {quickQ.slice(4).map(q=><Sm key={q} label={q} color="#7a4fc0" onClick={()=>sendAI(q)}/>)}
-        </div>
-        {/* NOTE: Input field is rendered in root JSX below tabContent — outside useMemo — for stable focus */}
-      </div>
-    );
-  }
-
-  // ─── SETTINGS — Fixed API key input + collapse after save ─────────────
-  // ─── SIGNAL DETAIL MODAL — Fixed scroll glitch ────────────────────────
-  // ─── TRADE VISUALIZATION ─────────────────────────────────────────────
-  function TradeVisualization({sig}){
-    const dc=sig.direction==="BUY"?C.green:C.red;const isBuy=sig.direction==="BUY";
-    const prices=[sig.sl,sig.entry,sig.tp1,sig.tp2,sig.tp3];
-    const minP=Math.min(...prices),maxP=Math.max(...prices),range=maxP-minP||0.00001;
-    const pct=(p)=>((p-minP)/range*100);const isH=sig.pair.includes("JPY");
-    const fmt=(p)=>typeof p==="number"?p.toFixed(isH?3:5):"–";
-    return(
-      <div style={{background:C.bg1,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"12px",marginBottom:"10px"}}>
-        <div style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",letterSpacing:"2px",marginBottom:"10px"}}>◈ TRADE VISUALIZATION — PRICE LEVELS</div>
-        <div style={{display:"flex",gap:"12px",alignItems:"stretch"}}>
-          <div style={{flex:1,position:"relative",height:"200px",background:C.bg,borderRadius:"4px",border:`1px solid ${C.bdr}`,overflow:"hidden"}}>
-            <div style={{position:"absolute",left:0,right:0,bottom:`${isBuy?pct(sig.entry):pct(sig.tp3)}%`,height:`${Math.abs(pct(sig.tp3)-pct(sig.entry))}%`,background:C.green+"15"}}/>
-            <div style={{position:"absolute",left:0,right:0,bottom:`${isBuy?pct(sig.sl):pct(sig.entry)}%`,height:`${Math.abs(pct(sig.entry)-pct(sig.sl))}%`,background:C.red+"15"}}/>
-            {[{p:sig.tp3,c:C.gold},{p:sig.tp2,c:"#00e5a0"},{p:sig.tp1,c:"#00b86a"},{p:sig.entry,c:C.amber},{p:sig.sl,c:C.red}].map((z,i)=>(
-              <div key={i} style={{position:"absolute",left:0,right:0,bottom:`${pct(z.p)}%`,display:"flex",alignItems:"center"}}>
-                <div style={{height:"1px",flex:1,background:z.c,opacity:0.8}}/>
-                <div style={{fontSize:"7.5px",color:z.c,fontWeight:"700",fontFamily:"monospace",paddingRight:"4px"}}>{fmt(z.p)}</div>
-              </div>
-            ))}
-            <div style={{position:"absolute",left:"50%",transform:"translateX(-50%)",bottom:`${pct(sig.entry)+2}%`,fontSize:"16px",color:dc}}>{isBuy?"▲":"▼"}</div>
-          </div>
-          <div style={{width:"130px",display:"flex",flexDirection:"column",gap:"5px",justifyContent:"space-around"}}>
-            {[{l:"TP3",v:fmt(sig.tp3),c:C.gold,sub:`+${sig.tp3Pips}p · 1:${sig.rr3}R`},{l:"TP2",v:fmt(sig.tp2),c:"#00e5a0",sub:`+${sig.tp2Pips}p · 1:${sig.rr2}R`},{l:"TP1",v:fmt(sig.tp1),c:"#00b86a",sub:`+${sig.tp1Pips}p · 1:${sig.rr1}R`},{l:"ENTRY",v:fmt(sig.entry),c:C.amber,sub:`${sig.lotSize} std lots`},{l:"SL",v:fmt(sig.sl),c:C.red,sub:`-${sig.slPips}p · $${sig.riskAmount}`}].map((r,i)=>(
-              <div key={i} style={{background:C.bg,border:`1px solid ${r.c}33`,borderLeft:`2px solid ${r.c}`,borderRadius:"3px",padding:"4px 7px"}}>
-                <div style={{fontSize:"7px",color:r.c,fontWeight:"700"}}>{r.l}</div>
-                <div style={{fontSize:"10px",color:r.c,fontFamily:"monospace",fontWeight:"700"}}>{r.v}</div>
-                <div style={{fontSize:"7.5px",color:C.muted}}>{r.sub}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"5px",marginTop:"10px"}}>
-          {[["RISK","$"+sig.riskAmount,C.red],["BEST R:R","1:"+sig.rr3,C.gold],["PROB",sig.probability+"%",sig.probability>=65?C.green:C.amber],["LOTS",sig.lotSize+" std",C.text]].map(([l,v,c])=>(
-            <div key={l} style={{background:C.bg,border:`1px solid ${C.bdr}`,borderRadius:"3px",padding:"6px",textAlign:"center"}}>
-              <div style={{fontSize:"7px",color:C.muted,marginBottom:"2px"}}>{l}</div>
-              <div style={{fontSize:"13px",fontWeight:"700",color:c}}>{v}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // ─── SIGNAL MODAL — 5 TABS ────────────────────────────────────────────
-  function SignalModal(){
-    const sig=modal;if(!sig)return null;
-    const dc=sig.direction==="BUY"?C.green:C.red;
-    const catBg=CATC[sig.primaryStrategy?.cat]||C.bg2;
-    const MTABS=[{id:"params",l:"Parameters"},{id:"viz",l:"Visualization"},{id:"confluences",l:"Confluences"},{id:"exits",l:"Exit Plan"},{id:"evidence",l:"Evidence"}];
-    return(
-      <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.90)",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(4px)"}}>
-        <div onClick={e=>e.stopPropagation()} style={{background:C.bg2,border:`1px solid ${dc}55`,borderRadius:"8px",maxWidth:"760px",width:"calc(100% - 24px)",maxHeight:"90vh",display:"flex",flexDirection:"column",overflow:"hidden"}}>
-          <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.bdr}`,flexShrink:0,display:"flex",alignItems:"center",gap:"8px",flexWrap:"wrap"}}>
-            <Bdg label={sig.direction} color={dc} sz="11px"/>
-            <span style={{fontWeight:"700",color:C.gold,fontSize:"19px"}}>{sig.pair}</span>
-            <span style={{display:"inline-block",padding:"2px 7px",background:catBg+"55",color:"#dde3ee",border:`1px solid ${catBg}`,borderRadius:"2px",fontSize:"8.5px",fontWeight:"700"}}>{sig.primaryStrategy?.cat}</span>
-            <Bdg label={sig.style?.toUpperCase()||"DAY"} color={SC[sig.style]||C.blue} sz="8.5px"/>
-            {sig.tier&&<Bdg label={sig.tier+"-TIER"} color={sig.tier==="S"?C.gold:sig.tier==="A"?C.green:C.muted} sz="8px"/>}
-            <span style={{fontSize:"9px",color:C.muted}}>{sig.timeframe} · {sig.holdTime}</span>
-            <span style={{marginLeft:"auto",fontWeight:"700",color:sig.probability>=68?C.green:C.gold,fontSize:"14px"}}>{sig.probability}%</span>
-            <button onClick={()=>setModal(null)} style={{background:"transparent",border:`1px solid ${C.bdr}`,borderRadius:"3px",color:C.muted,cursor:"pointer",padding:"4px 8px",fontSize:"10px",fontFamily:"inherit"}}>✕</button>
-          </div>
-          <div style={{display:"flex",borderBottom:`1px solid ${C.bdr}`,flexShrink:0,overflowX:"auto",scrollbarWidth:"none"}}>
-            {MTABS.map(t=>(
-              <button key={t.id} onClick={()=>setModalTab(t.id)} style={{padding:"9px 14px",background:"transparent",color:modalTab===t.id?C.gold:C.muted,border:"none",borderBottom:modalTab===t.id?`2px solid ${C.gold}`:"2px solid transparent",cursor:"pointer",fontSize:"9.5px",fontWeight:"700",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>{t.l}</button>
-            ))}
-          </div>
-          <div style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"14px 16px"}}>
-            {modalTab==="params"&&(
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px"}}>
-                <div style={{background:C.bg1,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"12px"}}>
-                  <div style={{fontSize:"8px",color:C.gold,fontWeight:"700",letterSpacing:"2px",marginBottom:"9px"}}>TRADE PARAMETERS</div>
-                  <Kv k="ENTRY"       v={String(sig.entry)}/>
-                  <Kv k="STOP LOSS"   v={`${sig.sl} (${sig.slPips}p · $${sig.riskAmount})`} vc={C.red}/>
-                  <Kv k="TP1"         v={`${sig.tp1}  +${sig.tp1Pips}p  1:${sig.rr1}R`}      vc={C.green}/>
-                  <Kv k="TP2"         v={`${sig.tp2}  +${sig.tp2Pips}p  1:${sig.rr2}R`}      vc={C.green}/>
-                  <Kv k="TP3"         v={`${sig.tp3}  +${sig.tp3Pips}p  1:${sig.rr3}R`}      vc={C.gold}/>
-                  <Kv k="LOT SIZE"    v={`${sig.lotSize} standard lots`}                       vc={C.gold}/>
-                  <Kv k="RISK"        v={`$${sig.riskAmount} (2% account)`}                   vc={C.amber}/>
-                  <Kv k="TIMEFRAME"   v={sig.timeframe}/>
-                  <Kv k="HOLD TIME"   v={sig.holdTime}                                         vc={C.muted}/>
-                  <Kv k="PROBABILITY" v={`${sig.probability}%`}                                vc={sig.probability>=68?C.green:C.gold}/>
-                </div>
-                <div style={{background:C.bg1,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"12px"}}>
-                  <div style={{fontSize:"8px",color:C.gold,fontWeight:"700",letterSpacing:"2px",marginBottom:"9px"}}>STRATEGY</div>
-                  <div style={{fontWeight:"700",color:C.text,marginBottom:"4px",fontSize:"12.5px"}}>{sig.primaryStrategy?.name}</div>
-                  <div style={{display:"inline-block",padding:"2px 8px",background:catBg+"55",color:"#dde3ee",border:`1px solid ${catBg}`,borderRadius:"2px",fontSize:"8.5px",fontWeight:"700",marginBottom:"8px"}}>{sig.primaryStrategy?.cat}</div>
-                  <div style={{fontSize:"8.5px",color:C.muted,marginBottom:"4px",fontWeight:"700"}}>SUPPORTING</div>
-                  <div style={{fontWeight:"600",color:"#90a8c0",fontSize:"11px",marginBottom:"2px"}}>{sig.supportingStrategy?.name}</div>
-                  <div style={{fontSize:"8.5px",color:C.muted,marginBottom:"10px"}}>{sig.supportingStrategy?.cat} · ~{sig.supportingStrategy?.wr}% WR</div>
-                  <div style={{height:"7px",background:C.bdr,borderRadius:"3px",marginBottom:"3px"}}><div style={{height:"100%",width:`${sig.probability}%`,background:sig.probability>=68?C.green:C.gold,borderRadius:"3px"}}/></div>
-                  <div style={{fontSize:"8px",color:C.muted,marginBottom:"12px"}}>{sig.probability}% probability</div>
-                  <button onClick={()=>window.open(`https://www.tradingview.com/chart/?symbol=FX%3A${TV_SYM[sig.pair]?.replace("FX:","")||"EURUSD"}&interval=60`,"_blank","noopener")} style={{width:"100%",padding:"7px",background:C.blue+"22",color:C.blue,border:`1px solid ${C.blue}44`,borderRadius:"3px",cursor:"pointer",fontSize:"10px",fontFamily:"inherit",fontWeight:"700"}}>📊 Open {sig.pair} on TradingView ↗</button>
-                </div>
-              </div>
-            )}
-            {modalTab==="viz"&&<TradeVisualization sig={sig}/>}
-            {modalTab==="confluences"&&(
-              <div>
-                <div style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",letterSpacing:"2px",marginBottom:"10px"}}>SUPPORTING CONFLUENCES ({sig.confluences?.length} FACTORS)</div>
-                {sig.confluences?.map((c,i)=>(
-                  <div key={i} style={{display:"flex",gap:"8px",padding:"7px 0",borderBottom:`1px solid ${C.bdr}22`,fontSize:"11px",color:"#b0c8e0",lineHeight:"1.5"}}>
-                    <span style={{color:dc,flexShrink:0}}>▸</span><span>{c}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {modalTab==="exits"&&(
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px"}}>
-                <div style={{background:C.bg1,border:`1px solid ${C.green}22`,borderRadius:"5px",padding:"12px"}}>
-                  <div style={{fontSize:"8.5px",color:C.green,fontWeight:"700",letterSpacing:"1.5px",marginBottom:"9px"}}>✓ WIN EXIT SIGNALS</div>
-                  {sig.winExits?.map((e,i)=><div key={i} style={{fontSize:"10.5px",color:"#a0c8b0",padding:"6px 0",borderBottom:`1px solid ${C.bdr}22`,lineHeight:"1.4"}}>▸ {e}</div>)}
-                </div>
-                <div style={{background:C.bg1,border:`1px solid ${C.red}22`,borderRadius:"5px",padding:"12px"}}>
-                  <div style={{fontSize:"8.5px",color:C.red,fontWeight:"700",letterSpacing:"1.5px",marginBottom:"9px"}}>✗ LOSS EXIT SIGNALS</div>
-                  {sig.lossExits?.map((e,i)=><div key={i} style={{fontSize:"10.5px",color:"#c8a0a0",padding:"6px 0",borderBottom:`1px solid ${C.bdr}22`,lineHeight:"1.4"}}>▸ {e}</div>)}
-                </div>
-              </div>
-            )}
-            {modalTab==="evidence"&&(
-              <div>
-                <div style={{background:C.bg1,border:`1px solid ${C.gold}33`,borderRadius:"5px",padding:"12px",marginBottom:"12px"}}>
-                  <div style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",letterSpacing:"2px",marginBottom:"8px"}}>PRIMARY: {sig.primaryStrategy?.name}</div>
-                  <div style={{fontSize:"10px",color:"#b8cde0",lineHeight:"1.7",marginBottom:"8px"}}><strong style={{color:C.text}}>Category:</strong> {sig.primaryStrategy?.cat} · <strong style={{color:C.text}}>Historical WR:</strong> ~{sig.primaryStrategy?.wr}%</div>
-                  <div style={{fontSize:"8.5px",color:C.muted,marginBottom:"6px",fontWeight:"700"}}>ACADEMIC EVIDENCE</div>
-                  <div style={{fontSize:"10px",color:"#b8cde0",marginBottom:"8px"}}>{sig.primaryStrategy?.desc||"Institutional FX strategy research"}</div>
-                  <a href={sig.primaryStrategy?.url||"https://www.bis.org/research/"} target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",gap:"6px",padding:"7px 12px",background:C.blue+"22",color:C.blue,border:`1px solid ${C.blue}44`,borderRadius:"3px",textDecoration:"none",fontSize:"10px",fontWeight:"700"}}>📄 Read Primary Source ↗</a>
-                </div>
-                <div style={{background:C.bg1,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"12px",marginBottom:"12px"}}>
-                  <div style={{fontSize:"8.5px",color:C.gold,fontWeight:"700",letterSpacing:"2px",marginBottom:"8px"}}>PROBABILITY BASIS ({sig.probability}%)</div>
-                  {[["Base Win Rate",`~${sig.primaryStrategy?.wr}%`,"Historical WR from institutional research"],["Tier Bonus",sig.tier==="S"?"+5%":sig.tier==="A"?"+2%":"+0%","Quality tier premium added to base WR"],["Multi-Confluence",`${sig.confluences?.length} factors`,"Each factor adds ~2% edge to base WR"],["R:R Adjusted",`Best 1:${sig.rr3}`,"High R:R reduces required win rate for profit"]].map(([l,v,d],i)=>(
-                    <div key={i} style={{padding:"6px 0",borderBottom:`1px solid ${C.bdr}22`}}>
-                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:"2px"}}><span style={{fontSize:"9.5px",color:C.muted}}>{l}</span><span style={{fontSize:"9.5px",color:C.gold,fontWeight:"700"}}>{v}</span></div>
-                      <div style={{fontSize:"8px",color:C.dim}}>{d}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-          <div style={{padding:"12px 16px",borderTop:`1px solid ${C.bdr}`,flexShrink:0,display:"flex",gap:"9px"}}>
-            <Btn label={`TAKE — ${sig.direction} ${sig.pair} @ ${sig.entry} · ${sig.lotSize} lots`} color={dc} onClick={()=>takeTrade(sig)} style={{flex:2,padding:"10px",fontSize:"11px"}}/>
-            <Btn label="DISMISS" color={C.muted} ghost onClick={()=>{dismissSig(sig.id);setModal(null);}} style={{flex:1}}/>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const Settings=React.memo(function Settings(){
-    const local=localSettings;
-    const setLocal=setLocalSettings;
-    const [notifStatus,setNotifStatus]=useState(()=>{try{return typeof Notification!=="undefined"?Notification.permission:"default";}catch{return"default";}});
-    const [regimeSaving,setRegimeSaving]=useState(false);
-    const [regimeSaved,setRegimeSaved]=useState(false);
-    // Regime edit state — load from localStorage or defaults
-    const defaultRegimes={USD:"BEARISH",EUR:"BULLISH",GBP:"NEUTRAL",JPY:"BULLISH",AUD:"BULLISH",NZD:"BEARISH",CAD:"BEARISH",CHF:"BULLISH",NOK:"NEUTRAL",SEK:"NEUTRAL"};
-    const [regimeEdit,setRegimeEdit]=useState(()=>{try{const s=localStorage.getItem("axiom_regimes");return s?JSON.parse(s):defaultRegimes;}catch{return defaultRegimes;}});
-    const regimeDirs=["BULLISH","NEUTRAL","BEARISH"];
-
-    const handleSave=()=>{
-      setSettings({...local,saved:true});
-      setSettingsSaved(true);
-      toast_("✓ Settings saved.",C.gold);
-    };
-
-    const handleSaveRegime=()=>{
-      setRegimeSaving(true);
-      try{
-        localStorage.setItem("axiom_regimes",JSON.stringify(regimeEdit));
-        // Also attempt to update via a simple fetch to a regime-update function
-        // The regime is stored in localStorage and read by the UI for display purposes
-        // The analyze.js reads AXIOM_REGIMES env var — update that via Netlify API or paste it manually
-        setRegimeSaved(true);
-        toast_("✓ Regime saved locally. Update AXIOM_REGIMES env var in Netlify to push to signal engine.",C.green);
-        setTimeout(()=>setRegimeSaved(false),4000);
-      }catch(e){toast_("Regime save error: "+e.message,C.red);}
-      setRegimeSaving(false);
-    };
-
-    const handleNotif=async()=>{
-      if(typeof Notification==="undefined"||!("Notification" in window)){toast_("Notifications not supported in this environment.",C.red);setNotifStatus("denied");return;}
-      try{
-        const perm=await Notification.requestPermission();
-        setNotifStatus(perm);
-        setLocal(p=>({...p,notif:perm==="granted"}));
-        toast_(perm==="granted"?"✓ Notifications enabled — you'll receive signal alerts!":"Notifications denied. Enable in iPhone Settings → Safari → Notifications.",perm==="granted"?C.green:C.red);
-      }catch(e){toast_("Notification error: "+e.message,C.red);}
-    };
-
-    // If saved and not in edit mode, show mini summary
-    if(settingsSaved){
-      return(
+const SignalModal=({sig,onTake,onClose,regimes,cbRates})=>{
+  const [tab,setTab]=useState("OVERVIEW");
+  if(!sig) return null;
+  const dc=sig.direction==="BUY"?C.green:C.red;
+  const lib=sig.lib;
+  const [b,q]=sig.pair.split("/");
+  const rb=regimes[b]||{dir:"NEUTRAL",strength:"WEAK"}, rq=regimes[q]||{dir:"NEUTRAL",strength:"WEAK"};
+  const cbB=cbRates&&cbRates[b], cbQ=cbRates&&cbRates[q];
+  const carry=(cbB&&cbQ)?cbB.rate-cbQ.rate:null;
+  const dirColor=d=>d==="BULLISH"?C.green:d==="BEARISH"?C.red:C.amber;
+  return(
+    <Overlay onClose={onClose}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
         <div>
-          <div style={{background:C.bg2,border:`1px solid ${C.green}44`,borderRadius:"6px",padding:"14px 16px",marginBottom:"12px",display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}}>
-            <div>
-              <div style={{fontSize:"10px",color:C.green,fontWeight:"700",letterSpacing:"1.5px",marginBottom:"4px"}}>✓ SETTINGS SAVED</div>
-              <div style={{fontSize:"11px",color:C.text}}>Account: <strong style={{color:C.gold}}>${local.acct.toLocaleString()}</strong> &nbsp;·&nbsp; Risk: <strong style={{color:C.amber}}>{local.risk}%</strong> &nbsp;·&nbsp; API Key: <strong style={{color:local.apiKey?C.green:C.red}}>{local.apiKey?"Set ✓":"Not set"}</strong> &nbsp;·&nbsp; Style: <strong style={{color:SC[style]}}>{style.toUpperCase()}</strong></div>
-            </div>
-            <button onClick={()=>setSettingsSaved(false)} style={{marginLeft:"auto",padding:"8px 14px",background:C.gold,color:C.bg,border:"none",borderRadius:"4px",cursor:"pointer",fontWeight:"700",fontSize:"10px",fontFamily:"inherit"}}>✏️ EDIT SETTINGS</button>
+          <span style={{fontSize:"17px",fontWeight:"900",color:C.text}}>{sig.pair}</span>
+          <span style={{fontSize:"13px",fontWeight:"800",color:dc,marginLeft:"9px"}}>{sig.direction}</span>
+          <div style={{marginTop:"5px",display:"flex",gap:"5px",alignItems:"center",flexWrap:"wrap"}}>
+            <Bdg label={(sig.tradeStyle||"day").toUpperCase()} color={SC[sig.tradeStyle]||C.blue}/>
+            <Bdg label={sig.timeframe} color={C.blue}/>
+            {sig.isPureTASignal&&<Bdg label="PURE TA · CAPPED 62%" color="#8f8fd0"/>}
+            <SigAge ts={sig.ts}/>
           </div>
         </div>
-      );
-    }
-
-    return(
-      <div>
-        {/* Account */}
-        <div style={{background:`linear-gradient(135deg,#0a1e10,#051410)`,border:`2px solid ${C.gold}`,borderRadius:"8px",padding:"16px",marginBottom:"14px"}}>
-          <div style={{fontSize:"11px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"4px"}}>💰 ACCOUNT SIZE (THEORETICAL)</div>
-          <div style={{fontSize:"9.5px",color:C.muted,marginBottom:"10px",lineHeight:"1.5"}}>Paper trading simulation. Update this to match your real balance. All lot sizes and risk amounts auto-update.</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"10px",marginBottom:"12px"}}>
-            <div>
-              <div style={{fontSize:"8.5px",color:C.muted,letterSpacing:"1px",marginBottom:"4px"}}>ACCOUNT SIZE ($)</div>
-              <input type="number" value={local.acct} onChange={e=>setLocal(p=>({...p,acct:parseFloat(e.target.value)||0}))}
-                style={{width:"100%",background:C.bg,border:`2px solid ${C.gold}`,borderRadius:"4px",color:C.gold,padding:"10px 11px",fontSize:"16px",fontFamily:"monospace",outline:"none",fontWeight:"700"}}/>
-            </div>
-            <div>
-              <div style={{fontSize:"8.5px",color:C.muted,letterSpacing:"1px",marginBottom:"4px"}}>RISK / TRADE (%)</div>
-              <input type="number" value={local.risk} onChange={e=>setLocal(p=>({...p,risk:parseFloat(e.target.value)||2}))}
-                style={{width:"100%",background:C.bg,border:`1px solid ${C.bdr}`,borderRadius:"4px",color:C.text,padding:"10px 11px",fontSize:"14px",fontFamily:"monospace",outline:"none"}}/>
-            </div>
-            <div>
-              <div style={{fontSize:"8.5px",color:C.muted,letterSpacing:"1px",marginBottom:"4px"}}>MAX RISK (AUTO)</div>
-              <div style={{background:"#0a1e10",border:`1px solid ${C.green}44`,borderRadius:"4px",color:C.green,padding:"11px 11px",fontSize:"14px",fontFamily:"monospace",fontWeight:"700"}}>${(local.acct*(local.risk||2)/100).toFixed(2)}</div>
-            </div>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px",marginBottom:"12px"}}>
-            <div>
-              <div style={{fontSize:"8.5px",color:C.muted,letterSpacing:"1px",marginBottom:"4px"}}>LEVERAGE</div>
-              <input type="number" value={local.lev} onChange={e=>setLocal(p=>({...p,lev:parseFloat(e.target.value)||50}))}
-                style={{width:"100%",background:C.bg,border:`1px solid ${C.bdr}`,borderRadius:"4px",color:C.text,padding:"9px 11px",fontSize:"13px",fontFamily:"monospace",outline:"none"}}/>
-            </div>
-            <div>
-              <div style={{fontSize:"8.5px",color:C.muted,letterSpacing:"1px",marginBottom:"4px"}}>BROKER</div>
-              <input type="text" value={local.broker} onChange={e=>setLocal(p=>({...p,broker:e.target.value}))}
-                style={{width:"100%",background:C.bg,border:`1px solid ${C.bdr}`,borderRadius:"4px",color:C.text,padding:"9px 11px",fontSize:"13px",fontFamily:"inherit",outline:"none"}}/>
-            </div>
-          </div>
-          <button onClick={handleSave} style={{width:"100%",padding:"12px",background:C.gold,color:C.bg,border:"none",borderRadius:"4px",cursor:"pointer",fontWeight:"700",fontSize:"13px",fontFamily:"inherit",letterSpacing:"1px"}}>💾 SAVE SETTINGS</button>
-        </div>
-
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px"}}>
-          <div>
-            {/* AXIOM AI Config — FIXED INPUT */}
-            <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"13px",marginBottom:"11px"}}>
-              <div style={{fontSize:"10px",color:C.gold,letterSpacing:"2px",marginBottom:"8px",fontWeight:"700"}}>✦ AXIOM AI CONFIG</div>
-              <div style={{fontSize:"9px",color:C.muted,marginBottom:"9px",lineHeight:"1.7"}}>
-                1. Go to <span style={{color:C.gold}}>console.anthropic.com</span><br/>
-                2. Sign up free → API Keys → Create Key<br/>
-                3. Copy key starting with sk-ant-api03-...<br/>
-                4. Long-press the field below → Paste → Save
-              </div>
-              <div style={{fontSize:"8.5px",color:C.muted,letterSpacing:"1px",marginBottom:"5px"}}>ANTHROPIC API KEY</div>
-              {/* Uncontrolled input — prevents keyboard dismiss on root re-render */}
-              <input
-                type="text"
-                inputMode="text"
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                id="axiom-api-key-input"
-                defaultValue={local.apiKey||""}
-                onBlur={e=>setLocal(p=>({...p,apiKey:e.target.value}))}
-                placeholder="sk-ant-api03-..."
-                style={{width:"100%",background:"#030608",border:`1px solid ${local.apiKey?C.green:C.bdr}`,borderRadius:"3px",color:local.apiKey?C.green:C.text,padding:"10px 11px",fontSize:"11px",fontFamily:"monospace",outline:"none",marginBottom:"5px",WebkitAppearance:"none",touchAction:"manipulation"}}
-              />
-              <div style={{fontSize:"8.5px",color:local.apiKey?C.green:C.muted,fontWeight:"700"}}>{local.apiKey?"✓ API key set — tap to update, blur/tap-away to save":"API key pre-wired server-side — tap field to override, blur to save"}</div>
-              <div style={{fontSize:"8px",color:C.muted,marginTop:"5px",lineHeight:"1.5"}}>iPhone: tap field → long-press → Paste. Key saves automatically when you tap away.</div>
-              {/* OANDA API Key for live prices */}
-              <div style={{marginTop:"12px"}}>
-                <div style={{fontSize:"8.5px",color:C.muted,letterSpacing:"1px",marginBottom:"5px",fontWeight:"700"}}>OANDA API KEY — LIVE REAL-TIME PRICES</div>
-                <input type="text" inputMode="text" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false}
-                  value={local.oandaKey||""}
-                  onChange={e=>setLocal(p=>({...p,oandaKey:e.target.value}))}
-                  placeholder="b41a0f67df1e1284a11d9487cedc06b2-..."
-                  style={{width:"100%",background:"#030608",border:`1px solid ${local.oandaKey?C.green:C.bdr}`,borderRadius:"3px",color:local.oandaKey?C.green:C.text,padding:"10px 11px",fontSize:"10px",fontFamily:"monospace",outline:"none",marginBottom:"5px",WebkitAppearance:"none"}}/>
-                <div style={{fontSize:"8px",color:local.oandaKey?C.green:C.muted,lineHeight:"1.5"}}>{local.oandaKey?"✓ OANDA key set — live prices activate when deployed to Netlify":"OANDA demo key pre-wired in app. Live prices (OANDA LIVE) activate on Netlify deploy. Shows SIM in Claude sandbox (API blocked by browser security)."}</div>
-              </div>
-            </div>
-
-            {/* Notifications — FIXED */}
-            <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"13px"}}>
-              <div style={{fontSize:"10px",color:C.gold,letterSpacing:"2px",marginBottom:"8px",fontWeight:"700"}}>🔔 SIGNAL NOTIFICATIONS</div>
-              <div style={{fontSize:"9px",color:C.muted,marginBottom:"8px",lineHeight:"1.6"}}>
-                Current status: <strong style={{color:notifStatus==="granted"?C.green:notifStatus==="denied"?C.red:C.amber}}>{notifStatus.toUpperCase()}</strong><br/>
-                {notifStatus==="denied"&&<span style={{color:C.red}}>Denied — enable in iPhone Settings → Safari → Notifications</span>}
-              </div>
-              <button
-                onClick={handleNotif}
-                style={{width:"100%",padding:"10px",background:notifStatus==="granted"?C.green+"22":"transparent",color:notifStatus==="granted"?C.green:C.text,border:`1px solid ${notifStatus==="granted"?C.green:C.bdr}`,borderRadius:"3px",cursor:"pointer",fontWeight:"700",fontSize:"11px",fontFamily:"inherit",touchAction:"manipulation"}}>
-                {notifStatus==="granted"?"✓ NOTIFICATIONS ACTIVE — TAP TO REFRESH":notifStatus==="denied"?"OPEN PHONE SETTINGS TO ENABLE":"TAP TO REQUEST NOTIFICATIONS"}
-              </button>
-            </div>
-
-            {/* Macro Regime Update */}
-            <div style={{background:C.bg2,border:`1px solid ${C.gold}44`,borderRadius:"6px",padding:"13px",marginTop:"11px"}}>
-              <div style={{fontSize:"10px",color:C.gold,letterSpacing:"2px",marginBottom:"4px",fontWeight:"700"}}>◎ MACRO REGIME UPDATE</div>
-              <div style={{fontSize:"8.5px",color:C.muted,marginBottom:"10px",lineHeight:"1.6"}}>Update after CB meetings or macro shifts. Saves locally + provides JSON to paste into Netlify <code style={{color:C.amber}}>AXIOM_REGIMES</code> env var for live engine update.</div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px",marginBottom:"10px"}}>
-                {Object.entries(regimeEdit).map(([ccy,dir])=>(
-                  <div key={ccy} style={{background:C.bg1,border:`1px solid ${dir==="BULLISH"?C.green+"44":dir==="BEARISH"?C.red+"44":C.bdr}`,borderRadius:"4px",padding:"7px 9px"}}>
-                    <div style={{fontSize:"9px",color:C.gold,fontWeight:"700",marginBottom:"5px"}}>{ccy}</div>
-                    <div style={{display:"flex",gap:"4px"}}>
-                      {["BULLISH","NEUTRAL","BEARISH"].map(d=>(
-                        <button key={d} onClick={()=>setRegimeEdit(p=>({...p,[ccy]:d}))}
-                          style={{flex:1,padding:"3px 0",background:dir===d?(d==="BULLISH"?C.green:d==="BEARISH"?C.red:C.gold)+"33":"transparent",color:dir===d?(d==="BULLISH"?C.green:d==="BEARISH"?C.red:C.gold):C.dim,border:`1px solid ${dir===d?(d==="BULLISH"?C.green:d==="BEARISH"?C.red:C.gold):C.bdr}`,borderRadius:"2px",cursor:"pointer",fontSize:"7px",fontWeight:"700",fontFamily:"inherit"}}>
-                          {d.slice(0,4)}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <button onClick={handleSaveRegime} disabled={regimeSaving}
-                style={{width:"100%",padding:"9px",background:regimeSaved?C.green+"22":C.gold+"22",color:regimeSaved?C.green:C.gold,border:`1px solid ${regimeSaved?C.green:C.gold}44`,borderRadius:"3px",cursor:"pointer",fontWeight:"700",fontSize:"10.5px",fontFamily:"inherit",marginBottom:"8px"}}>
-                {regimeSaved?"✓ REGIME SAVED":"↑ SAVE REGIME"}
-              </button>
-              <div style={{background:C.bg,border:`1px solid ${C.bdr}`,borderRadius:"3px",padding:"8px",fontSize:"8px",color:C.muted,fontFamily:"monospace",wordBreak:"break-all",lineHeight:"1.6"}}>
-                <div style={{color:C.amber,marginBottom:"3px",fontSize:"7.5px"}}>Paste into Netlify → Site → Env Vars → AXIOM_REGIMES:</div>
-                {JSON.stringify(Object.fromEntries(Object.entries(regimeEdit).map(([c,d])=>[c,{dir:d,strength:d==="NEUTRAL"?"WEAK":d==="BULLISH"?"MOD":"MOD"}])))}
-              </div>
-            </div>
-          </div>
-
-          <div>
-            {/* Style */}
-            <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"13px",marginBottom:"11px"}}>
-              <div style={{fontSize:"10px",color:C.gold,letterSpacing:"2px",marginBottom:"8px",fontWeight:"700"}}>📊 TRADING STYLE</div>
-              <div style={{display:"flex",gap:"6px",marginBottom:"8px"}}>
-                {["scalp","day","swing"].map(s=>(
-                  <button key={s} onClick={()=>{setStyle(s);setLocal(p=>({...p,tradeStyle:s}));}} style={{flex:1,padding:"9px",background:style===s?SC[s]:"transparent",color:style===s?C.bg:C.muted,border:`1px solid ${style===s?SC[s]:C.bdr}`,borderRadius:"3px",cursor:"pointer",fontWeight:"700",fontSize:"11px",fontFamily:"inherit",touchAction:"manipulation"}}>{s.toUpperCase()}</button>
-                ))}
-              </div>
-              <div style={{fontSize:"8.5px",color:C.muted,lineHeight:"1.7"}}>Signals fire every 15–90s automatically. No limit on monitored pairs. Signals persist until dismissed.</div>
-            </div>
-
-            {/* Pairs — ALL selected, no limit */}
-            <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"6px",padding:"13px",marginBottom:"11px"}}>
-              <div style={{fontSize:"10px",color:C.gold,letterSpacing:"2px",marginBottom:"8px",fontWeight:"700"}}>🌐 SIGNAL PAIRS (NO LIMIT)</div>
-              <div style={{display:"flex",flexWrap:"wrap",gap:"4px",marginBottom:"8px"}}>
-                {ALL_PAIRS.map(p=><Sm key={p} label={p} active={local.pairs?.includes(p)} onClick={()=>setLocal(prev=>({...prev,pairs:prev.pairs?.includes(p)?prev.pairs.filter(x=>x!==p):[...(prev.pairs||[]),p]}))}/>)}
-              </div>
-              <div style={{display:"flex",gap:"6px"}}>
-                <button onClick={()=>setLocal(p=>({...p,pairs:ALL_PAIRS}))} style={{flex:1,padding:"7px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}44`,borderRadius:"3px",cursor:"pointer",fontWeight:"700",fontSize:"9.5px",fontFamily:"inherit"}}>SELECT ALL</button>
-                <button onClick={()=>setLocal(p=>({...p,pairs:[]}))} style={{flex:1,padding:"7px",background:C.red+"22",color:C.red,border:`1px solid ${C.red}44`,borderRadius:"3px",cursor:"pointer",fontWeight:"700",fontSize:"9.5px",fontFamily:"inherit"}}>CLEAR ALL</button>
-              </div>
-            </div>
-
-            {/* Deploy */}
-            <div style={{background:C.bg2,border:`1px solid ${C.gold}33`,borderRadius:"6px",padding:"13px"}}>
-              <div style={{fontSize:"10px",color:C.gold,letterSpacing:"2px",marginBottom:"9px",fontWeight:"700"}}>📱 DEPLOY AS APP</div>
-              <div style={{fontSize:"9px",color:C.muted,lineHeight:"1.85"}}>
-                <strong style={{color:C.green}}>iPhone (Safari only):</strong><br/>
-                Open this chat in Safari → Share (□↑) → "Add to Home Screen" → Full-screen app<br/><br/>
-                <strong style={{color:C.blue}}>Standalone HTML file:</strong><br/>
-                Download AXIOM_FX_v5.html → Open in any browser → Install as PWA<br/><br/>
-                <strong style={{color:C.amber}}>Free online URL (recommended):</strong><br/>
-                1. Go to <span style={{color:C.gold}}>netlify.com/drop</span><br/>
-                2. Drag the .html file → Get permanent HTTPS URL<br/>
-                3. Bookmark on all devices = cross-device continuity<br/><br/>
-                <strong style={{color:C.text}}>Cross-device sync:</strong> Use same URL on all devices. API key must be re-entered per browser (stored locally for security).
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <button onClick={handleSave} style={{width:"100%",padding:"13px",background:C.gold,color:C.bg,border:"none",borderRadius:"4px",cursor:"pointer",fontWeight:"700",fontSize:"13px",fontFamily:"inherit",letterSpacing:"1px",marginTop:"12px"}}>💾 SAVE ALL SETTINGS</button>
-      </div>
-    );
-  });
-
-  // ─── STRATEGIES TAB ───────────────────────────────────────────────────
-  function StrategiesTab(){
-    const catFilter=stratCatFilter,setCatFilter=setStratCatFilter;
-    const tierFilter=stratTierFilter,setTierFilter=setStratTierFilter;
-    const cats=["ALL",...new Set(STRATEGIES.map(s=>s.cat))];
-    const tiers=["ALL","S","A","B","C"];
-    const tierC={S:C.gold,A:C.green,B:C.blue,C:C.muted};
-    const filtered=STRATEGIES.filter(s=>(catFilter==="ALL"||s.cat===catFilter)&&(tierFilter==="ALL"||s.tier===tierFilter));
-    const toggleS=(id)=>setEnabledStrats(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
-    const sCount=STRATEGIES.filter(s=>enabledStrats.includes(s.id)).length;
-    return(
-      <div>
-        <div style={{background:`linear-gradient(90deg,${C.bg2},#0a1a2a)`,border:`2px solid ${C.gold}`,borderRadius:"7px",padding:"14px 16px",marginBottom:"12px"}}>
-          <div style={{fontSize:"12px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"6px"}}>◎ AXIOM STRATEGY LIBRARY — {STRATEGIES.length} STRATEGIES</div>
-          <div style={{fontSize:"9px",color:C.muted,lineHeight:"1.65",marginBottom:"10px"}}>Tap any card to toggle for signal generation. <strong style={{color:C.gold}}>S-Tier</strong> (elite ≥62% WR) and <strong style={{color:C.green}}>A-Tier</strong> (59-62%) are default — fewer but higher-probability signals. <strong style={{color:C.muted}}>C-Tier</strong> = pure-TA strategies: fire without macro regime, capped at 62% probability.</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:"6px",marginBottom:"10px"}}>
-            {[[STRATEGIES.filter(s=>s.tier==="S").length,"S-TIER","Elite ≥62%",C.gold],[STRATEGIES.filter(s=>s.tier==="A").length,"A-TIER","High 59-62%",C.green],[STRATEGIES.filter(s=>s.tier==="B").length,"B-TIER","Solid 54-58%",C.blue],[STRATEGIES.filter(s=>s.tier==="C").length,"C-TIER","Pure TA ≤62%",C.muted],[sCount,"ENABLED","Active",C.amber]].map(([n,l,sub,c])=>(
-              <div key={l} style={{background:C.bg1,border:`1px solid ${c}33`,borderRadius:"4px",padding:"7px",textAlign:"center"}}>
-                <div style={{fontSize:"16px",fontWeight:"700",color:c}}>{n}</div>
-                <div style={{fontSize:"7.5px",color:c,fontWeight:"700"}}>{l}</div>
-                <div style={{fontSize:"7px",color:C.muted}}>{sub}</div>
-              </div>
-            ))}
-          </div>
-          <div style={{display:"flex",gap:"5px",flexWrap:"wrap"}}>
-            <button onClick={()=>setEnabledStrats(STRATEGIES.filter(s=>s.tier==="S").map(s=>s.id))} style={{padding:"5px 9px",background:C.gold+"22",color:C.gold,border:`1px solid ${C.gold}44`,borderRadius:"3px",cursor:"pointer",fontSize:"8.5px",fontWeight:"700",fontFamily:"inherit"}}>S ONLY</button>
-            <button onClick={()=>setEnabledStrats(DEFAULT_ENABLED)} style={{padding:"5px 9px",background:C.green+"22",color:C.green,border:`1px solid ${C.green}44`,borderRadius:"3px",cursor:"pointer",fontSize:"8.5px",fontWeight:"700",fontFamily:"inherit"}}>S+A ✓ RECOMMENDED</button>
-            <button onClick={()=>setEnabledStrats(STRATEGIES.filter(s=>s.tier==="C").map(s=>s.id))} style={{padding:"5px 9px",background:C.muted+"22",color:C.muted,border:`1px solid ${C.muted}44`,borderRadius:"3px",cursor:"pointer",fontSize:"8.5px",fontWeight:"700",fontFamily:"inherit"}}>PURE TA ONLY</button>
-            <button onClick={()=>setEnabledStrats(STRATEGIES.map(s=>s.id))} style={{padding:"5px 9px",background:C.blue+"22",color:C.blue,border:`1px solid ${C.blue}44`,borderRadius:"3px",cursor:"pointer",fontSize:"8.5px",fontWeight:"700",fontFamily:"inherit"}}>ALL {STRATEGIES.length}</button>
-          </div>
-        </div>
-        <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"9px 11px",marginBottom:"9px"}}>
-          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center",marginBottom:"6px"}}>
-            <span style={{fontSize:"8px",color:C.muted,fontWeight:"700",minWidth:"30px"}}>TIER:</span>
-            {tiers.map(t=><Sm key={t} label={t==="ALL"?"ALL":t+"-TIER"} active={tierFilter===t} onClick={()=>setTierFilter(t)} color={tierC[t]||C.gold}/>)}
-          </div>
-          <div style={{display:"flex",gap:"5px",flexWrap:"wrap",alignItems:"center"}}>
-            <span style={{fontSize:"8px",color:C.muted,fontWeight:"700",minWidth:"30px"}}>CAT:</span>
-            {cats.map(c=><Sm key={c} label={c} active={catFilter===c} onClick={()=>setCatFilter(c)}/>)}
-          </div>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}}>
-          {/* Strategy Detail Modal */}
-          {expandedStrat&&(()=>{
-            const s=STRATEGIES.find(x=>x.id===expandedStrat);if(!s)return null;
-            const tc={S:C.gold,A:C.green,B:C.blue,C:C.muted}[s.tier]||C.muted;
-            const DETAIL={
-              howItWorks:{
-                BOJ_NORM:"Tracks Bank of Japan's hiking cycle divergence against all other G10 central banks on hold or cutting. Entry signals come from USD/JPY approaching key resistance levels (158+, 160+) with technical confirmation (bearish engulfing, RSI overbought on H4). The structural thesis: BOJ is raising rates while Fed/ECB/BOE are cutting — this rate differential compression drives systematic JPY appreciation. Position on the short side every time USD/JPY rallies to key levels.",
-                NEWS_DFT:"After high-impact data releases (CPI, NFP, CB decisions), prices initially spike in the direction of the surprise then pull back before continuing in the same direction 64% of the time. The 'drift' occurs because institutional algorithmic execution continues for 2-4 hours post-release as large orders fill. Enter 10-15 minutes after release on the pullback, in the direction of the initial spike. Avoid if the release is within 1 pip of consensus.",
-                TRI_ARB:"Identifies when three currency pairs create a mathematical inconsistency — e.g., EUR/USD × USD/JPY ≠ EUR/JPY. When the cross-rate is mispriced vs the implied rate, enter the triangle simultaneously: buy the undervalued pair, sell the overvalued pair, hedge with the third. The edge is typically 2-5 pips and lasts seconds to minutes. Requires fast execution and real-time pricing.",
-                RATE_SRP:"Central bank rate decisions that surprise vs market consensus trigger an extension of the initial move for 2-6 hours. The mechanism: repricing of rate expectations cascades through all assets denominated in that currency. Enter 5-15 minutes after the decision in the direction of the surprise. BOC cutting to 2.75%, RBNZ at 3.50% cutting cycle, ECB hawkish hold — these are the live regime drivers.",
-                CB_DIV:"Systematic long of the currency whose central bank is hiking/hawkish vs the currency whose central bank is cutting/dovish. In April 2026: BOJ hiking = long JPY; RBNZ cutting = short NZD. The strongest signals come when the divergence is at an extreme (both direction and speed of divergence). Confirmed by actual policy rate changes, not just rhetoric.",
-                WMR_FIX:"The WM/Reuters Fix at 4PM London is the most important daily FX benchmark. Large funds must transact at this rate for index rebalancing. Institutional order flow in the 5-minute window before Fix is directional and predictable based on month-end flows, index changes, and known corporate hedging. Enter 15-30 minutes before 4PM London in the direction of anticipated fix flow.",
-                STRUCT_BK:"When price breaks through a major structural level (multi-month resistance/support) on high volume with follow-through, a continuation trade in the direction of the break has a 63% win rate. EUR/USD breaking 1.16 (which held for 18 months) is a current live example. Entry: on the retest of the broken level. Stop: back through the breakout level. Target: measured move (height of consolidation range projected forward).",
-                GRW_DIV:"Systematic long of the currency whose economy is growing faster relative to consensus expectations, vs the currency of the slower-growing economy. Uses PMI beats/misses, GDP surprise indices, and IFO/ZEW sentiment data. Currently: Eurozone growth being revised up (German fiscal stimulus) while US growth is being revised down — supports EUR/USD longs.",
-                REAL_YLD:"Tracks the inflation-adjusted interest rate differential between two countries. When real yields widen in favor of a currency (nominal rates rise OR inflation falls), that currency tends to appreciate. Key relationship: when US real yields fall (Fed cutting while inflation sticky) vs rising real yields elsewhere, USD weakens vs those currencies.",
-                SAFE_HVN:"In periods of risk-off (equity selloffs, geopolitical stress, VIX spikes), capital flows to JPY, CHF, and historically USD. In 2026, USD has partially lost safe-haven status due to reserve currency erosion — so JPY and CHF are the primary safe havens. Strategy: monitor VIX and equity futures; when VIX spikes above 20 with equity selloff, enter JPY/CHF long positions.",
-                OPT_EXP:"Large option strikes (notional >$500M) at round numbers act as 'magnets' pulling spot price toward them in the hours before NY 10AM option expiry. CME data shows the effect is strongest when spot is within 30-50 pips of the strike. Enter in direction of the strike 1-2 hours before 10AM NY. Exit 15 minutes before expiry as the gravitational effect ends.",
-                CB_COMM:"Central bank communications (speeches, minutes, press conferences) cause systematic price drifts in the hours and days following. The mechanism: algorithmic parsing of text sentiment triggers initial move; then fundamental traders reassess positioning. Key indicators: hawkish/dovish word frequency, changes in 'data dependent' language, forward guidance shifts. Currently tracking: ECB Schnabel, BOJ Ueda.",
-                TSM_CTA:"Systematic time-series momentum: if an asset has positive returns over the past 1, 3, 6, and 12 months, go long; if negative, go short. AQR research shows this has delivered positive Sharpe ratios across 58 liquid markets including G10 FX since the 1880s. No discretion — pure rules-based trend following. Currently: EUR, JPY momentum is positive; USD, NZD momentum is negative.",
-                CROSS_CAR:"Combines classic carry (long high-yielder vs low-yielder) with a momentum filter. Long carry is only initiated when the high-yield currency also has positive recent price momentum. This filter eliminates the crash risk inherent in pure carry (which loses badly in risk-off). AQR research shows the Sharpe ratio improves from 0.6 (pure carry) to 1.0+ (carry + momentum filter).",
-                FX_VOL:"Systematic sale of implied volatility (through options) when implied vol exceeds historical realized volatility. The volatility risk premium in FX has been positive on average historically — sellers of vol earn premium over time similar to how insurance sellers earn premium. Execute by selling 1-month straddles when 1M implied vol is significantly above 20-day realized vol. Currently: vol premium exists in EUR/USD and USD/JPY.",
-                ICT_OB:"ICT Order Block methodology: institutional order blocks are identified as the last bearish candle before a bullish impulse (demand zone) or last bullish candle before a bearish impulse (supply zone). These zones represent where institutions accumulated positions and will defend/add to them on retests. The FVG (Fair Value Gap) is a three-candle imbalance pattern that often gets filled before continuation.",
-                STOP_HNT:"Identifies equal highs or equal lows (a cluster of wicks at the same price level) which represent resting stop-loss orders. Institutions deliberately push price through these levels to trigger stops and provide liquidity for their own entries. Entry: after the sweep of the liquidity pool with a reversal candle. The institutional trap is confirmed when price quickly reverses back through the swept level.",
-                GLOB_MAC:"Top-down macro framework: identify the dominant global macro theme (post-peak USD in 2026), then find the best expression in FX pairs. Currently: short USD (Fed cutting, reserve status erosion), long JPY (only G10 hiker), long EUR (ECB hawkish, fiscal stimulus). Trade the theme across multiple pairs rather than concentrating in one. Size based on conviction of the macro thesis.",
-                CARRY_MOM:"Classic G10 carry: long the highest-yielding G10 currency, short the lowest. Current ranking: NOK 4.50%, GBP 4.50%, AUD 4.10%, USD 3.75%, NZD 3.50%, SEK 2.25%, EUR 2.00%, CAD 2.75%, CHF 0.25% vs JPY 0.50%. Combined with momentum filter to avoid entering carry longs when the high-yielder is in a downtrend. The BOJ hiking cycle is the key risk — JPY carry reversal is the dominant concern.",
-                CS_MOM:"Every month, rank all G10 currencies by their return over the prior 1-month and 12-month periods. Go long the top performers and short the bottom performers. This cross-sectional approach captures relative momentum between currencies rather than absolute trends. Currently: JPY, EUR are top performers; USD, NZD are bottom performers. Rebalance monthly.",
-                COT_FADE:"Uses CFTC Commitment of Traders (COT) data released every Friday. When speculative positioning reaches extreme net-long or net-short levels (top/bottom quartile historically), fade the crowd. The mechanism: extreme positioning means most potential buyers/sellers are already in the market — the trade becomes crowded and is prone to violent reversal. Currently: USD net-short is at a multi-year extreme.",
-                GOLD_USD:"Gold and USD have a strong inverse correlation — gold is the primary alternative reserve asset to USD. When gold makes new all-time highs (as in 2025-2026), it signals USD reserve status is being questioned. Gold at $3,000+ in 2026 is the 'debasement trade' — benefits USD/CHF shorts, USD/JPY shorts, and AUD/USD longs (gold-linked). Monitor gold spot as a leading indicator for USD direction.",
-                SESS_BRK:"The NY session open (8:00-8:30 AM EST, 13:00-13:30 UTC) is the highest volume period of the trading day. When NY opens, it often breaks the Asian session range decisively. The trade: identify the Asian session high/low, wait for the NY open momentum candle, enter in the direction of the break with a stop behind the Asian range. 60% win rate historically due to institutional participation.",
-                VOL_BRK:"After a prolonged period of low ATR (volatility compression), markets tend to make explosive directional moves — often catalyzed by scheduled events (data releases, CB decisions). Identify pairs with ATR at multi-week lows, check calendar for upcoming catalysts, position for the breakout before the catalyst occurs. The direction of the break is not predicted — position straddle or wait for initial directional move.",
-                CORR_BRK:"G10 currency pairs have historically stable correlations (e.g., EUR/USD and GBP/USD typically move together; USD/JPY and CHF/JPY). When these correlations break down — when normally-correlated pairs diverge significantly — the divergence tends to revert. Trade: identify the pair that has diverged from its correlated twin and fade it back to the mean. Example: if EUR/USD rallies 0.5% but GBP/USD doesn't move, fade the EUR/USD rally.",
-                UIP_DEV:"Uncovered Interest Rate Parity predicts that higher-yielding currencies should depreciate to offset the yield advantage. Empirically (Fama 1984), the opposite is true — the 'forward premium puzzle' — high-yielders tend to appreciate in the short-to-medium term. This strategy systematically exploits this puzzle by going long the higher-yielding currency vs the lower-yielder, especially when the yield differential is widening.",
-                ADX_BRK:"Average Directional Index (ADX) measures trend strength from 0-100. ADX >25 with DI+ > DI- signals an established uptrend; ADX >25 with DI- > DI+ signals a downtrend. The entry signal is when ADX crosses above 25 with a DI crossover — indicating a trend is just beginning to establish. Works best in directional, low-noise market conditions. Avoid in range-bound markets (ADX <20).",
-                LDN_BRK:"The London open (07:00-08:00 UTC) is the transition from low-volume Asian session to the world's largest FX trading hub. This creates systematic breakouts of the Asian range as European institutional participants establish positions. The Asian range (typically 07:00 UTC high and low) breaks in the direction of European institutional bias approximately 68% of sessions. Enter on break with stop behind range.",
-                VWAP_REV:"Volume-Weighted Average Price (VWAP) is the anchor for institutional order execution. When price trades significantly above VWAP (>2 standard deviations), institutional selling kicks in as algorithms seek to sell above the daily average; when below VWAP, institutional buying. The reversion to VWAP occurs within the session approximately 72% of the time. Best used as an intraday mean-reversion entry trigger.",
-                EARL_WRN:"Composite leading indicator combining: sovereign CDS spread widening, current account deficit expansion, FX reserve depletion, and sudden currency depreciation. When 3 of 4 indicators are triggered simultaneously, a currency crisis event has 67% probability within 6 months (IMF research). Currently monitoring: USD CDS, MXN, TRY as early warning signals that could affect G10 safe haven flows.",
-                MOMO_CRS:"Triple EMA crossover: when the 5-period EMA crosses above the 13-period EMA which is above the 50-period EMA, a confirmed uptrend momentum signal is generated. All three EMAs must be aligned and expanding — not just the fast/slow cross. Works best in the H1-H4 timeframe. Exit signal: fast EMA crosses back below medium EMA. Filter: only trade when ADX >20 to confirm trend strength.",
-                BOP_FLOW:"Tracks quarterly Balance of Payments data — current account surpluses create structural demand for that currency as exporters repatriate foreign earnings. Japan's current account surplus of ¥2.4T per quarter creates consistent JPY demand. The EUR block (Germany, Netherlands, Belgium) runs large CA surpluses. The US runs a persistent CA deficit — structural USD selling from income account. Monitor quarterly BOP releases from each country's statistics bureau.",
-                CARRY:"Pure interest rate differential carry: borrow the low-yielder (JPY 0.50%, CHF 0.25%), invest in the high-yielder (NOK 4.50%, GBP 4.50%, AUD 4.10%). The carry income compensates for adverse moves up to the differential per year. Key risk: sudden risk-off triggers carry unwind, causing the high-yielder to drop sharply. In 2026, the BOJ hiking cycle is systematically compressing carry differentials against JPY — avoid long carry vs JPY.",
-                BB_FADE:"When price touches the outer Bollinger Band (2 standard deviations from 20-period moving average), it has moved statistically far from the mean and has ~68% probability of reverting. Enter when: (1) price touches or closes outside 2σ band, (2) RSI confirms overbought/oversold, (3) no high-impact news expected for 2 hours. Best in range-bound, mean-reverting conditions. Avoid in strong trending markets.",
-                FIBO_PULL:"After an impulsive price move, the 61.8% Fibonacci retracement of that move represents the 'golden ratio' pullback level where the trend typically resumes. Entry: on a reversal candle at the 61.8% level with RSI showing momentum turning back in the trend direction. The 38.2% level is a more aggressive entry; the 78.6% level is a deeper retest. Most reliable when the impulse move was significant (50+ pips for day trades).",
-                ICHIMOKU:"The Ichimoku Cloud system uses five components: Tenkan-sen (9-period midpoint), Kijun-sen (26-period midpoint), Senkou Span A and B (cloud boundaries, displaced 26 periods forward), and Chikou Span (close displaced 26 periods back). A bullish signal requires: price above cloud, Tenkan above Kijun, and Chikou above price 26 periods ago. The cloud acts as dynamic support/resistance. Best for identifying established trends in H4-D1 timeframes.",
-                MON_PULL:"Friday session often sees position squaring and directional momentum. On Monday, this momentum frequently continues after a brief pullback in the Asian session. The 'Monday Pullback' strategy: identify Friday's dominant direction, wait for Asian session pullback on Monday, enter in Friday's direction when European session begins (07:00 UTC). Works best when there is no major weekend news event that would invalidate Friday's trend.",
-                EQ_BETA:"AUD, NZD, and CAD have positive beta to global equity markets (risk-on = buy these currencies). JPY and CHF have negative beta (risk-on = sell these currencies). USD has variable beta depending on whether the risk event is US-specific. Strategy: use equity futures and VIX as leading indicators for FX. If S&P 500 futures are +0.5% pre-market, bias is bullish AUD, NZD, CAD and bearish JPY, CHF.",
-                REGIME_SW:"VIX-based regime identification: VIX <15 = carry and risk-on regime (long high-yielders, short safe havens); VIX 15-25 = neutral/data-driven regime; VIX >25 = safe haven regime (long JPY, CHF, short carry). The strategy is not to predict regime changes but to trade within the current regime and exit positions quickly when VIX crosses regime thresholds. April 2026: VIX has been volatile — monitor closely.",
-                COMD_CCY:"AUD has 0.75 correlation with iron ore and copper prices. CAD has 0.68 correlation with WTI crude oil. Use commodity price moves as leading indicators for these currencies: iron ore +2% = bullish AUD signal; crude oil -3% = bearish CAD signal. The lead time is typically 1-4 hours for spot FX to catch up to commodity moves. Enter FX position in direction of commodity signal before the FX market fully prices it.",
-                TURT_TR:"The Turtle Trading Rules: buy when price makes a new 20-day high, sell when it makes a new 20-day low. Exit when price reverses 10 days in the opposite direction. This was one of the first systematic trend-following strategies, taught to a group of traders ('Turtles') by Richard Dennis in 1983. The original rules generated 80% annualized returns from 1983-1988. Modern version: use 20-day Donchian channel breakouts with ATR-based position sizing.",
-                STOCH_RSI:"Combines Stochastic oscillator with RSI: the StochRSI measures the RSI's level relative to its own high-low range over a specified period (typically 14). When StochRSI shows bullish divergence (price makes lower low but StochRSI makes higher low), a reversal is signaled. Most reliable at key structural support/resistance levels. The combination filters out noise that individual Stochastic or RSI would generate alone.",
-                DUAL_THR:"The Dual Thrust system uses the prior session's high-low range and the high-low range from N days ago to create dynamic breakout levels. Buy trigger = open + K1 × range. Sell trigger = open - K2 × range. K1 and K2 are optimized parameters (typically 0.5-0.7). Different from simple range breakout because the range adapts to recent volatility. Originally developed by Michael Chalek for futures markets, adapted to FX.",
-                KELTNER:"Keltner Channels use an ATR multiple (typically 2×ATR) around an exponential moving average. When price closes outside the channel, it signals a breakout with volatility expansion. Unlike Bollinger Bands (which use standard deviation), Keltner uses ATR — making the channel more stable and less prone to false signals during volatile periods. Combine with ADX >25 to confirm trend strength before entering breakout direction.",
-                RISK_PAR:"Equal volatility weighting across all G10 pairs: instead of risking $X per trade, risk 1/volatility-weighted amount so each pair contributes equal portfolio risk. High-volatility pairs (AUD/JPY) get smaller position sizes; low-volatility pairs (EUR/CHF) get larger. This reduces the tendency of high-volatility pairs to dominate portfolio P&L. Rebalance monthly based on 20-day ATR for each pair.",
-                SUPPLY_DEM:"Supply zones are price levels where institutional selling previously occurred (visible as a sharp down move from consolidation). Demand zones are where institutional buying occurred (sharp up move from consolidation). When price returns to these zones, the original institution likely adds to the position, creating a high-probability reaction. Entry: on a reversal candle at the zone boundary. Stop: just beyond the zone.",
-                TOT_SHOCK:"Commodity price shocks impact currency markets through the Terms of Trade channel. Australia's terms of trade are dominated by iron ore and coal exports. Canada's by crude oil. A sudden 10%+ drop in these commodity prices creates immediate selling pressure on AUD and CAD respectively — the mechanism is both fundamental (trade flows) and speculative (algorithmic correlation trading). Enter FX short within the same session as the commodity shock.",
-                ENG_CAN:"A bearish engulfing pattern occurs when a large bearish candle completely engulfs the prior bullish candle, at a key resistance level. The reverse for bullish engulfing at support. The pattern has 55% win rate on its own but rises to 65%+ when: (1) at a key S/R level, (2) confirmed by volume spike, (3) RSI shows momentum turning. Best used on H4 and D1 charts where the pattern has more statistical significance.",
-                PPP_VAL:"Purchasing Power Parity calculates the 'fair value' exchange rate based on price level differences between countries. The OECD's PPP estimate for EUR/USD is approximately 1.14 (April 2026), USD/JPY approximately 140. Spot prices deviate from PPP for extended periods but revert over 3-5 year horizons. This is a long-term valuation anchor, not a timing tool — used to assess whether a currency is fundamentally cheap or expensive.",
-                RSIMR:"RSI mean reversion on daily charts: when daily RSI exceeds 75 (overbought) or falls below 25 (oversold), the pair has an elevated probability of reverting. Confirm with price at a key S/R level. Entry: when RSI begins to turn back from the extreme (crosses back through 70 from above, or 30 from below). This filter ensures momentum is already reversing. Stop: beyond the price extreme that created the RSI reading.",
-                ATR_FADE:"When intraday price has already moved more than 2× the daily ATR from the session open, the probability of further extension diminishes significantly. The mean reversion tendency kicks in as late-arriving retail traders push prices to extremes while institutions fade the move. Entry: when price has extended >2× ATR with RSI overbought/oversold. Stop: 1× ATR beyond the extreme. Works best in the final 2 hours of London/NY session.",
-                EMA_CROSS_55:"The EMA55/200 cross on the primary timeframe (H1 for scalp, H4 for day, D1 for swing) signals a confirmed trend change. The 55-period EMA is the institutional-grade trend filter — above EMA200 = bullish regime. The strategy fires on the FIRST PULLBACK to the EMA55 after the cross — this is the optimal risk:reward entry. RSI 38-62 confirms neutral momentum (not yet overbought on the new trend). Multi-timeframe: no macro regime required, signal is purely technical.",
-                PRICE_ACTION_PIN:"A pin bar (hammer or shooting star) with a lower/upper wick at least 2.5× the body size appears at a defined swing S/R level. The long wick shows price rejection — institutions rejecting a price level and reversing. Hammer at support = bullish rejection. Shooting star at resistance = bearish rejection. Confirmation: RSI turning from extreme direction AND EMA55 aligned. Fires on primary TF (H1/H4/D1 by style).",
-                INSIDE_BAR_BO:"An inside bar forms when the entire range of the current candle fits within the prior candle's range — showing indecision and compression. The setup: mother bar + inside bar forms the compression. The trigger: when price breaks decisively beyond the mother bar's high (bullish) or low (bearish) with ATR expanding or stochastic crossing. EMA55 aligned with direction confirms the breakout has structural support.",
-                SR_BOUNCE:"Identifies swing levels that have been tested 2+ times within 0.2% of each other (multi-touch S/R). These levels have proven institutional interest. The bounce setup requires: RSI extreme (<35 buy, >65 sell), EMA200 on the correct side, and stochastic NOT YET crossed from extreme — this catches the setup before the move rather than after. The pre-cross timing gives better entry prices.",
-                MACD_HIST_DIVERGENCE:"The MACD histogram represents the velocity of the MACD line. Bullish histogram divergence: price makes a lower low but the histogram makes a higher low — momentum is decelerating on the downside, suggesting a reversal. Bearish: price higher high but histogram lower high. The divergence must occur at a meaningful S/R level to be valid. RSI confirming (turning from extreme) adds further conviction.",
-                STOCH_SR_CONFLUENCE:"Slow stochastic (14,3,3) that has been at an extreme level (below 25 or above 75) for multiple bars, then crosses the signal line, at a defined S/R level. The key is the exhaustion — stoch staying at extreme for 2+ bars shows the momentum move is spent. The cross then confirms the reversal is beginning. The conviction close (body >60% of bar range) confirms institutional participation.",
-                CANDLE_REVERSAL_CLUSTER:"Three-candle reversal patterns: Morning Star (large bearish, small indecision body, large bullish closing >50% into first bar) signals bullish reversal. Evening Star is the bearish equivalent. Three White Soldiers (3 consecutive full-body bullish candles, each opening within prior body) signals bullish trend initiation — best after consolidation. Three Black Crows is bearish equivalent. RSI turning from extreme adds confluence.",
-                TREND_PULLBACK_EMA55:"In an established trend (EMA55 sloping above EMA200 = uptrend), price pulls back to the EMA55 zone (within 0.8%) — this is the 'buy the dip' institutional entry. RSI reset to 38-58 confirms momentum has normalized without reversing trend. Stochastic between 25-55 shows room for the continuation. ATR calm during pullback confirms it's an orderly correction, not a reversal. This is the highest-probability entry in a trending market.",
-                ENGULF_STRUCT:"A bullish engulfing candle entirely engulfs the prior bearish candle (current open below prior close, current close above prior open) at a structural swing support level. This shows institutional buying overwhelming prior selling at a key level. RSI diverging (current print higher than prior despite lower price) confirms the exhaustion. EMA55 not opposing adds trend filter. Fires on primary TF.",
-                THREE_BAR_PLAY:"Setup: Bar 1 is a strong directional candle. Bar 2 is narrow or inside Bar 1 (≤60% of bar 1 range) — this is indecision after the initial move. Bar 3 breaks beyond Bar 1's extreme in Bar 1's direction — the continuation. ATR expanding on Bar 3 confirms participation. This is a momentum continuation pattern, best used after a pullback in a trending market. EMA200 aligned adds structural confirmation.",
-                OUTSIDE_BAR:"An outside bar completely engulfs the prior bar's range (current high > prior high AND current low < prior low). It represents a decisive expansion of volatility and a tug-of-war between bulls and bears. The direction is determined by where price closes relative to the midpoint. At S/R levels, the close direction is especially significant as it shows who won the battle at the key level. RSI turning adds momentum confirmation.",
-                HAMMER_STAR:"Single-candle reversal shadows: Hammer has a lower wick ≥2.5× body at the bottom (bullish rejection of lower prices). Shooting star has an upper wick ≥2.5× body at the top (bearish rejection of higher prices). Validity requires: appearance at a defined S/R level, EMA55 aligned with reversal direction OR stochastic at extreme. The longer the wick relative to the body, the stronger the rejection signal.",
-                THREE_SOLDIERS_CROWS:"Three White Soldiers: 3 consecutive bullish candles, each with body >60% of its range, each opening within the prior candle's body. Signals the beginning of institutional trend accumulation after a period of low volatility (low ATR). RSI in 40-65 midzone confirms early trend positioning — not yet overbought. EMA55 sloping in direction adds conviction. Three Black Crows is the bearish mirror pattern.",
-                MORNING_EVENING_STAR:"Classic three-candle reversal: Bar 1 is a large directional candle. Bar 2 is a small-bodied star (doji or spinning top) — indecision after the trend. Bar 3 is a large reversal candle closing >50% into Bar 1. Most powerful when appearing at a multi-touch S/R level with RSI divergence between Bar 1 and Bar 3, or with slow stochastic crossing from extreme on Bar 3.",
-                HEAD_SHOULDERS:"Three-peak (or three-trough) chart pattern: left shoulder, head (higher/lower peak), right shoulder at similar level to left shoulder (within 1.5%). The neckline connects the troughs (H&S) or peaks (inverse H&S). A close beyond the neckline triggers the signal. Most reliable on D1/H4 — scalp excluded due to insufficient candle resolution. RSI divergence between the head and right shoulder adds conviction. Day/swing only.",
-                DOUBLE_TOP_BOTTOM:"Two price tests of the same level within 0.3% of each other, with RSI showing a weaker second test (divergence). The signal fires when price breaks through the intervening swing low (double top) or high (double bottom) — the neckline break. Day/swing only (scalp excluded). Strongest when the two tests are separated by 5+ candles. EMA55 confirming direction adds confluence.",
-                MARKET_STRUCTURE:"Identifies HH/HL (higher high/higher low = uptrend) or LH/LL patterns in primary TF swings. Continuation signals: uptrend making a new HH with RSI and EMA55 aligned. Market Structure Break (MSB): price in HH/HL uptrend suddenly breaks below the last HL — signals potential trend reversal (scored higher at 3 pts). RSI and EMA55 confirmation required for both continuation and MSB signals.",
-                FLAG_PENNANT:"After a sharp impulse move (≥2.5× ATR in 3-5 candles), price consolidates in a tight channel (range ≤45% of impulse) often sloping slightly against the impulse. The breakout from this consolidation in the impulse direction is the entry — ATR must expand on breakout confirming participation. EMA55 aligned with impulse direction adds structural confidence. Works across all timeframes.",
-                RANGE_BREAKOUT:"Identifies genuine consolidation: last 20 primary-TF candles with high-low range ≤1.8× ATR average (tight range = compression). A decisive close outside the range with ATR expanding confirms the breakout. RSI not yet at extreme (RSI <70 for buys, >30 for sells) ensures the momentum has room to run. EMA55 not opposing prevents trading into a major trend barrier.",
-                TREND_CONTINUATION_BREAK:"In an established trend (EMA55 + EMA200 both aligned), ATR compresses over the last 8 candles vs the prior 8 — the market is resting before continuing. Price then breaks to a new 20-candle extreme with stochastic reset (was between 25-65 during compression) and crosses back in trend direction. This distinguishes a genuine continuation break from a false breakout in a rangy market.",
-              },
-              bestConditions:{
-                BOJ_NORM:"USD/JPY approaching 158-161 zone. Low liquidity (Tokyo lunch, early European session). BOJ news flow absent (no speeches). Risk sentiment neutral to positive (avoid entering on sharp risk-off as JPY already bid).",
-                NEWS_DFT:"Major data release (CPI, NFP, CB decision) that significantly beats or misses consensus by >0.2%. Initial spike has occurred. 10-15 minute pullback completed. Trade has at least 2-hour window before next major event.",
-                TRI_ARB:"During high-liquidity periods (London/NY overlap). Market dislocation events (flash crashes, major news). Requires multi-broker access for simultaneous execution. Window typically 30-90 seconds.",
-                RATE_SRP:"Immediately following a CB rate decision that surprises vs market pricing. Most powerful in the first 2 hours. Direction must be clear from initial spike. No conflicting data release scheduled within 4 hours.",
-                CB_DIV:"When rate differential is at a multi-year extreme. When one bank just hiked while another just cut. H4/D1 trend confirmed in divergence direction. No imminent CB meeting that could reverse the divergence.",
-                WMR_FIX:"Last trading day of the month (month-end Fix) and last trading day of each quarter (most powerful). Known large index rebalancing events. Flow direction typically known 30-60 minutes before Fix based on equity market performance.",
-                STRUCT_BK:"Price has consolidated at a major level for 1+ weeks. Volume on the break is above average. First retest of broken level as new support/resistance. ADX confirms trend is developing (>20 and rising).",
-                GRW_DIV:"After a significant data miss or beat that changes growth outlook (PMI, GDP, retail sales). When growth forecasts are being revised in diverging directions. Best initiated at start of month with fresh economic data.",
-                REAL_YLD:"When central bank shifts policy (hike or cut) while inflation remains stable. When inflation data surprises vs expectations. Most powerful at extremes of real yield differentials (both above and below historical averages).",
-                SAFE_HVN:"VIX spike above 20. Equity markets down >1.5%. Geopolitical event causing risk-off. USD losing safe-haven status events. Best pairs: USD/JPY short, EUR/CHF short.",
-                OPT_EXP:"Spot price within 30-50 pips of a known large option strike (check daily expiry notices from major banks). 1-2 hours before 10AM New York (15:00 UTC). Best when multiple strikes are clustered near current price.",
-                CB_COMM:"Within first 2 hours of CB speech or minutes release. When language changes significantly from prior statement. Algorithmic parsing creates initial volatility — then systematic traders add to the direction. Best on H1 charts.",
-                EMA_CROSS_55:"Fresh cross within last 20 candles on primary TF. Scalp: H1 cross and price pulling back to H1 EMA55. Day: H4 cross with H4 EMA55 pullback. Swing: D1 cross with D1 EMA55 test. RSI 38-62 confirms fresh positioning. Best in directional markets — avoid ranging environments.",
-                PRICE_ACTION_PIN:"At multi-tested swing levels (the more tests, the stronger). During Asian or early London session when wicks are more meaningful due to lower liquidity. RSI at its most extreme reading in 20+ bars for maximum divergence. EMA55 flat or turning in reversal direction.",
-                INSIDE_BAR_BO:"Best after a significant trend move where consolidation is expected. Daily inside bars are especially powerful (often preceding multi-day directional moves). EMA55 clearly sloping in breakout direction. No major news release within 2 hours that could cause a false break.",
-                SR_BOUNCE:"Multi-touch levels with 3+ tests are most reliable. Weekly support/resistance zones (visible on D1 and above) are strongest. RSI at most extreme reading in the current swing. Entering when stochastic is about to cross (not yet crossed) for best R:R.",
-                MACD_HIST_DIVERGENCE:"Most reliable when divergence spans 3-5 candles on the primary TF. At confluence of MACD divergence + price at structural S/R. RSI mirroring the divergence (showing weakening momentum). Best in trending-then-reversing markets, not choppy conditions.",
-                STOCH_SR_CONFLUENCE:"When stochastic stays in extreme zone (below 25 or above 75) for 2-4 bars before crossing. At well-defined horizontal S/R levels rather than dynamic support. Conviction close candle (large body). Best during London and NY sessions when institutional participation is highest.",
-                CANDLE_REVERSAL_CLUSTER:"Morning/evening star: strongest at major weekly or monthly S/R levels. Three soldiers/crows: most reliable after a 3-10 bar consolidation period with below-average ATR. RSI transitioning through the midpoint (crossing 50). Best on H4 and D1 timeframes — more noise on H1.",
-                TREND_PULLBACK_EMA55:"In a clearly established trend (EMA55 trending for 20+ bars). The deeper the pullback into the EMA55 zone (touching rather than approaching), the better the R:R. RSI reset to 40-55 for maximum room. Low ATR during pullback confirms orderly retracement. Avoid if pullback is aggressive (high ATR = potential reversal not pullback).",
-                ENGULF_STRUCT:"At key horizontal support/resistance levels identified on D1 or H4. Bullish engulfing most powerful at well-defined demand zones. Bearish engulfing at multi-test resistance. RSI divergence adds conviction — look for prior RSI extreme not matched by current candle's price extreme.",
-                THREE_BAR_PLAY:"Best when Bar 1 is significantly larger than the 20-bar average candle size. Bar 2 should be inside Bar 1 for maximum compression. Bar 3 ATR expansion most meaningful during London or NY session hours. After a pullback in a trending market, not at a reversal point.",
-                OUTSIDE_BAR:"At key S/R where the range expansion is meaningful, not random volatility. Outside bars on weekly candles (visible as D1 candles in a week) are especially significant. RSI turning from extreme on the same bar. Avoid outside bars that appear during high-impact news releases — these are noise, not signal.",
-                HAMMER_STAR:"At swing lows/highs that are visible on the next higher timeframe (e.g., H4 hammer at a level visible on D1). Longer wick = stronger rejection. EMA55 ideally flat or turning in reversal direction. Avoid if hammer/shooting star appears in the middle of a range without a clear structural reference.",
-                THREE_SOLDIERS_CROWS:"After a consolidation period (5-15 bars with compressed ATR). RSI in 40-65 on the third bar — confirms early trend positioning not exhaustion. EMA55 just beginning to slope in pattern direction. Most reliable on H4 and D1. Avoid if appearing after an already extended trend (late entry risk).",
-                MORNING_EVENING_STAR:"At weekly S/R levels for maximum significance. Strongest when Bar 3 has above-average ATR (strong reversal candle). RSI divergence between Bar 1 low/high and Bar 3 — momentum clearly weakening. Best on H4 and D1. Slow stochastic crossing from extreme on Bar 3 is strong additional confluence.",
-                HEAD_SHOULDERS:"On H4 and D1 charts only. Head must be clearly higher/lower than both shoulders by at least 1× ATR. Shoulders within 1.5% height of each other. Neckline break with ATR expansion. RSI divergence between head and right shoulder (right shoulder RSI less extreme) confirms weakening momentum.",
-                DOUBLE_TOP_BOTTOM:"Two tests at least 5+ candles apart. RSI divergence on second test is mandatory for high-probability setup. Neckline break with close beyond the level (not just wick). Most reliable when second test has lower volume/ATR than first (confirming less conviction). Day/swing only — H4 and D1.",
-                MARKET_STRUCTURE:"Continuation: trade after the second confirmed higher low (HH/HL pattern established). MSB: fire at the moment of the structure break, not before. RSI confirmation essential to avoid false breaks. EMA55 in agreement with the new direction adds strong confluence for the MSB trade.",
-                FLAG_PENNANT:"After a sharp, clean impulse move (not a gradual trend). Consolidation of 4-10 bars ideally. Breakout with ATR expanding to at least 1.2× consolidation ATR. EMA55 clearly sloping in impulse direction. Most reliable when the impulse move was triggered by a catalyst (news, data release).",
-                RANGE_BREAKOUT:"Best when consolidation has lasted 10+ bars (longer compression = stronger release). Range high/low should be tested 2+ times on each side to confirm the boundaries. ATR expansion on breakout candle is mandatory. Avoid if major news release immediately follows the breakout — pre-news volatility creates false breaks.",
-                TREND_CONTINUATION_BREAK:"In a trend that has been running 20+ bars on the primary TF. ATR compression over last 8 vs prior 8 bars must be meaningful (>15% drop). New 20-bar extreme confirms the continuation. Stochastic reset during compression to 25-65 and crossing back confirms the setup. Most reliable in H4 trend with D1 EMA alignment.",
-              },
-              avoidConditions:{
-                BOJ_NORM:"When BOJ officials signal caution about pace of hikes. During risk-off events when USD spikes as safe haven. When USD/JPY has already fallen significantly (158 to 150 in one week) — mean reversion risk.",
-                NEWS_DFT:"When data release was only marginally different from consensus (less than 0.1% miss/beat). When conflicting data comes out within 1 hour. When market had already priced the surprise in anticipation. Low liquidity (Asian session for USD pairs).",
-                TRI_ARB:"Wide bid-ask spreads. News events pending. Single-broker access (simultaneous execution impossible). High volatility regimes where prices move before execution completes.",
-                RATE_SRP:"When CB decision matched consensus exactly (no surprise element). During ongoing geopolitical crisis that overwhelms rate signal. When CB chair's press conference contradicts the rate decision signal.",
-                CB_DIV:"When both banks are on hold with no clear policy divergence. When the diverging currency pair has already moved significantly (risk of mean reversion). During geopolitical crises that override monetary policy signals.",
-                WMR_FIX:"Avoid trading the Fix direction in illiquid conditions. If equity markets have been extremely volatile (±2%+), Fix flows are harder to predict. In thin currency pairs (NZD, NOK) where Fix can create sharp, unforecastable moves.",
-                STRUCT_BK:"During low-volume periods (holidays, early Asian session). When break occurs on no clear fundamental catalyst. When the pair has already extended significantly before reaching the structural level.",
-                GRW_DIV:"During global risk-off events that override country-specific growth data. When data is stale (PMI revised significantly next month). In illiquid market conditions. Near major CB decisions that could change growth outlook.",
-                REAL_YLD:"When FX is dominated by risk sentiment (equities crashing). When CB is intervening directly in FX market. In illiquid conditions. When the yield differential move is already fully priced.",
-                SAFE_HVN:"In risk-on rallies (VIX falling below 12). When JPY carry trade is being rebuilt. After large safe-haven spikes (sell the rumor/buy the fact reversal risk). When USD regains safe-haven demand.",
-                OPT_EXP:"When spot is more than 50 pips from the strike. When there is no clear confirmation of large option interest. In low-liquidity sessions. After 10AM NY has already passed.",
-                CB_COMM:"When speech contains no new information vs prior statements. During scheduled blackout periods before CB meetings. When market has already moved significantly in anticipation of the speech.",
-              }
-            };
-            const how=DETAIL.howItWorks[s.id]||s.desc||"This strategy uses quantitative signal generation to identify high-probability entry points based on "+s.cat+" factors. Entry is confirmed when multiple confluences align with the primary signal.";
-            const best=DETAIL.bestConditions[s.id]||"Best conditions: When market regime aligns with strategy category. "+s.tf+" timeframe showing momentum in signal direction. No conflicting high-impact news within 2 hours.";
-            const avoid=DETAIL.avoidConditions[s.id]||"Avoid when: market regime contradicts strategy type. During extreme volatility events. When spread is above 3× normal. Immediately before or after high-impact news releases.";
-            return(
-              <div onClick={()=>setExpandedStrat(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",zIndex:3000,display:"flex",alignItems:"flex-end",justifyContent:"center",backdropFilter:"blur(6px)"}}>
-                <div onClick={e=>e.stopPropagation()} style={{background:C.bg2,border:`2px solid ${tc}`,borderRadius:"12px 12px 0 0",maxWidth:"720px",width:"100%",maxHeight:"88vh",display:"flex",flexDirection:"column",overflow:"hidden"}}>
-                  {/* Header */}
-                  <div style={{padding:"14px 16px",borderBottom:`1px solid ${C.bdr}`,flexShrink:0,background:`linear-gradient(90deg,${C.bg1},${C.bg2})`}}>
-                    <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"5px",flexWrap:"wrap"}}>
-                      <Bdg label={s.tier+"-TIER"} color={tc} sz="10px"/>
-                      <Bdg label={s.cat} color={C.muted} sz="9px"/>
-                      <Bdg label={s.wr+"% WR"} color={s.wr>=63?C.gold:s.wr>=59?C.green:C.muted} sz="9px"/>
-                      <Bdg label={s.tf} color={C.blue} sz="9px"/>
-                      <button onClick={()=>setExpandedStrat(null)} style={{marginLeft:"auto",background:"transparent",border:`1px solid ${C.bdr}`,borderRadius:"4px",color:C.muted,cursor:"pointer",padding:"4px 10px",fontSize:"11px",fontFamily:"inherit"}}>✕</button>
-                    </div>
-                    <div style={{fontSize:"16px",fontWeight:"700",color:C.text,lineHeight:"1.3"}}>{s.name}</div>
-                    <div style={{fontSize:"9px",color:C.muted,marginTop:"3px"}}>{s.note}</div>
-                  </div>
-                  {/* Scrollable content */}
-                  <div style={{overflowY:"auto",padding:"14px 16px",display:"flex",flexDirection:"column",gap:"12px",WebkitOverflowScrolling:"touch"}}>
-                    {/* How It Works */}
-                    <div style={{background:C.bg1,border:`1px solid ${tc}33`,borderLeft:`3px solid ${tc}`,borderRadius:"5px",padding:"12px 14px"}}>
-                      <div style={{fontSize:"8px",color:tc,fontWeight:"700",letterSpacing:"2px",marginBottom:"7px"}}>◈ HOW IT WORKS</div>
-                      <div style={{fontSize:"10px",color:"#b8cde0",lineHeight:"1.8"}}>{how}</div>
-                    </div>
-                    {/* Best Conditions */}
-                    <div style={{background:"#071a07",border:`1px solid ${C.green}33`,borderLeft:`3px solid ${C.green}`,borderRadius:"5px",padding:"12px 14px"}}>
-                      <div style={{fontSize:"8px",color:C.green,fontWeight:"700",letterSpacing:"2px",marginBottom:"7px"}}>✓ WHEN TO USE — BEST CONDITIONS</div>
-                      <div style={{fontSize:"10px",color:"#b8cde0",lineHeight:"1.8"}}>{best}</div>
-                    </div>
-                    {/* Avoid */}
-                    <div style={{background:"#1a0505",border:`1px solid ${C.red}33`,borderLeft:`3px solid ${C.red}`,borderRadius:"5px",padding:"12px 14px"}}>
-                      <div style={{fontSize:"8px",color:C.red,fontWeight:"700",letterSpacing:"2px",marginBottom:"7px"}}>✗ WHEN TO AVOID</div>
-                      <div style={{fontSize:"10px",color:"#b8cde0",lineHeight:"1.8"}}>{avoid}</div>
-                    </div>
-                    {/* Win Rate context */}
-                    <div style={{background:C.bg1,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"12px 14px"}}>
-                      <div style={{fontSize:"8px",color:C.gold,fontWeight:"700",letterSpacing:"2px",marginBottom:"9px"}}>📊 PERFORMANCE CONTEXT</div>
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"8px",marginBottom:"9px"}}>
-                        {[["WIN RATE",s.wr+"%",s.wr>=63?C.gold:s.wr>=59?C.green:C.muted],["TIMEFRAME",s.tf,C.blue],["MIN CONFLUENCES",s.minC+"+ required",C.amber]].map(([l,v,c])=>(
-                          <div key={l} style={{background:C.bg,border:`1px solid ${c}33`,borderRadius:"4px",padding:"8px",textAlign:"center"}}>
-                            <div style={{fontSize:"7px",color:C.muted,marginBottom:"3px",fontWeight:"700"}}>{l}</div>
-                            <div style={{fontSize:"13px",fontWeight:"700",color:c}}>{v}</div>
-                          </div>
-                        ))}
-                      </div>
-                      <a href={s.url} target="_blank" rel="noopener noreferrer" style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 12px",background:C.bg,border:`1px solid ${C.blue}33`,borderRadius:"4px",textDecoration:"none"}}>
-                        <div>
-                          <div style={{fontSize:"9.5px",color:C.text,fontWeight:"600"}}>{s.desc}</div>
-                          <div style={{fontSize:"8px",color:C.blue,marginTop:"2px"}}>Academic evidence · Peer-reviewed research</div>
-                        </div>
-                        <span style={{fontSize:"16px",color:C.blue,flexShrink:0}}>↗</span>
-                      </a>
-                    </div>
-                    {/* Current April 2026 context */}
-                    <div style={{background:`linear-gradient(90deg,#0a1a07,#0a1a2a)`,border:`1px solid ${C.gold}33`,borderRadius:"5px",padding:"12px 14px"}}>
-                      <div style={{fontSize:"8px",color:C.gold,fontWeight:"700",letterSpacing:"2px",marginBottom:"7px"}}>🗓 APRIL 2026 CONTEXT</div>
-                      <div style={{fontSize:"10px",color:"#b8cde0",lineHeight:"1.8"}}>{s.note} Best pairs for this strategy in current regime: see Analyzer → Regime tab for active recommendations. Current market environment: BOJ hiking cycle + post-peak USD + ECB hawkish hold.</div>
-                    </div>
-                    <div style={{height:"20px"}}/>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-          {filtered.map(s=>{
-            const on=enabledStrats.includes(s.id),tc=tierC[s.tier]||C.muted;
-            return(
-              <div key={s.id} style={{background:on?C.bg1:C.bg,border:`1px solid ${on?tc+"55":C.bdr}`,borderLeft:`3px solid ${on?tc:C.bdr}`,borderRadius:"5px",padding:"10px",transition:"all 0.12s"}}>
-                <div style={{display:"flex",alignItems:"center",gap:"5px",marginBottom:"5px",flexWrap:"wrap"}}>
-                  <span style={{padding:"2px 5px",background:on?tc+"22":"#ffffff08",color:on?tc:C.muted,border:`1px solid ${on?tc+"44":"transparent"}`,borderRadius:"2px",fontSize:"7.5px",fontWeight:"700"}}>{s.tier}-TIER</span>
-                  <span style={{padding:"2px 5px",background:"#ffffff08",color:"#9ab",borderRadius:"2px",fontSize:"7px",fontWeight:"700"}}>{s.cat}</span>
-                  <span style={{marginLeft:"auto",fontSize:"9px",color:s.wr>=63?C.gold:s.wr>=59?C.green:C.muted,fontWeight:"700"}}>{s.wr}%</span>
-                </div>
-                <div style={{fontWeight:"700",color:on?C.text:"#6a8a9a",fontSize:"10.5px",marginBottom:"3px",lineHeight:"1.3"}}>{s.name}</div>
-                <div style={{fontSize:"8px",color:C.muted,marginBottom:"7px",lineHeight:"1.4"}}>{s.note}</div>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"5px"}}>
-                  <button onClick={()=>setExpandedStrat(s.id)} style={{flex:1,padding:"5px 0",background:tc+"22",color:tc,border:`1px solid ${tc}44`,borderRadius:"3px",cursor:"pointer",fontWeight:"700",fontSize:"8px",fontFamily:"inherit"}}>📋 STRATEGY DETAIL</button>
-                  <button onClick={()=>toggleS(s.id)} style={{padding:"5px 9px",background:on?tc:"transparent",color:on?"#05090f":C.muted,border:`1px solid ${on?tc:C.bdr}`,borderRadius:"3px",cursor:"pointer",fontWeight:"700",fontSize:"9px",fontFamily:"inherit"}}>{on?"✓":"+"}</button>
-                </div>
-              </div>
-            );
-          })}
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:"22px",fontWeight:"900",color:sig.probability>=62?C.green:sig.probability>=55?C.gold:C.amber}}>{sig.probability}%</div>
+          <div style={{fontSize:"7px",color:C.muted,letterSpacing:"1px"}}>LIVE PROB</div>
         </div>
       </div>
-    );
-  }
-
-  // ─── DEPLOY / TUTORIAL TAB ────────────────────────────────────────────
-  function DeployTab(){
-    // deployTab lifted to root state — persists across tab switches
-    const dtab=deployTab,setDtab=setDeployTab;
-    const DTABS=[{id:"overview",l:"Overview"},{id:"netlify",l:"Netlify Web"},{id:"iphone",l:"iPhone App"},{id:"notifs",l:"Notifications"},{id:"broker",l:"Broker Link"},{id:"continuity",l:"Continuity"}];
-    const Sec=({title,color=C.gold,children})=>(<div style={{background:C.bg2,border:`1px solid ${color}33`,borderRadius:"6px",padding:"12px 14px",marginBottom:"10px"}}><div style={{fontSize:"9px",fontWeight:"700",color,letterSpacing:"2px",marginBottom:"9px",paddingBottom:"6px",borderBottom:`1px solid ${color}22`}}>{title}</div>{children}</div>);
-    const Step=({n,text,sub})=>(<div style={{display:"flex",gap:"10px",alignItems:"flex-start",marginBottom:"8px"}}><div style={{width:"22px",height:"22px",borderRadius:"50%",background:C.gold+"33",color:C.gold,fontSize:"10px",fontWeight:"700",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{n}</div><div><div style={{fontSize:"10.5px",color:C.text,lineHeight:"1.5"}}>{text}</div>{sub&&<div style={{fontSize:"8.5px",color:C.muted,marginTop:"2px",lineHeight:"1.5"}}>{sub}</div>}</div></div>);
-    // Tag is defined at root level
-    return(
-      <div>
-        <div style={{background:`linear-gradient(90deg,${C.bg2},#0a1a2a)`,border:`2px solid ${C.gold}`,borderRadius:"7px",padding:"13px 15px",marginBottom:"12px"}}>
-          <div style={{fontSize:"13px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"4px"}}>🚀 AXIOM FX — DEPLOYMENT GUIDE</div>
-          <div style={{fontSize:"9px",color:C.muted,lineHeight:"1.65"}}>Everything you need to run AXIOM as a live web app, iPhone home screen app, or connected to your broker. Select a topic below.</div>
-        </div>
-        {/* Tab bar */}
-        <div style={{display:"flex",gap:"5px",marginBottom:"12px",overflowX:"auto",scrollbarWidth:"none",WebkitOverflowScrolling:"touch"}}>
-          {DTABS.map(t=><button key={t.id} onClick={()=>setDtab(t.id)} style={{padding:"7px 12px",background:dtab===t.id?C.gold+"22":"transparent",color:dtab===t.id?C.gold:C.muted,border:`1px solid ${dtab===t.id?C.gold:C.bdr}`,borderRadius:"4px",cursor:"pointer",fontSize:"9.5px",fontWeight:"700",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>{t.l}</button>)}
-        </div>
-
-        {/* OVERVIEW */}
-        {dtab==="overview"&&(<div>
-          <Sec title="⚡ WHAT WORKS WHERE" color={C.green}>
-            <div style={{overflowX:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:"9.5px",minWidth:"400px"}}>
-                <thead><tr style={{borderBottom:`1px solid ${C.bdr}`}}>{["FEATURE","CLAUDE SANDBOX","NETLIFY WEB","IPHONE PWA"].map(h=><th key={h} style={{padding:"5px 7px",color:C.gold,fontWeight:"700",textAlign:"left",fontSize:"8px",letterSpacing:"1px"}}>{h}</th>)}</tr></thead>
-                <tbody>{[
-                  ["All 15 Tabs + UI","✓ Full","✓ Full","✓ Full"],
-                  ["AI Chat (Claude)","✓ Works","✓ Works","✓ Works"],
-                  ["AI News Feed","✓ Works","✓ Works","✓ Works"],
-                  ["OANDA Live Prices","✗ Blocked","✓ LIVE","✓ LIVE"],
-                  ["ECB Fallback Prices","✗ Blocked","✓ Works","✓ Works"],
-                  ["Push Notifications","✗ No","✓ Limited","✓ Full"],
-                  ["Home Screen Icon","✗ No","✗ No","✓ Yes"],
-                  ["Works Offline","✗ No","✗ No","Partial"],
-                  ["Auto-launch App","✗ No","Bookmark","✓ Full"],
-                ].map(([f,c,n,p])=>(
-                  <tr key={f} style={{borderBottom:`1px solid ${C.bdr}22`}}>
-                    <td style={{padding:"6px 7px",color:C.text,fontWeight:"600"}}>{f}</td>
-                    {[c,n,p].map((v,i)=><td key={i} style={{padding:"6px 7px",color:v.includes("✓")?C.green:v.includes("✗")?C.red:C.gold}}>{v}</td>)}
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
-            <div style={{background:"#071407",border:`1px solid ${C.green}33`,borderRadius:"4px",padding:"9px 11px",marginTop:"9px",fontSize:"9px",color:C.muted,lineHeight:"1.7"}}>
-              <strong style={{color:C.green}}>Recommendation:</strong> Deploy to Netlify (free, 2 min) for live OANDA prices + push notifications. Then add to iPhone home screen for full PWA experience.
-            </div>
-          </Sec>
-          <Sec title="🔑 YOUR PRE-CONFIGURED KEYS" color={C.amber}>
-            {[["Anthropic API Key","sk-ant-api03-... (set in Netlify env vars)","AI Chat + News","Pre-wired ✓"],["OANDA API Key","b41a0f67df1e1284...8b255","Live FX Prices","Pre-wired ✓"],["OANDA Account","001-001-21201857-001","Live Account","Pre-wired ✓"]].map(([l,v,use,status])=>(
-              <div key={l} style={{background:C.bg1,border:`1px solid ${C.bdr}`,borderRadius:"4px",padding:"8px 10px",marginBottom:"6px"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"3px"}}>
-                  <span style={{fontWeight:"700",color:C.text,fontSize:"10px"}}>{l}</span>
-                  <span style={{fontSize:"8px",color:C.green,fontWeight:"700"}}>{status}</span>
-                </div>
-                <div style={{fontSize:"8.5px",color:C.muted,fontFamily:"monospace",marginBottom:"2px"}}>{v}</div>
-                <div style={{fontSize:"8px",color:C.blue}}>Used for: {use}</div>
-              </div>
-            ))}
-          </Sec>
-        </div>)}
-
-        {/* NETLIFY */}
-        {dtab==="netlify"&&(<div>
-          <Sec title="🌐 DEPLOY TO NETLIFY — FREE WEB APP" color={C.green}>
-            <div style={{background:"#071407",border:`1px solid ${C.green}33`,borderRadius:"4px",padding:"9px 11px",marginBottom:"10px",fontSize:"9px",color:C.muted,lineHeight:"1.7"}}>
-              Netlify deployment gives you: <strong style={{color:C.green}}>live OANDA prices</strong>, a permanent URL you can bookmark on any device, and optional push notifications. Free tier is more than enough.
-            </div>
-            <Step n="1" text="Download the AXIOM_FX_v6.jsx file" sub="Tap the file link in Claude → Download. It saves to your Files app or Downloads folder."/>
-            <Step n="2" text="Create a free Netlify account" sub="Go to netlify.com → Sign Up (use GitHub, Google, or email). Takes 60 seconds."/>
-            <Step n="3" text="Create index.html wrapper" sub='On your computer, create a new file called index.html with this content: paste the React CDN wrapper below.'/>
-            <div style={{background:C.bg,border:`1px solid ${C.bdr}`,borderRadius:"4px",padding:"10px",marginBottom:"10px",fontFamily:"monospace",fontSize:"8px",color:C.green,overflowX:"auto",lineHeight:"1.8"}}>
-              {`<!DOCTYPE html>
-<html><head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<meta name="apple-mobile-web-app-capable" content="yes"/>
-<meta name="apple-mobile-web-app-title" content="AXIOM FX"/>
-<title>AXIOM FX v6</title>
-</head><body style="margin:0">
-<div id="root"></div>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script type="text/babel" src="./AXIOM_FX_v6.jsx"></script>
-<script>
-  window.addEventListener('load',()=>{
-    const root=ReactDOM.createRoot(document.getElementById('root'));
-    window.AxiomFX = AxiomFX;
-root.render(React.createElement(AxiomFX));
-  });
-</script>
-</body></html>`}
-            </div>
-            <Step n="4" text="Put both files in one folder" sub="Create a folder called 'axiom-fx'. Put index.html and AXIOM_FX_v6.jsx inside it."/>
-            <Step n="5" text="Deploy to Netlify" sub="Go to app.netlify.com → Sites → drag your 'axiom-fx' folder onto the deploy area. Done in 30 seconds."/>
-            <Step n="6" text="Your app is live!" sub="Netlify gives you a URL like https://axiom-fx-abc123.netlify.app — bookmark this on all devices. OANDA live prices will activate automatically."/>
-            <div style={{background:`#0a1200`,border:`1px solid ${C.green}44`,borderRadius:"4px",padding:"9px 11px",fontSize:"9px",color:C.muted,lineHeight:"1.7"}}>
-              <strong style={{color:C.green}}>Custom domain:</strong> In Netlify Settings → Domain Management → you can add a custom domain like axiom-fx.yourdomain.com for free.
-            </div>
-          </Sec>
-        </div>)}
-
-        {/* IPHONE PWA */}
-        {dtab==="iphone"&&(<div>
-          <Sec title="📱 IPHONE HOME SCREEN APP (PWA)" color={C.blue}>
-            <div style={{background:"#070a14",border:`1px solid ${C.blue}33`,borderRadius:"4px",padding:"9px 11px",marginBottom:"10px",fontSize:"9px",color:C.muted,lineHeight:"1.7"}}>
-              Adding AXIOM to your iPhone home screen creates a <strong style={{color:C.blue}}>Progressive Web App (PWA)</strong> — it launches full-screen like a native app, hides the browser UI, and can receive push notifications. <strong style={{color:C.text}}>Requires Netlify deployment first.</strong>
-            </div>
-            <Step n="1" text="Deploy to Netlify first" sub="Follow the Netlify tab instructions. You need a live URL before adding to home screen."/>
-            <Step n="2" text="Open your Netlify URL in Safari" sub="Must be Safari (not Chrome) for PWA installation on iPhone. Go to your https://axiom-fx-....netlify.app URL."/>
-            <Step n="3" text="Tap the Share button" sub="The square with an arrow pointing up — at the bottom of Safari's browser bar."/>
-            <Step n="4" text='Tap "Add to Home Screen"' sub='Scroll down in the share sheet until you see "Add to Home Screen". Tap it.'/> 
-            <Step n="5" text='Name it "AXIOM FX" and tap Add' sub="The app icon will appear on your home screen. Tap it to launch full-screen with no browser UI."/>
-            <Step n="6" text="Live prices + notifications active" sub="Once installed as PWA from Netlify, OANDA prices are live (3s refresh) and push notifications work."/>
-            <div style={{background:"#070a14",border:`1px solid ${C.amber}33`,borderRadius:"4px",padding:"9px 11px",marginTop:"8px",fontSize:"9px",color:C.muted,lineHeight:"1.7"}}>
-              <strong style={{color:C.amber}}>Cross-device continuity:</strong> Your settings (API key, account size, risk) are stored in localStorage per browser/device. When you set up on a new device, go to ⚙ Settings and your API keys are already pre-wired in the code — just tap Save Settings to confirm.
-            </div>
-          </Sec>
-        </div>)}
-
-        {/* NOTIFICATIONS */}
-        {dtab==="notifs"&&(<div>
-          <Sec title="🔔 PUSH NOTIFICATIONS — IPHONE SETUP" color={C.amber}>
-            <div style={{background:"#14100a",border:`1px solid ${C.amber}33`,borderRadius:"4px",padding:"9px 11px",marginBottom:"10px",fontSize:"9px",color:C.muted,lineHeight:"1.7"}}>
-              Push notifications for new AXIOM signals require the app to be <strong style={{color:C.amber}}>installed as a PWA from Netlify</strong>. They do NOT work in Claude.ai sandbox or regular Safari browsing. iOS 16.4+ required.
-            </div>
-            <Step n="1" text="Install as iPhone PWA first" sub="Follow the iPhone App tab. Must be running from Netlify URL added to home screen."/>
-            <Step n="2" text="Open the PWA from home screen" sub="Launch AXIOM from the home screen icon (not from Safari directly)."/>
-            <Step n="3" text="Go to ⚙ Settings → Signal Notifications" sub='Tap "ENABLE PUSH NOTIFICATIONS" button. iOS will show a permission dialog.'/> 
-            <Step n="4" text='Tap "Allow" on the iOS permission dialog' sub="AXIOM will now send you a push notification whenever a new high-confidence signal is generated (S-Tier or A-Tier only)."/>
-            <Step n="5" text="Notification content" sub="Each notification shows: pair, direction (BUY/SELL), strategy name, and probability %. Tap the notification to jump directly to the signal."/>
-            <div style={{background:"#14100a",border:`1px solid ${C.amber}33`,borderRadius:"4px",padding:"9px 11px",marginTop:"8px",fontSize:"9px",color:C.muted,lineHeight:"1.7"}}>
-              <strong style={{color:C.amber}}>If notifications don't appear:</strong> Go to iPhone Settings → Notifications → AXIOM FX → ensure Allow Notifications is ON and Alerts, Sounds, Badges are enabled.
-            </div>
-            <div style={{background:"#14100a",border:`1px solid ${C.bdr}`,borderRadius:"4px",padding:"9px 11px",marginTop:"6px",fontSize:"9px",color:C.muted,lineHeight:"1.7"}}>
-              <strong style={{color:C.text}}>Available in:</strong> <Tag label="iPhone PWA" color={C.green}/><Tag label="NOT in Claude" color={C.red}/><Tag label="NOT in Safari browser" color={C.red}/>
-            </div>
-          </Sec>
-        </div>)}
-
-        {/* BROKER LINK */}
-        {dtab==="broker"&&(<div>
-          <Sec title="🔗 BROKER CONNECTION — OANDA & TASTYFX" color={C.green}>
-            <div style={{background:"#071407",border:`1px solid ${C.green}33`,borderRadius:"4px",padding:"9px 11px",marginBottom:"10px",fontSize:"9px",color:C.muted,lineHeight:"1.7"}}>
-              AXIOM currently uses your <strong style={{color:C.green}}>OANDA Live API</strong> for live price data. Below are instructions for connecting your live OANDA account or TastyFX MT4 for trade execution.
-            </div>
-            <div style={{fontWeight:"700",color:C.gold,fontSize:"10px",marginBottom:"8px",letterSpacing:"1px"}}>OPTION A — OANDA LIVE ACCOUNT</div>
-            <Step n="1" text="Open an OANDA live account (if not already)" sub="Go to oanda.com → Open Live Account. Minimum deposit varies by region."/>
-            <Step n="2" text="Generate a live API key" sub="Log in to hub.oanda.com → Settings → API Access → Generate Token. Copy your live API key."/>
-            <Step n="3" text="Update in AXIOM Settings" sub="Go to ⚙ Settings → OANDA API KEY field → paste your live key → Save Settings. The endpoint automatically switches from practice to live."/>
-            <Step n="4" text="Switch endpoint in code" sub="In the AXIOM JSX file, change: api-trade.oanda.com → api-trade.oanda.com (remove 'fx' prefix). This switches to the live price feed."/>
-            <div style={{background:"#071407",border:`1px solid ${C.bdr}`,borderRadius:"4px",padding:"9px 11px",marginBottom:"10px",fontSize:"9px",color:C.muted,lineHeight:"1.7"}}>
-              <strong style={{color:C.amber}}>⚠ Important:</strong> AXIOM is a paper trading simulator. Live API connection provides real-time prices only — it does NOT place real trades on your account. All trades in AXIOM are theoretical.
-            </div>
-            <div style={{fontWeight:"700",color:C.gold,fontSize:"10px",marginBottom:"8px",letterSpacing:"1px"}}>OPTION B — TASTYFX / TASTYTRADE MT4</div>
-            <Step n="1" text="Log in to your TastyFX account" sub="Go to tastyfx.com or tastytrade.com → your account dashboard."/>
-            <Step n="2" text="Find MT4 server credentials" sub="Account Settings → MetaTrader 4 → you'll see your MT4 server name, login number, and password."/>
-            <Step n="3" text="MT4 connection note" sub="TastyFX MT4 uses a proprietary WebSocket feed that requires server-side code to relay prices — not directly accessible from a browser app due to CORS restrictions."/>
-            <Step n="4" text="Recommended approach for TastyFX" sub="Use OANDA Demo/Live for live price data in AXIOM (same interbank prices, negligible difference). Use TastyFX MT4 for actual trade execution based on AXIOM signals."/>
-            <div style={{background:"#070a14",border:`1px solid ${C.blue}33`,borderRadius:"4px",padding:"9px 11px",marginTop:"6px",fontSize:"9px",color:C.muted,lineHeight:"1.7"}}>
-              <strong style={{color:C.blue}}>Workflow:</strong> AXIOM generates signal → note entry/SL/TP levels → open MT4 on TastyFX → manually place the trade using AXIOM's exact levels. This is the institutional workflow — signal system and execution platform are always separate.
-            </div>
-          </Sec>
-        </div>)}
-
-        {/* CONTINUITY */}
-        {dtab==="continuity"&&(<div>
-          <Sec title="🔄 CROSS-DEVICE CONTINUITY" color={C.blue}>
-            <div style={{background:"#070a14",border:`1px solid ${C.blue}33`,borderRadius:"4px",padding:"9px 11px",marginBottom:"10px",fontSize:"9px",color:C.muted,lineHeight:"1.7"}}>
-              Your AXIOM data (trades, signals, settings) is stored in <strong style={{color:C.blue}}>browser localStorage</strong> — meaning it's device and browser specific. Here's how to maintain continuity.
-            </div>
-            <Step n="1" text="API keys are pre-wired in the code" sub="Your Anthropic key and OANDA key are embedded in the JSX. Every new deployment automatically has them — no re-entry needed."/>
-            <Step n="2" text="Settings persist per browser/device" sub="Account size, risk settings, and preferences are saved to localStorage. On first open of any new browser, they load from code defaults."/>
-            <Step n="3" text="Trade history is device-local" sub="Paper trades are stored in localStorage on that device. They don't sync across devices (by design — this is a local simulation tool)."/>
-            <Step n="4" text="Recommended multi-device setup" sub="iPhone PWA (home screen) = primary trading companion. Netlify URL bookmarked in Safari/Chrome on Mac/iPad = secondary research screen."/>
-            <Step n="5" text="Updating to a new version" sub="When a new AXIOM version is deployed to Netlify, your settings and trades carry over automatically from localStorage. Just replace the JSX file and re-deploy."/>
-            <div style={{background:"#070a14",border:`1px solid ${C.gold}33`,borderRadius:"4px",padding:"9px 11px",marginTop:"8px",fontSize:"9px",color:C.muted,lineHeight:"1.7"}}>
-              <strong style={{color:C.gold}}>Live data availability by platform:</strong><br/>
-              <div style={{marginTop:"5px",lineHeight:"2"}}>
-                <Tag label="Claude Sandbox" color={C.amber}/> AI chat ✓ · News ✓ · Prices SIM · No notifications<br/>
-                <Tag label="Netlify Web" color={C.green}/> All features ✓ · OANDA Live prices ✓ · Bookmarkable URL<br/>
-                <Tag label="iPhone PWA" color={C.blue}/> All features ✓ · OANDA Live ✓ · Push notifications ✓ · Full screen
-              </div>
-            </div>
-          </Sec>
-        </div>)}
+      <div style={{display:"flex",gap:"5px",margin:"12px 0"}}>
+        {["OVERVIEW","LEVELS","EVIDENCE","CONTEXT"].map(t=>(<Sm key={t} label={t} color={C.gold} active={tab===t} onClick={()=>setTab(t)}/>))}
       </div>
-    );
-  }
-
-  // ─── SOURCES TAB ─────────────────────────────────────────────────────────
-  function SourcesTab(){
-      // srcCat and srcPage lifted to root state — persist across tab switches
-
-      // MASTER SOURCE LIBRARY \u2014 100+ vetted institutional sources
-      const ALL_SOURCES=[
-        // CENTRAL BANKS
-        {cat:"CENTRAL BANKS",name:"Federal Reserve",role:"Fed Funds Rate, FOMC Minutes, Beige Book, PCE",url:"https://www.federalreserve.gov/monetarypolicy/",freq:"8x/year",tier:"S"},
-        {cat:"CENTRAL BANKS",name:"European Central Bank",role:"ECB rate decisions, Schnabel/Lagarde speeches, TLTRO data",url:"https://www.ecb.europa.eu/mopo/",freq:"8x/year",tier:"S"},
-        {cat:"CENTRAL BANKS",name:"Bank of Japan",role:"BOJ rate decisions, Outlook Report, Ueda speeches",url:"https://www.boj.or.jp/en/mopo/",freq:"8x/year",tier:"S"},
-        {cat:"CENTRAL BANKS",name:"Bank of England",role:"MPC decisions, Monetary Policy Report, Governor Bailey",url:"https://www.bankofengland.co.uk/monetary-policy/",freq:"8x/year",tier:"S"},
-        {cat:"CENTRAL BANKS",name:"Reserve Bank of Australia",role:"RBA Board Minutes, Governor Bullock speeches, SMP",url:"https://www.rba.gov.au/monetary-policy/",freq:"11x/year",tier:"S"},
-        {cat:"CENTRAL BANKS",name:"Bank of Canada",role:"BOC decisions, Monetary Policy Report, Macklem",url:"https://www.bankofcanada.ca/core-functions/monetary-policy/",freq:"8x/year",tier:"S"},
-        {cat:"CENTRAL BANKS",name:"Swiss National Bank",role:"SNB decisions, Quarterly Bulletin, Jordan speeches",url:"https://www.snb.ch/en/monetary-policy/overview/",freq:"4x/year",tier:"S"},
-        {cat:"CENTRAL BANKS",name:"RBNZ",role:"OCR decisions, MPS, Governor Orr \u2014 325bp cutting cycle",url:"https://www.rbnz.govt.nz/monetary-policy/",freq:"7x/year",tier:"S"},
-        {cat:"CENTRAL BANKS",name:"BIS \u2014 Bank for International Settlements",role:"Global CB coordination, FX research, financial stability",url:"https://www.bis.org/research/",freq:"Continuous",tier:"S"},
-        {cat:"CENTRAL BANKS",name:"Fed FRED Database",role:"All US economic data: PCE, CPI, employment, yields — AXIOM 10Y yield spreads live feed",url:"https://fred.stlouisfed.org/",freq:"Daily",tier:"S"},
-        {cat:"LIVE DATA FEEDS",name:"Finnhub Economic Calendar",role:"AXIOM live feed: economic releases with actual vs estimate for NEWS_DFT + ECO_SURP strategies",url:"https://finnhub.io/docs/api/economic-calendar",freq:"Real-time",tier:"S"},
-        {cat:"LIVE DATA FEEDS",name:"CFTC Commitments of Traders",role:"AXIOM live feed: weekly net non-commercial FX positioning for COT_REAL strategy",url:"https://www.cftc.gov/MarketReports/CommitmentsofTraders/",freq:"Weekly Fri",tier:"A"},
-        {cat:"LIVE DATA FEEDS",name:"OANDA v3 API",role:"AXIOM live feed: real-time bid/ask prices + H1/H4/D1 candles for all 28 G10 pairs",url:"https://developer.oanda.com/rest-live-v20/introduction/",freq:"Real-time",tier:"S"},
-        // MACRO RESEARCH HOUSES
-        {cat:"MACRO RESEARCH",name:"J.P. Morgan Global Research",role:"EUR/USD 1.20, USD/JPY 164 year-end. CB transition themes.",url:"https://www.jpmorgan.com/insights/global-research/outlook/market-outlook",freq:"Weekly",tier:"S"},
-        {cat:"MACRO RESEARCH",name:"MUFG Research",role:"Post-peak USD world. EUR/USD 1.24, USD/JPY 146 targets.",url:"https://www.mufgresearch.com/",freq:"Weekly",tier:"S"},
-        {cat:"MACRO RESEARCH",name:"ING Think \u2014 G10 FX",role:"Fundamentals return. EUR/GBP 0.88-0.90. BOE easing.",url:"https://think.ing.com/",freq:"Daily",tier:"S"},
-        {cat:"MACRO RESEARCH",name:"Goldman Sachs FX Research",role:"USD index forecasts, EM vs DM flows, commodity FX",url:"https://www.goldmansachs.com/insights/",freq:"Weekly",tier:"S"},
-        {cat:"MACRO RESEARCH",name:"BlackRock Investment Institute",role:"Short USD, dollar debasement, multi-asset regime views",url:"https://www.blackrock.com/institutions/en-us/insights/",freq:"Monthly",tier:"S"},
-        {cat:"MACRO RESEARCH",name:"RBC Capital Markets FX",role:"AUD/USD 0.73, EUR/CHF 0.93, USMCA CAD risk",url:"https://www.rbccm.com/",freq:"Weekly",tier:"A"},
-        {cat:"MACRO RESEARCH",name:"Deutsche Bank FX Research",role:"G10 carry signals, USD positioning, EM contagion",url:"https://www.db.com/newsroom/",freq:"Weekly",tier:"A"},
-        {cat:"MACRO RESEARCH",name:"Citigroup FX Strategy",role:"Pain trade analysis, positioning extremes, flow data",url:"https://www.citigroup.com/global/insights/",freq:"Weekly",tier:"A"},
-        {cat:"MACRO RESEARCH",name:"Morgan Stanley FX",role:"USD structural views, cross-asset FX signals",url:"https://www.morganstanley.com/im/en-us/individual-investor/insights/",freq:"Weekly",tier:"A"},
-        {cat:"MACRO RESEARCH",name:"Barclays FX Research",role:"EUR/USD short-term fair value, CB surprise indices",url:"https://home.barclays/news/",freq:"Weekly",tier:"A"},
-        {cat:"MACRO RESEARCH",name:"UBS FX Strategy",role:"Safe haven flows, CHF/JPY dynamics, wealth management FX",url:"https://www.ubs.com/global/en/investment-bank/insights.html",freq:"Weekly",tier:"A"},
-        {cat:"MACRO RESEARCH",name:"Nomura FX Research",role:"Asia-Pacific flows, JPY structural analysis, BOJ forecasting",url:"https://www.nomuraholdings.com/",freq:"Weekly",tier:"A"},
-        {cat:"MACRO RESEARCH",name:"Credit Suisse/UBS FX",role:"EUR/CHF, Swiss macro, European cross dynamics",url:"https://www.ubs.com/global/en/investment-bank/insights.html",freq:"Weekly",tier:"A"},
-        {cat:"MACRO RESEARCH",name:"Soci\u00e9t\u00e9 G\u00e9n\u00e9rale Cross-Asset",role:"EUR macro, positioning, flow-of-funds analysis",url:"https://wholesale.banking.societegenerale.com/en/",freq:"Weekly",tier:"A"},
-        {cat:"MACRO RESEARCH",name:"Capital Economics FX",role:"Independent macro forecasting, unbiased CB outlook",url:"https://www.capitaleconomics.com/",freq:"Daily",tier:"A"},
-        // IMF / WORLD BANK / OECD
-        {cat:"INTERNATIONAL INSTITUTIONS",name:"IMF World Economic Outlook",role:"Global growth forecasts, exchange rate equilibrium (CGER)",url:"https://www.imf.org/en/Publications/WEO",freq:"2x/year",tier:"S"},
-        {cat:"INTERNATIONAL INSTITUTIONS",name:"IMF Working Papers",role:"Currency crises, capital flows, CB divergence research",url:"https://www.imf.org/en/Publications/WP",freq:"Continuous",tier:"S"},
-        {cat:"INTERNATIONAL INSTITUTIONS",name:"OECD PPP Database",role:"Purchasing Power Parity FX fair value \u2014 EUR/USD ~1.14",url:"https://stats.oecd.org/index.aspx?queryid=221",freq:"Annual",tier:"A"},
-        {cat:"INTERNATIONAL INSTITUTIONS",name:"World Bank Global Finance",role:"Remittance flows, EM currency pressures, DM growth",url:"https://www.worldbank.org/en/research",freq:"Quarterly",tier:"A"},
-        {cat:"INTERNATIONAL INSTITUTIONS",name:"BIS Quarterly Review",role:"FX market turnover, OTC derivatives, global liquidity",url:"https://www.bis.org/publ/qtrpdf/",freq:"Quarterly",tier:"S"},
-        {cat:"INTERNATIONAL INSTITUTIONS",name:"BIS Working Papers",role:"CB communication, carry trade, safe haven, stop-loss orders",url:"https://www.bis.org/research/workingpapers.htm",freq:"Continuous",tier:"S"},
-        // ECONOMIC DATA
-        {cat:"ECONOMIC DATA",name:"Bureau of Labor Statistics",role:"NFP, CPI, PPI, unemployment \u2014 primary USD movers",url:"https://www.bls.gov/news.release/",freq:"Monthly",tier:"S"},
-        {cat:"ECONOMIC DATA",name:"Bureau of Economic Analysis",role:"GDP, PCE, personal income \u2014 Fed's preferred inflation gauge",url:"https://www.bea.gov/data/",freq:"Monthly",tier:"S"},
-        {cat:"ECONOMIC DATA",name:"Eurostat",role:"Eurozone CPI flash, GDP, industrial production",url:"https://ec.europa.eu/eurostat/statistics-explained/",freq:"Monthly",tier:"S"},
-        {cat:"ECONOMIC DATA",name:"Statistics Japan (e-Stat)",role:"Japan wage data, CPI, industrial output, trade balance",url:"https://www.e-stat.go.jp/en/",freq:"Monthly",tier:"S"},
-        {cat:"ECONOMIC DATA",name:"ONS UK",role:"UK CPI, GDP, employment, retail sales",url:"https://www.ons.gov.uk/economy/",freq:"Monthly",tier:"S"},
-        {cat:"ECONOMIC DATA",name:"Statistics Canada",role:"Canada CPI, employment, trade balance, GDP",url:"https://www150.statcan.gc.ca/",freq:"Monthly",tier:"A"},
-        {cat:"ECONOMIC DATA",name:"Australian Bureau of Statistics",role:"AUS employment, CPI, GDP, trade",url:"https://www.abs.gov.au/statistics/",freq:"Monthly",tier:"A"},
-        {cat:"ECONOMIC DATA",name:"Statistics NZ",role:"NZ GDP, CPI \u2014 recession confirmation data",url:"https://www.stats.govt.nz/",freq:"Monthly",tier:"A"},
-        {cat:"ECONOMIC DATA",name:"ForexFactory Economic Calendar",role:"Real-time global economic releases, consensus forecasts",url:"https://www.forexfactory.com/calendar",freq:"Daily",tier:"S"},
-        {cat:"ECONOMIC DATA",name:"Investing.com Economic Calendar",role:"Global economic events, historical data, forecasts",url:"https://www.investing.com/economic-calendar/",freq:"Daily",tier:"S"},
-        // POSITIONING & FLOW DATA
-        {cat:"POSITIONING & FLOW",name:"CFTC Commitment of Traders",role:"Weekly institutional net positioning \u2014 USD extremes",url:"https://www.cftc.gov/MarketReports/CommitmentsofTraders/",freq:"Weekly",tier:"S"},
-        {cat:"POSITIONING & FLOW",name:"LSEG WM/Reuters Fix",role:"4PM London Fix methodology \u2014 institutional order flow",url:"https://www.lseg.com/en/data-analytics/financial-data/foreign-exchange/wm-reuters-rates",freq:"Daily",tier:"S"},
-        {cat:"POSITIONING & FLOW",name:"CME Group FX Options",role:"G10 option expiry strikes, gamma levels, open interest",url:"https://www.cmegroup.com/trading/fx/",freq:"Daily",tier:"S"},
-        {cat:"POSITIONING & FLOW",name:"ICE FX Futures",role:"EUR, GBP, JPY, AUD futures positioning data",url:"https://www.theice.com/products/29271",freq:"Daily",tier:"A"},
-        {cat:"POSITIONING & FLOW",name:"Bank of Japan Flow Data",role:"Japan current account, portfolio investment flows",url:"https://www.boj.or.jp/en/statistics/br/index.htm",freq:"Monthly",tier:"A"},
-        {cat:"POSITIONING & FLOW",name:"US Treasury TIC Data",role:"Foreign purchases of US assets \u2014 USD demand indicator",url:"https://ticdata.treasury.gov/resource-center/data-chart-center/tic/Pages/ticsec2.aspx",freq:"Monthly",tier:"A"},
-        // ACADEMIC / QUANTITATIVE RESEARCH
-        {cat:"ACADEMIC RESEARCH",name:"AQR Capital \u2014 Factor Research",role:"Carry, momentum, value everywhere. Cross-asset factors.",url:"https://www.aqr.com/Insights/Research/",freq:"Quarterly",tier:"S"},
-        {cat:"ACADEMIC RESEARCH",name:"NBER Working Papers",role:"Carry (WP11631), news drift (WP20427), UIP puzzle (Fama 1984)",url:"https://www.nber.org/",freq:"Continuous",tier:"S"},
-        {cat:"ACADEMIC RESEARCH",name:"SSRN Finance & Economics",role:"FX technical patterns, VWAP, Fibonacci, session breakouts",url:"https://papers.ssrn.com/",freq:"Continuous",tier:"S"},
-        {cat:"ACADEMIC RESEARCH",name:"Journal of Finance",role:"Peer-reviewed: arbitrage, carry, FX anomalies",url:"https://afajof.org/journal-of-finance/",freq:"Quarterly",tier:"A"},
-        {cat:"ACADEMIC RESEARCH",name:"Journal of International Economics",role:"UIP, purchasing power parity, exchange rate determination",url:"https://www.journals.elsevier.com/journal-of-international-economics",freq:"Quarterly",tier:"A"},
-        {cat:"ACADEMIC RESEARCH",name:"Review of Financial Studies",role:"Liquidity, market microstructure, FX price discovery",url:"https://academic.oup.com/rfs",freq:"Monthly",tier:"A"},
-        {cat:"ACADEMIC RESEARCH",name:"Quantitative Finance Journal",role:"Technical patterns, systematic strategies, FX models",url:"https://www.tandfonline.com/toc/rquf20/current",freq:"Monthly",tier:"A"},
-        {cat:"ACADEMIC RESEARCH",name:"Federal Reserve IFDP Papers",role:"Real interest rate differentials, FX regime analysis",url:"https://www.federalreserve.gov/pubs/ifdp/",freq:"Continuous",tier:"A"},
-        // REAL-TIME MARKET INTELLIGENCE
-        {cat:"REAL-TIME INTELLIGENCE",name:"Reuters FX Markets",role:"Breaking CB news, G10 price action, sovereign flows",url:"https://www.reuters.com/markets/currencies/",freq:"Continuous",tier:"S"},
-        {cat:"REAL-TIME INTELLIGENCE",name:"Bloomberg FX Markets",role:"Live FX analysis, macro strategy, CB watch",url:"https://www.bloomberg.com/markets/currencies",freq:"Continuous",tier:"S"},
-        {cat:"REAL-TIME INTELLIGENCE",name:"Financial Times Markets",role:"In-depth macro analysis, CB policy, global FX narrative",url:"https://www.ft.com/currencies",freq:"Continuous",tier:"S"},
-        {cat:"REAL-TIME INTELLIGENCE",name:"Wall Street Journal Markets",role:"USD policy analysis, macro narratives, Fed coverage",url:"https://www.wsj.com/market-data/currencies",freq:"Continuous",tier:"S"},
-        {cat:"REAL-TIME INTELLIGENCE",name:"FT Alphaville",role:"Deep-dive macro commentary, critical CB analysis",url:"https://www.ft.com/alphaville",freq:"Daily",tier:"A"},
-        {cat:"REAL-TIME INTELLIGENCE",name:"MarketWatch FX",role:"US-focused macro news, Fed commentary, economic data",url:"https://www.marketwatch.com/investing/currencies",freq:"Continuous",tier:"A"},
-        {cat:"REAL-TIME INTELLIGENCE",name:"Forexlive",role:"Real-time FX dealer commentary, CB speaker wire",url:"https://www.forexlive.com/",freq:"Continuous",tier:"A"},
-        {cat:"REAL-TIME INTELLIGENCE",name:"MNI Market News",role:"Professional CB monitoring, policy change signals",url:"https://marketnews.com/",freq:"Continuous",tier:"A"},
-        {cat:"REAL-TIME INTELLIGENCE",name:"The Macro Compass",role:"Cross-asset macro flows, institutional positioning shifts",url:"https://themacrocompass.substack.com/",freq:"Weekly",tier:"A"},
-        {cat:"REAL-TIME INTELLIGENCE",name:"Real Vision FX",role:"Institutional macro interviews, trading strategies",url:"https://www.realvision.com/finance/currencies",freq:"Weekly",tier:"A"},
-        // COMMODITY & CROSS-ASSET
-        {cat:"COMMODITY & CROSS-ASSET",name:"World Gold Council",role:"Gold-USD inverse correlation, central bank gold buying",url:"https://www.gold.org/goldhub/research/",freq:"Monthly",tier:"A"},
-        {cat:"COMMODITY & CROSS-ASSET",name:"IEA Oil Market Report",role:"Oil demand/supply \u2014 direct CAD/NOK/RUB FX driver",url:"https://www.iea.org/reports/oil-market-report",freq:"Monthly",tier:"S"},
-        {cat:"COMMODITY & CROSS-ASSET",name:"RBA Commodity Index",role:"Iron ore/copper prices \u2192 AUD correlation",url:"https://www.rba.gov.au/statistics/frequency/commodity-prices.html",freq:"Monthly",tier:"A"},
-        {cat:"COMMODITY & CROSS-ASSET",name:"CBOE VIX Index",role:"Risk regime indicator \u2014 VIX >25 = JPY/CHF bid",url:"https://www.cboe.com/tradable_products/vix/",freq:"Daily",tier:"S"},
-        {cat:"COMMODITY & CROSS-ASSET",name:"Bloomberg Commodity Index",role:"Broad commodity direction \u2014 commodity CCY beta",url:"https://www.bloomberg.com/markets/commodities",freq:"Daily",tier:"A"},
-        // TECHNICAL & SYSTEMATIC
-        {cat:"TECHNICAL & SYSTEMATIC",name:"CTA/Trend Following Research",role:"Turtle Rules, Donchian breakout systems, CTAs",url:"https://www.trendfollowing.com/",freq:"Continuous",tier:"A"},
-        {cat:"TECHNICAL & SYSTEMATIC",name:"Investopedia Technical Analysis",role:"Bollinger, Keltner, Ichimoku, Fibonacci \u2014 retail benchmark",url:"https://www.investopedia.com/technical-analysis-4689657",freq:"Continuous",tier:"B"},
-        {cat:"TECHNICAL & SYSTEMATIC",name:"CMT Association Research",role:"Chartered Market Technician \u2014 peer-reviewed TA research",url:"https://cmtassociation.org/",freq:"Quarterly",tier:"A"},
-        {cat:"TECHNICAL & SYSTEMATIC",name:"Pedersen (NYU Stern): FX Momentum",role:"Cross-sectional momentum in currency markets",url:"https://pages.stern.nyu.edu/~lpederse/papers/MomentumCurrencies.pdf",freq:"Static",tier:"S"},
-        // TRADE & GEOPOLITICAL
-        {cat:"TRADE & GEOPOLITICAL",name:"USTR \u2014 US Trade Policy",role:"Tariff announcements, USMCA review, trade war risk",url:"https://ustr.gov/about-us/policy-offices/press-office/press-releases",freq:"Irregular",tier:"S"},
-        {cat:"TRADE & GEOPOLITICAL",name:"WTO Trade Statistics",role:"Global trade flows, G10 CA surplus/deficit data",url:"https://www.wto.org/english/res_e/statis_e/statis_e.htm",freq:"Quarterly",tier:"A"},
-        {cat:"TRADE & GEOPOLITICAL",name:"Japan MOF: Trade & BOP",role:"Japan current account surplus \u2014 structural JPY support",url:"https://www.mof.go.jp/english/policy/balance_of_payments/",freq:"Monthly",tier:"S"},
-        {cat:"TRADE & GEOPOLITICAL",name:"Council on Foreign Relations",role:"Geopolitical risk analysis \u2014 safe haven demand driver",url:"https://www.cfr.org/global/",freq:"Continuous",tier:"A"},
-        {cat:"TRADE & GEOPOLITICAL",name:"PIIE \u2014 Peterson Institute",role:"US trade policy, tariff impact analysis, FX implications",url:"https://www.piie.com/research/topics/",freq:"Weekly",tier:"A"},
-        // RISK & VOLATILITY
-        {cat:"RISK & VOLATILITY",name:"Cboe FX Volatility (CVIX)",role:"G10 implied volatility index \u2014 risk premium signal",url:"https://www.cboe.com/tradable_products/vix/",freq:"Daily",tier:"S"},
-        {cat:"RISK & VOLATILITY",name:"DTCC FX Data",role:"Global FX settlement data, counterparty flow volumes",url:"https://www.dtcc.com/repository-otc-data",freq:"Daily",tier:"A"},
-        {cat:"RISK & VOLATILITY",name:"JPMorgan FX Volatility Index",role:"G10 3M implied vol index \u2014 option premium signal",url:"https://www.jpmorgan.com/insights/research/",freq:"Daily",tier:"A"},
-      ];
-
-      const cats=["ALL",...new Set(ALL_SOURCES.map(s=>s.cat))];
-      const tierC={S:C.gold,A:C.green,B:C.blue};
-      const PAGE=15;
-
-      const filtered=ALL_SOURCES.filter(s=>srcCat==="ALL"||s.cat===srcCat);
-      const displayed=filtered.slice(0,(srcPage+1)*PAGE);
-      const hasMore=displayed.length<filtered.length;
-
-      return(
+      {tab==="OVERVIEW"&&(
         <div>
-          <div style={{background:`linear-gradient(90deg,${C.bg2},#0a1a2a)`,border:`2px solid ${C.gold}`,borderRadius:"7px",padding:"13px 15px",marginBottom:"12px"}}>
-            <div style={{fontSize:"12px",fontWeight:"700",color:C.gold,letterSpacing:"2px",marginBottom:"5px"}}>\ud83d\udcc4 RESEARCH SOURCES \u2014 {ALL_SOURCES.length}+ VETTED INSTITUTIONS</div>
-            <div style={{fontSize:"9px",color:C.muted,lineHeight:"1.65",marginBottom:"8px"}}>Every source AXIOM uses for strategy evidence, macro narrative, and signal generation. Tap any source to open directly. Updated as new institutional research is published.</div>
-            <div style={{display:"flex",gap:"5px",flexWrap:"wrap"}}>
-              {cats.map(c=>(
-                <button key={c} onClick={()=>{setSrcCat(c);setSrcPage(0);}}
-                  style={{padding:"5px 9px",background:srcCat===c?C.gold+"22":"transparent",color:srcCat===c?C.gold:C.muted,border:`1px solid ${srcCat===c?C.gold:C.bdr}`,borderRadius:"3px",cursor:"pointer",fontSize:"8px",fontWeight:"700",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                  {c==="ALL"?`ALL (${ALL_SOURCES.length})`:c}
-                </button>
-              ))}
-            </div>
+          <Kv k="Hold horizon" v={sig.holdTime}/>
+          <Kv k="Strategies fired / score" v={`${sig.strategiesTriggered} / ${sig.technicalScore}`}/>
+          <Kv k="Macro · Tech · Pure-TA" v={`${sig.macroTriggered} · ${sig.techTriggered} · ${sig.pureTA_T||0}`}/>
+          {sig.technicalDetails&&(
+            <div style={{marginTop:"10px",fontSize:"9px",color:C.muted,lineHeight:"1.9",background:C.bg2,borderRadius:"3px",padding:"9px"}}>
+              <div>{sig.technicalDetails.techNote}</div>
+              <div>{sig.technicalDetails.sessionNote}</div>
+              <div>{sig.technicalDetails.regimeNote}</div>
+            </div>)}
+          {sig.indicators&&(
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(96px,1fr))",gap:"6px",marginTop:"10px"}}>
+              {Object.entries(sig.indicators).map(([k,v])=>(
+                <div key={k} style={{background:C.bg2,borderRadius:"3px",padding:"6px",textAlign:"center"}}>
+                  <div style={{fontSize:"6.5px",color:C.muted,letterSpacing:"0.5px"}}>{k}</div>
+                  <div style={{fontSize:"10px",fontWeight:"800",color:C.text,marginTop:"2px"}}>{String(v)}</div>
+                </div>))}
+            </div>)}
+        </div>)}
+      {tab==="LEVELS"&&(
+        <div>
+          <Kv k="Entry" v={fmtP(sig.pair,sig.entry)}/>
+          <Kv k={`Stop (${sig.slPips}p)`} v={fmtP(sig.pair,sig.sl)} vc={C.red}/>
+          <Kv k={`TP1 (${sig.tp1Pips}p · R:R ${sig.rr1})`} v={fmtP(sig.pair,sig.tp1)} vc={C.green}/>
+          <Kv k={`TP2 (${sig.tp2Pips}p · R:R ${sig.rr2})`} v={fmtP(sig.pair,sig.tp2)} vc={C.green}/>
+          <Kv k={`TP3 (${sig.tp3Pips}p · R:R ${sig.rr3})`} v={fmtP(sig.pair,sig.tp3)} vc={C.green}/>
+          <Kv k="Lot size (clamped 0.01–2.00)" v={String(sig.lotSize)}/>
+          <Kv k="Pip value / lot (live legs)" v={fmtUsd(sig.pipValuePerLot)+" per pip"}/>
+          <Kv k="Risk at stop" v={fmtUsd(sig.riskAmount)} vc={C.amber}/>
+        </div>)}
+      {tab==="EVIDENCE"&&(
+        <div>
+          <div style={{fontSize:"8.5px",color:C.muted,background:C.bg2,borderRadius:"3px",padding:"9px",lineHeight:"1.8",marginBottom:"10px"}}>
+            <span style={{color:C.gold,fontWeight:"800"}}>LIVE PROB</span> is this signal's confluence output right now. <span style={{color:C.gold,fontWeight:"800"}}>RESEARCH WR</span> on each strategy is a literature baseline from the cited paper — not this system's live record. Your actual record lives in the Performance tab.
           </div>
-
-          <div style={{fontSize:"8.5px",color:C.muted,background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"8px 11px",marginBottom:"10px",lineHeight:"1.7"}}>
-            Showing <strong style={{color:C.text}}>{displayed.length}</strong> of <strong style={{color:C.text}}>{filtered.length}</strong> sources
-            {srcCat!=="ALL"&&<span> in <strong style={{color:C.gold}}>{srcCat}</strong></span>}
-            {" \u00b7 "}<Tag label="S-TIER" color={C.gold}/> Essential daily
-            {" "}<Tag label="A-TIER" color={C.green}/> High value
-            {" "}<Tag label="B-TIER" color={C.blue}/> Supplementary
-          </div>
-
-          {displayed.map((s,i)=>{
-            const tc=tierC[s.tier]||C.muted;
+          {(sig.allTriggered||[]).map((t,i)=>{
+            const ls=STRAT_BY_ID[t.id];
             return(
-              <div key={i} onClick={()=>window.open(s.url,"_blank","noopener")}
-                style={{background:C.bg2,border:`1px solid ${tc}22`,borderLeft:`3px solid ${tc}`,borderRadius:"5px",padding:"11px 13px",marginBottom:"7px",cursor:"pointer"}}
-                onMouseEnter={e=>{e.currentTarget.style.background=C.bg1;e.currentTarget.style.borderColor=tc+"55";}}
-                onMouseLeave={e=>{e.currentTarget.style.background=C.bg2;e.currentTarget.style.borderColor=tc+"22";}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:"8px",marginBottom:"4px"}}>
-                  <div style={{flex:1}}>
-                    <div style={{display:"flex",alignItems:"center",gap:"6px",marginBottom:"3px",flexWrap:"wrap"}}>
-                      <span style={{fontWeight:"700",color:C.text,fontSize:"11px"}}>{s.name}</span>
-                      <span style={{padding:"1px 5px",background:tc+"22",color:tc,border:`1px solid ${tc}33`,borderRadius:"2px",fontSize:"7px",fontWeight:"700"}}>{s.tier}</span>
-                      <span style={{padding:"1px 5px",background:"#ffffff08",color:C.muted,borderRadius:"2px",fontSize:"7px",fontWeight:"700"}}>{s.freq}</span>
-                    </div>
-                    <div style={{fontSize:"8.5px",color:tc,fontWeight:"600",marginBottom:"3px"}}>{s.role}</div>
-                  </div>
-                  <span style={{fontSize:"14px",color:C.blue,flexShrink:0}}>\u2197</span>
+              <div key={i} style={{display:"flex",gap:"8px",alignItems:"flex-start",padding:"7px 0",borderBottom:`1px solid ${C.bdr}22`}}>
+                <span style={{fontSize:"9px",fontWeight:"900",color:C.gold,width:"22px",flexShrink:0}}>+{t.score}</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:"9.5px",fontWeight:"800",color:C.text}}>{ls?ls.name:t.id} {ls&&<span style={{fontSize:"7.5px",color:C.muted,fontWeight:"400"}}>· {ls.tier} · research WR {ls.wr}%</span>}</div>
+                  <div style={{fontSize:"8.5px",color:C.muted,marginTop:"2px",lineHeight:"1.6"}}>{t.desc}</div>
                 </div>
-                <div style={{fontSize:"7.5px",color:C.muted,fontFamily:"monospace"}}>{s.cat}</div>
-              </div>
-            );
+                {ls&&<a href={ls.url} target="_blank" rel="noreferrer" style={{fontSize:"8px",color:C.blue,textDecoration:"none",flexShrink:0}}>src ↗</a>}
+              </div>);
           })}
+        </div>)}
+      {tab==="CONTEXT"&&(
+        <div>
+          <div style={{fontSize:"8px",color:C.gold,fontWeight:"800",letterSpacing:"1px",marginBottom:"8px"}}>LIVE CONTEXT — {new Date(sig.ts).toLocaleString()}</div>
+          <Kv k={`${b} regime`} v={`${rb.dir} · ${rb.strength}`} vc={dirColor(rb.dir)}/>
+          <Kv k={`${q} regime`} v={`${rq.dir} · ${rq.strength}`} vc={dirColor(rq.dir)}/>
+          <Kv k={`${b} policy rate`} v={cbB?`${cbB.rate.toFixed(2)}% · ${cbB.outlook||""} · as of ${cbB.asOf}`:"not loaded"} vc={cbB?C.text:C.dim}/>
+          <Kv k={`${q} policy rate`} v={cbQ?`${cbQ.rate.toFixed(2)}% · ${cbQ.outlook||""} · as of ${cbQ.asOf}`:"not loaded"} vc={cbQ?C.text:C.dim}/>
+          <Kv k="Carry differential" v={carry!=null?`${carry>0?"+":""}${carry.toFixed(2)}% (base − quote)`:"n/a"} vc={carry==null?C.dim:carry>0?C.green:C.red}/>
+          <div style={{fontSize:"8.5px",color:C.muted,marginTop:"9px",lineHeight:"1.7"}}>Context reflects the terminal's live regime settings and FRED rates at render time — no dated narratives are stored with the signal.</div>
+        </div>)}
+      <div style={{display:"flex",gap:"8px",marginTop:"14px"}}>
+        <Btn label="CLOSE" ghost color={C.muted} onClick={onClose} style={{flex:1}}/>
+        <Btn label="TAKE TRADE" color={dc} onClick={()=>{onTake(sig);onClose();}} style={{flex:1}}/>
+      </div>
+    </Overlay>);
+};
 
-          {hasMore&&(
-            <button onClick={()=>setSrcPage(p=>p+1)}
-              style={{width:"100%",padding:"11px",background:C.bg1,color:C.gold,border:`1px solid ${C.gold}44`,borderRadius:"4px",cursor:"pointer",fontSize:"11px",fontWeight:"700",fontFamily:"inherit",marginTop:"4px"}}>
-              \u2193 LOAD MORE SOURCES \u2014 {filtered.length-displayed.length} remaining
-            </button>
-          )}
-          {!hasMore&&displayed.length>0&&(
-            <div style={{textAlign:"center",padding:"12px",fontSize:"9px",color:C.muted}}>
-              \u2713 All {filtered.length} sources loaded{srcCat!=="ALL"?` for ${srcCat}`:""}
-            </div>
-          )}
-          <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"10px 12px",marginTop:"6px",fontSize:"8.5px",color:C.muted,lineHeight:"1.7"}}>
-            <strong style={{color:C.text}}>Disclaimer:</strong> AXIOM is a theoretical paper trading simulation for educational purposes. Signals are algorithmic and do not constitute financial advice. Strategy win rates reflect academic research and do not guarantee future performance. Price data anchored to Apr 8, 2026 snapshots; OANDA/ECB live prices activate on Netlify deploy.
-          </div>
+const StratModal=({strat,onClose,regimes,cbRates})=>{
+  if(!strat) return null;
+  const relevant=G10.filter(c=>regimes[c]&&regimes[c].strength==="STRONG");
+  return(
+    <Overlay onClose={onClose} maxWidth="480px">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+        <div>
+          <div style={{fontSize:"14px",fontWeight:"900",color:C.text}}>{strat.name}</div>
+          <div style={{fontSize:"8px",color:C.dim,marginTop:"2px"}}>{strat.id}</div>
         </div>
-      );
-    }
-  // ─── ROOT RENDER ─────────────────────────────────────────────────────
-  // Memoized content — only re-renders active tab, not on every price tick
-  // ── ERROR BANNERS — shown above all content when critical feeds are down ──
-  const errorBanners=useMemo(()=>{
-    const banners=[];
-    if(apiStatus==="error") banners.push({id:"oanda",msg:`✗ OANDA PRICE FEED UNAVAILABLE${priceError?": "+priceError:""}`,action:"Check OANDA_API_KEY in Netlify env vars",color:C.red});
-    if(cbRatesSource==="error") banners.push({id:"fred",msg:"✗ CB RATES FEED UNAVAILABLE — FRED unreachable",action:"Check FRED_API_KEY in Netlify env vars",color:C.red});
-    if(newsSource==="error") banners.push({id:"news",msg:"✗ NEWS FEED UNAVAILABLE — Finnhub unreachable",action:"Check FINNHUB_API_KEY in Netlify env vars",color:C.red});
-    if(scanStatus?.startsWith("✗ AXIOM_REGIMES")) banners.push({id:"regimes",msg:"✗ MACRO REGIMES NOT CONFIGURED",action:"Settings → Regime Update → save JSON to Netlify AXIOM_REGIMES env var",color:C.amber});
-    return banners;
-  },[apiStatus,priceError,cbRatesSource,newsSource,scanStatus]);
+        <div style={{display:"flex",gap:"5px"}}>
+          <Bdg label={strat.tier} color={strat.tier==="S"?C.gold:strat.tier==="A"?C.blue:strat.tier==="C"?"#8f8fd0":C.muted}/>
+          <Tag label={strat.cat} color={CATC[strat.cat]||C.muted}/>
+        </div>
+      </div>
+      <div style={{marginTop:"12px"}}>
+        <Kv k="Timeframes" v={strat.tf}/>
+        <Kv k="Research win rate (literature)" v={strat.wr+"%"} vc={C.gold}/>
+        <Kv k="Min confluence" v={String(strat.minC)}/>
+      </div>
+      <div style={{fontSize:"10px",color:C.text,lineHeight:"1.9",marginTop:"10px"}}>{strat.note}</div>
+      <div style={{fontSize:"8.5px",color:C.muted,marginTop:"8px"}}>{strat.desc}</div>
+      {cbRates&&(strat.cat==="CARRY"||strat.id==="REAL_YLD")&&(
+        <div style={{fontSize:"8.5px",color:C.green,marginTop:"9px"}}>◈ LIVE: FRED policy rates loaded — this strategy is active in scans.</div>)}
+      {!cbRates&&(strat.cat==="CARRY"||strat.id==="REAL_YLD")&&(
+        <div style={{fontSize:"8.5px",color:C.amber,marginTop:"9px"}}>◈ CB rates not loaded in this session — during scans the engine fetches them independently; if FRED is down, this strategy is inert.</div>)}
+      {relevant.length>0&&strat.cat==="MACRO"&&(
+        <div style={{fontSize:"8.5px",color:C.muted,marginTop:"9px"}}>Live context: STRONG regimes on {relevant.join(", ")}.</div>)}
+      <a href={strat.url} target="_blank" rel="noreferrer" style={{display:"inline-block",marginTop:"12px",fontSize:"9px",color:C.blue,textDecoration:"none"}}>Research source ↗</a>
+      <div style={{marginTop:"12px"}}><Btn label="CLOSE" ghost color={C.muted} onClick={onClose} style={{width:"100%"}}/></div>
+    </Overlay>);
+};
 
-  const tabContent=useMemo(()=>{
+const CBModal=({ccy,cbRates,onClose})=>{
+  if(!ccy) return null;
+  const r=cbRates&&cbRates[ccy];
+  return(
+    <Overlay onClose={onClose} maxWidth="440px">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{fontSize:"15px",fontWeight:"900",color:C.text}}>{ccy} — {CB_NAMES[ccy]}</div>
+          {r&&<div style={{fontSize:"8.5px",color:C.muted,marginTop:"3px"}}>as of {r.asOf} · {r.freq} FRED series</div>}
+        </div>
+        {r&&<div style={{fontSize:"24px",fontWeight:"900",color:C.gold}}>{r.rate.toFixed(2)}%</div>}
+      </div>
+      {!r?(
+        <div style={{fontSize:"9.5px",color:C.red,marginTop:"12px"}}>◈ No live data for {ccy} in the current load.</div>
+      ):(
+        <div>
+          <div style={{display:"flex",gap:"6px",marginTop:"10px"}}>
+            {r.outlook&&<Bdg label={"OUTLOOK: "+r.outlook.toUpperCase()} color={r.outlook==="Hiking"?C.green:r.outlook==="Cutting"?C.red:C.muted}/>}
+            {r.bias&&<Bdg label={"12M BIAS: "+r.bias.toUpperCase()} color={r.bias==="Hawkish"?C.green:r.bias==="Dovish"?C.red:C.muted}/>}
+          </div>
+          <div style={{marginTop:"12px",background:C.bg2,borderRadius:"3px",padding:"10px"}}>
+            <div style={{fontSize:"7.5px",color:C.muted,letterSpacing:"1px",marginBottom:"6px"}}>POLICY PATH — LAST 14 CHANGES (4Y WINDOW)</div>
+            <Spark data={(r.hist||[]).map(h=>h.r)} w={380} h={64} color={C.gold}/>
+          </div>
+          <div style={{fontSize:"8.5px",color:C.muted,marginTop:"9px",lineHeight:"1.7"}}>Outlook is derived mechanically: a change within the last 8 months sets the trajectory; the 12-month net move sets the bias. No editorial next-meeting guesses are stored.</div>
+          <a href={CB_SOURCE_URLS[ccy]} target="_blank" rel="noreferrer" style={{display:"inline-block",marginTop:"10px",fontSize:"9px",color:C.blue,textDecoration:"none"}}>Official decisions page ↗</a>
+        </div>)}
+      <div style={{marginTop:"12px"}}><Btn label="CLOSE" ghost color={C.muted} onClick={onClose} style={{width:"100%"}}/></div>
+    </Overlay>);
+};
+
+// ═══ GLOBAL PRICE-FEED BANNER (subscriber) ═══════════════════════════════════
+const GlobalFeedBanner=memo(()=>{
+  const s=usePriceSnap();
+  if(s.status!=="error") return null;
+  return(
+    <div style={{padding:"9px 14px",background:C.red+"1a",borderBottom:`1px solid ${C.red}66`,fontSize:"10px",color:C.red,fontWeight:"700"}}>
+      ◈ PRICE FEED DOWN — {s.error||"OANDA unreachable"} · retrying every 3s{s.lastTick?` · last good tick ${timeAgo(s.lastTick)}`:""}{s.prices?" · board shows STALE data flagged red":""}
+    </div>);
+});
+
+// ═══ STORAGE + MIGRATION ═════════════════════════════════════════════════════
+function loadJSON(key,fallback){ try{const v=localStorage.getItem(key); return v?JSON.parse(v):fallback;}catch(_){return fallback;} }
+function saveJSON(key,val){ try{localStorage.setItem(key,JSON.stringify(val));}catch(_){}}
+
+function migrateSettings(){
+  const v72=loadJSON("axiom_settings_v72",null);
+  if(v72&&v72.strategies) return v72;
+  const old=loadJSON("axiom_settings",null)||{};
+  const strategies={};
+  STRATEGIES.forEach(s=>{
+    if(old.strategies&&typeof old.strategies[s.id]==="boolean") strategies[s.id]=old.strategies[s.id];
+    else strategies[s.id]=DEFAULT_ENABLED.includes(s.id);
+  });
+  return{
+    acct:Number(old.acct)||10000,
+    riskPct:Number(old.riskPct)||2,
+    style:["scalp","day","swing"].includes(old.style)?old.style:"day",
+    pairs:Array.isArray(old.pairs)&&old.pairs.length?old.pairs.filter(p=>ALL_PAIRS.includes(p)):[...ALL_PAIRS],
+    strategies,
+  };
+}
+function migrateRegimes(){
+  const v2=loadJSON("axiom_regimes_v2",null);
+  if(v2&&v2.USD&&v2.USD.dir) return {...DEFAULT_REGIMES,...v2};
+  const old=loadJSON("axiom_regimes",null);
+  if(old&&typeof old.USD==="string"){
+    const out={};
+    G10.forEach(c=>{out[c]={dir:["BULLISH","BEARISH","NEUTRAL"].includes(old[c])?old[c]:"NEUTRAL",strength:"MODERATE"};});
+    return out;
+  }
+  return {...DEFAULT_REGIMES};
+}
+
+const TABS=[["dashboard","DASHBOARD"],["signals","SIGNALS"],["strategies","STRATEGIES"],["charts","CHARTS"],["analyzer","ANALYZER"],["weekend","WEEKEND"],["calendar","CALENDAR"],["news","NEWS"],["cbrates","CB RATES"],["ai","AI DESK"],["trades","TRADES"],["performance","PERFORMANCE"],["settings","SETTINGS"],["deploy","DEPLOY"],["sources","SOURCES"]];
+
+// ═══ ROOT ════════════════════════════════════════════════════════════════════
+function AxiomFX(){
+  const [tab,setTab]=useState("dashboard");
+  const [settings,setSettings]=useState(migrateSettings);
+  const [regimes,setRegimes]=useState(migrateRegimes);
+  const [sigs,setSigs]=useState(()=>loadJSON("axiom_sigs_v72",[]));
+  const [trades,setTrades]=useState(()=>loadJSON("axiom_trades_v72",[]));
+  const [history,setHistory]=useState(()=>loadJSON("axiom_history_v72",[]));
+  const [aiMsgs,setAiMsgs]=useState(()=>loadJSON("axiom_ai_v72",[]));
+
+  const [scanning,setScanning]=useState(false);
+  const [scanStatus,setScanStatus]=useState("");
+  const [scanPartial,setScanPartial]=useState(false);
+  const [scanUnscanned,setScanUnscanned]=useState([]);
+  const [scanErrors,setScanErrors]=useState([]);
+  const [scanEngineErr,setScanEngineErr]=useState(null);
+  const [lastScanMeta,setLastScanMeta]=useState(null);
+
+  const [cbRates,setCbRates]=useState(null);
+  const [cbSource,setCbSource]=useState(null);
+  const [cbErrors,setCbErrors]=useState([]);
+  const [cbLoading,setCbLoading]=useState(false);
+  const [cbAsOf,setCbAsOf]=useState(null);
+
+  const [newsArts,setNewsArts]=useState(null);
+  const [newsError,setNewsError]=useState(null);
+  const [newsLoading,setNewsLoading]=useState(false);
+
+  const [calThis,setCalThis]=useState(null);
+  const [calNext,setCalNext]=useState(null);
+  const [calError,setCalError]=useState(null);
+  const [calLoading,setCalLoading]=useState(false);
+
+  const [weekend,setWeekend]=useState({themes:null,loading:false,error:null,generatedAt:null});
+  const [regimeAI,setRegimeAI]=useState({cards:null,loading:false,error:null,generatedAt:null});
+
+  const [modalSig,setModalSig]=useState(null);
+  const [stratModal,setStratModal]=useState(null);
+  const [cbModal,setCbModal]=useState(null);
+  const [chartPair,setChartPair]=useState("EUR/USD");
+
+  const [aiInput,setAiInput]=useState("");
+  const [aiSending,setAiSending]=useState(false);
+  const [aiTest,setAiTest]=useState({testing:false,ok:null,result:null});
+  const [toast,setToast]=useState(null);
+
+  const toastTimer=useRef(null);
+  const toastMsg=useCallback((msg,color)=>{
+    setToast({msg,color:color||C.gold});
+    if(toastTimer.current)clearTimeout(toastTimer.current);
+    toastTimer.current=setTimeout(()=>setToast(null),4200);
+  },[]);
+
+  // ── PRICE ENGINE — writes the module store; root does NOT subscribe ────────
+  useEffect(()=>{
+    let dead=false, lastAttempt=0;
+    const instruments=ALL_PAIRS.map(p=>p.replace("/","_")).join(",");
+    async function tick(force){
+      if(dead||document.hidden) return;
+      const snap=priceStore.get();
+      const now=Date.now();
+      if(!force&&snap.marketClosed&&now-lastAttempt<60000) return;
+      lastAttempt=now;
+      try{
+        const res=await fetch(`/api/prices?instruments=${instruments}`);
+        if(!res.ok){ let m="Prices "+res.status; try{const j=await res.json(); if(j.error)m=typeof j.error==="string"?j.error:(j.error.message||m);}catch(_){/*noop*/} throw new Error(m); }
+        const data=await res.json();
+        const map={}; let anyTradeable=false;
+        (data.prices||[]).forEach(p=>{
+          const pair=p.instrument.replace("_","/");
+          const bid=parseFloat(p.bids&&p.bids[0]&&p.bids[0].price);
+          const ask=parseFloat(p.asks&&p.asks[0]&&p.asks[0].price);
+          if(!isFinite(bid)||!isFinite(ask)) return;
+          const tradeable=p.tradeable!==false;
+          if(tradeable) anyTradeable=true;
+          map[pair]={bid,ask,mid:(bid+ask)/2,spread:ask-bid,tradeable,time:p.time};
+        });
+        if(!Object.keys(map).length) throw new Error("Empty pricing response");
+        pushPriceHistory(map);
+        priceStore.set({status:"live",prices:map,marketClosed:!anyTradeable,error:null,staleSince:null,lastTick:Date.now()});
+      }catch(e){
+        if(dead) return;
+        const prev=priceStore.get();
+        priceStore.set({status:"error",error:e.message,staleSince:prev.staleSince||Date.now()});
+      }
+    }
+    tick(true);
+    const iv=setInterval(()=>tick(false),3000);
+    const onVis=()=>{ if(!document.hidden) tick(true); };
+    document.addEventListener("visibilitychange",onVis);
+    return()=>{dead=true;clearInterval(iv);document.removeEventListener("visibilitychange",onVis);};
+  },[]);
+
+  // ── DAILY OPENS (5pm-NY FX day) — mount + every 30 min ────────────────────
+  useEffect(()=>{
+    let dead=false;
+    async function loadOpens(){
+      try{
+        const res=await fetch(`/api/candles?bulk=daily-opens&pairs=${encodeURIComponent(ALL_PAIRS.join(","))}`);
+        if(!res.ok) return;
+        const data=await res.json();
+        if(!dead&&data.opens) priceStore.set({dailyOpens:data.opens,opensDate:data.date||null});
+      }catch(_){/* board shows 'daily opens loading…' */}
+    }
+    loadOpens();
+    const iv=setInterval(loadOpens,1800000);
+    return()=>{dead=true;clearInterval(iv);};
+  },[]);
+
+  // ── P&L LOOP — 2s; exit-side pricing; engine-identical pip values ──────────
+  const tradesRef=useRef(trades); useEffect(()=>{tradesRef.current=trades;},[trades]);
+  useEffect(()=>{
+    const iv=setInterval(()=>{
+      const list=tradesRef.current;
+      if(!list||!list.length) return;
+      const snap=priceStore.get();
+      const prices=snap.prices;
+      if(!prices) return;
+      let changed=false;
+      const next=list.map(t=>{
+        const p=prices[t.pair];
+        if(!p) return t;
+        const exit=t.direction==="BUY"?p.bid:p.ask;
+        const dir=t.direction==="BUY"?1:-1;
+        const pips=(exit-t.entry)*dir*pipMultOf(t.pair);
+        let pv=pipValueUSDClient(t.pair,t.lotSize,prices);
+        if(pv==null&&t.pipValuePerLot) pv=t.pipValuePerLot*t.lotSize;
+        const pnl=pv!=null?pips*pv:t.pnl;
+        if(Math.abs((t.pnl||0)-(pnl||0))>0.005||Math.abs((t.pips||0)-pips)>0.05){changed=true;return{...t,pnl:pnl!=null?Math.round(pnl*100)/100:t.pnl,pips};}
+        return t;
+      });
+      if(changed) setTrades(next);
+    },2000);
+    return()=>clearInterval(iv);
+  },[]);
+
+  // ── PERSISTENCE ────────────────────────────────────────────────────────────
+  useEffect(()=>{saveJSON("axiom_settings_v72",settings);},[settings]);
+  useEffect(()=>{saveJSON("axiom_regimes_v2",regimes);},[regimes]);
+  useEffect(()=>{saveJSON("axiom_sigs_v72",sigs.slice(0,40));},[sigs]);
+  useEffect(()=>{saveJSON("axiom_trades_v72",trades);},[trades]);
+  useEffect(()=>{saveJSON("axiom_history_v72",history.slice(0,500));},[history]);
+  useEffect(()=>{saveJSON("axiom_ai_v72",aiMsgs.slice(-60));},[aiMsgs]);
+
+  // ── FEED LOADERS (promise-returning for AI grounding chains) ───────────────
+  const cbLoadingRef=useRef(false);
+  const cbPromiseRef=useRef(null);
+  const loadCBRates=useCallback(async()=>{
+    if(cbPromiseRef.current) return cbPromiseRef.current; // share the in-flight fetch
+    cbLoadingRef.current=true; setCbLoading(true);
+    const promise=(async()=>{
+      try{
+        const res=await fetch("/api/cbrates");
+        const body=await res.json();
+        if(!res.ok||!body.rates){ throw new Error(body.error||("CB rates "+res.status)); }
+        setCbRates(body.rates); setCbSource(body.source); setCbErrors(body.errors||[]); setCbAsOf(Object.values(body.rates).map(function(r){return r.asOf;}).sort()[0]||null);
+        return body.rates;
+      }catch(e){
+        setCbSource("error"); setCbErrors([e.message]);
+        throw e;
+      }finally{ cbLoadingRef.current=false; setCbLoading(false); cbPromiseRef.current=null; }
+    })();
+    cbPromiseRef.current=promise;
+    return promise;
+  },[]);
+
+  const loadNews=useCallback(async(more)=>{
+    setNewsLoading(true);
+    try{
+      const res=await fetch("/api/news");
+      const body=await res.json();
+      if(!res.ok||!body.articles) throw new Error(body.error||("News "+res.status));
+      setNewsError(null);
+      setNewsArts(prev=>{
+        if(!more||!prev) return body.articles;
+        const seen=new Set(prev.map(a=>a.id));
+        return [...prev,...body.articles.filter(a=>!seen.has(a.id))].slice(0,120);
+      });
+    }catch(e){ setNewsError(e.message); }
+    finally{ setNewsLoading(false); }
+  },[]);
+
+  const loadCalendar=useCallback(async(week)=>{
+    setCalLoading(true);
+    try{
+      const res=await fetch(`/api/calendar?week=${week==="next"?"next":"this"}`);
+      const body=await res.json();
+      if(!res.ok||!body.events) throw new Error(body.error||("Calendar "+res.status));
+      setCalError(null);
+      if(week==="next") setCalNext(body.events); else setCalThis(body.events);
+      return body.events;
+    }catch(e){ setCalError(e.message); throw e; }
+    finally{ setCalLoading(false); }
+  },[]);
+
+  // Tab-triggered lazy loads
+  useEffect(()=>{
+    if((tab==="cbrates"||tab==="dashboard")&&!cbRates&&cbSource!=="error"&&!cbLoadingRef.current) loadCBRates().catch(()=>{});
+    if((tab==="news"||tab==="dashboard")&&!newsArts&&!newsError&&!newsLoading) loadNews(false);
+    if(tab==="calendar"&&!calThis&&!calError&&!calLoading){ loadCalendar("this").catch(()=>{}); loadCalendar("next").catch(()=>{}); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[tab]);
+
+  // ── SIGNAL SCAN ────────────────────────────────────────────────────────────
+  const scanningRef=useRef(false);
+  const runSignalScan=useCallback(async()=>{
+    if(scanningRef.current) return;
+    const snap=priceStore.get();
+    if(snap.marketClosed){ setScanStatus("Market closed — engine idle until the Sunday 17:00 NY open."); return; }
+    scanningRef.current=true; setScanning(true); setScanStatus("Scanning "+(settings.pairs.length||28)+" pairs against "+STRATEGIES.filter(s=>settings.strategies[s.id]).length+" enabled strategies…");
+    try{
+      const enabled=STRATEGIES.filter(s=>settings.strategies[s.id]).map(s=>s.id);
+      const params=new URLSearchParams({style:settings.style,acct:String(settings.acct||10000),risk:String(settings.riskPct||2)});
+      if(enabled.length>0&&enabled.length<STRATEGIES.length) params.set("strategies",enabled.join(","));
+      if(settings.pairs.length>0&&settings.pairs.length<ALL_PAIRS.length) params.set("pairs",settings.pairs.join(","));
+      const res=await fetch(`/api/analyze?${params.toString()}`);
+      const body=await res.json();
+      if(!res.ok||body.source==="error"){
+        setScanEngineErr({error:body.error||("Engine "+res.status),action:body.action});
+        setScanStatus("Engine error — see banner.");
+        return;
+      }
+      setScanEngineErr(null);
+      if(body.marketClosed){
+        priceStore.set({marketClosed:true});
+        setScanStatus(`Market closed — next open ${body.nextOpen?localDT(body.nextOpen):"Sunday 17:00 NY"}.`);
+        setScanPartial(false); setScanUnscanned([]); setScanErrors([]);
+        return;
+      }
+      const now=Date.now();
+      const fresh=(body.signals||[]).map((s,i)=>({...s,id:`${s.pair}-${s.direction}-${now}-${i}`,ts:now,lib:STRAT_BY_ID[(s.primaryStrategy&&s.primaryStrategy.id)]||null}));
+      setSigs(prev=>{
+        const replaced=new Set(fresh.map(s=>s.pair+"|"+s.direction));
+        return [...fresh,...prev.filter(s=>!replaced.has(s.pair+"|"+s.direction))].slice(0,40);
+      });
+      setScanPartial(!!body.partial);
+      setScanUnscanned(body.unscanned||[]);
+      setScanErrors(body.errors||[]);
+      setLastScanMeta({ts:now,feeds:body.feeds||{},elapsed:body.elapsedMs,scanned:body.scanned,requested:body.requested,count:body.count});
+      if(body.feedErrors&&body.feedErrors.length) toastMsg("Feed issues: "+body.feedErrors.map(f=>f.feed).join(" · "),C.amber);
+      setScanStatus(`Last scan: ${body.count} signal${body.count===1?"":"s"} · ${body.scanned}/${body.requested} pairs · ${body.skipped} gated · ${body.correlationFiltered||0} corr-filtered · ${body.elapsedMs}ms`);
+    }catch(e){
+      setScanEngineErr({error:e.message});
+      setScanStatus("Scan failed — see banner.");
+    }finally{
+      scanningRef.current=false; setScanning(false);
+    }
+  },[settings,toastMsg]);
+
+  // Auto-scan every 5 min while visible + market open
+  const runScanRef=useRef(runSignalScan); useEffect(()=>{runScanRef.current=runSignalScan;},[runSignalScan]);
+  useEffect(()=>{
+    const iv=setInterval(()=>{
+      if(document.hidden||scanningRef.current) return;
+      if(priceStore.get().marketClosed) return;
+      runScanRef.current();
+    },300000);
+    return()=>clearInterval(iv);
+  },[]);
+
+  // ── TRADES ─────────────────────────────────────────────────────────────────
+  const takeTrade=useCallback((sig)=>{
+    const t={id:"T"+Date.now()+Math.random().toString(36).slice(2,6),pair:sig.pair,direction:sig.direction,
+      entry:sig.entry,sl:sig.sl,tp1:sig.tp1,tp2:sig.tp2,tp3:sig.tp3,lotSize:sig.lotSize,riskAmount:sig.riskAmount,
+      pipValuePerLot:sig.pipValuePerLot,style:sig.tradeStyle||"day",
+      strategyId:(sig.primaryStrategy&&sig.primaryStrategy.id)||null,
+      strategyName:(sig.lib&&sig.lib.name)||null,
+      openTime:Date.now(),pnl:0,pips:0};
+    setTrades(prev=>[t,...prev]);
+    toastMsg(`Paper trade opened: ${t.pair} ${t.direction} ${t.lotSize} lot`,C.green);
+  },[toastMsg]);
+
+  const moveBE=useCallback((id)=>{
+    setTrades(prev=>prev.map(t=>t.id===id?{...t,sl:t.entry}:t));
+    toastMsg("Stop moved to break-even",C.blue);
+  },[toastMsg]);
+
+  const closeTrade=useCallback((id)=>{
+    setTrades(prev=>{
+      const t=prev.find(x=>x.id===id);
+      if(t){
+        setHistory(h=>[{...t,finalPnl:t.pnl||0,finalPips:t.pips||0,status:(t.pnl||0)>0?"WIN":"LOSS",closeTime:Date.now()},...h].slice(0,500));
+        toastMsg(`Closed ${t.pair}: ${fmtUsd(t.pnl)}`,(t.pnl||0)>=0?C.green:C.red);
+      }
+      return prev.filter(x=>x.id!==id);
+    });
+  },[toastMsg]);
+
+  const closeHalf=useCallback((id)=>{
+    setTrades(prev=>{
+      const t=prev.find(x=>x.id===id);
+      if(!t) return prev;
+      if(t.lotSize<0.02){ toastMsg("Lot too small to split (min 0.01 each side)",C.amber); return prev; }
+      const half=Math.round((t.lotSize/2)*100)/100;
+      const remain=Math.round((t.lotSize-half)*100)/100;
+      const bank=Math.round(((t.pnl||0)*(half/t.lotSize))*100)/100;
+      setHistory(h=>[{...t,lotSize:half,finalPnl:bank,finalPips:t.pips||0,status:bank>0?"WIN":"LOSS",partial:true,closeTime:Date.now()},...h].slice(0,500));
+      toastMsg(`Banked 50% of ${t.pair}: ${fmtUsd(bank)} · remainder SL → BE`,C.gold);
+      return prev.map(x=>x.id===id?{...x,lotSize:remain,sl:x.entry,partialTaken:true,pnl:(x.pnl||0)-bank}:x);
+    });
+  },[toastMsg]);
+
+  const exportCSV=useCallback(()=>{
+    const rows=[["pair","direction","style","strategy","entry","sl","tp1","lots","pips","pnl","result","partial","openTime","closeTime"]];
+    history.forEach(h=>rows.push([h.pair,h.direction,h.style||"",h.strategyId||"",h.entry,h.sl,h.tp1,h.lotSize,(h.finalPips||0).toFixed(1),(h.finalPnl||0).toFixed(2),h.status||"",h.partial?"Y":"",new Date(h.openTime).toISOString(),new Date(h.closeTime).toISOString()]));
+    const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const a=document.createElement("a");
+    a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);
+    a.download="axiom_history.csv"; a.click();
+  },[history]);
+
+  // ── AI GROUNDING ───────────────────────────────────────────────────────────
+  const buildLiveContext=useCallback(()=>{
+    const snap=priceStore.get();
+    const px=(p)=>snap.prices&&snap.prices[p]?fmtP(p,snap.prices[p].mid):"unavailable";
+    const lines=[];
+    lines.push(`TIMESTAMP: ${new Date().toISOString()} · MARKET: ${snap.marketClosed?"CLOSED":"OPEN"} · FEED: ${snap.status.toUpperCase()}`);
+    lines.push(`PRICES (live mid): EUR/USD ${px("EUR/USD")} · GBP/USD ${px("GBP/USD")} · USD/JPY ${px("USD/JPY")} · AUD/USD ${px("AUD/USD")} · USD/CHF ${px("USD/CHF")} · USD/CAD ${px("USD/CAD")} — 28 pairs streaming in-app`);
+    lines.push("REGIMES (user-set): "+G10.map(c=>`${c}:${(regimes[c]||{}).dir||"?"}/${((regimes[c]||{}).strength||"?").slice(0,3)}`).join(" "));
+    if(cbRates){
+      lines.push("CB POLICY RATES (live FRED): "+G10.filter(c=>cbRates[c]).map(c=>`${c} ${cbRates[c].rate.toFixed(2)}%${cbRates[c].outlook?"("+cbRates[c].outlook+")":""} asOf ${cbRates[c].asOf}`).join(" · "));
+      const ranked=G10.filter(c=>cbRates[c]).sort((a,b)=>cbRates[b].rate-cbRates[a].rate);
+      lines.push(`CARRY RANK: high ${ranked.slice(0,3).join(">")} · low ${ranked.slice(-3).join("<")}`);
+    } else lines.push("CB POLICY RATES: unavailable this session (feed not loaded)");
+    if(trades.length) lines.push("OPEN PAPER TRADES: "+trades.map(t=>`${t.pair} ${t.direction} ${t.lotSize}lot pnl ${fmtUsd(t.pnl)}`).join(" · "));
+    else lines.push("OPEN PAPER TRADES: none");
+    lines.push(`SIGNALS IN MEMORY: ${sigs.length}`);
+    return lines.join("\n");
+  },[regimes,cbRates,trades,sigs]);
+
+  const callAI=useCallback(async(system,messages,maxTokens)=>{
+    const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({system,messages,max_tokens:maxTokens||1200})});
+    const body=await res.json();
+    if(!res.ok) throw new Error((body.error&&(body.error.message||body.error))||("AI proxy "+res.status));
+    const text=(body.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n");
+    if(!text) throw new Error("Empty AI response");
+    return text;
+  },[]);
+
+  const sendAI=useCallback(async()=>{
+    const q=aiInput.trim();
+    if(!q||aiSending) return;
+    setAiInput("");
+    const userMsg={role:"user",content:q};
+    setAiMsgs(prev=>[...prev,userMsg]);
+    setAiSending(true);
+    try{
+      const system=`You are AXIOM, the AI desk inside a live G10 FX terminal. Ground every answer EXCLUSIVELY in the LIVE DATA block below. If a number, event, or fact is not in that block, say it is unavailable in this terminal — NEVER invent prices, rates, news, events, dates, or probabilities. Keep answers tight and desk-style. Trades here are paper simulations.\n\nLIVE DATA\n${buildLiveContext()}`;
+      const msgs=[...aiMsgs,userMsg].slice(-24).map(m=>({role:m.role,content:m.content}));
+      const text=await callAI(system,msgs,1200);
+      setAiMsgs(prev=>[...prev,{role:"assistant",content:text}]);
+    }catch(e){
+      setAiMsgs(prev=>[...prev,{role:"assistant",content:"⚠ AI proxy error: "+e.message}]);
+    }finally{ setAiSending(false); }
+  },[aiInput,aiSending,aiMsgs,buildLiveContext,callAI]);
+
+  // ── WEEKEND DESK (grounded, whitelisted) ───────────────────────────────────
+  const loadWeekend=useCallback(async()=>{
+    if(weekend.loading) return;
+    setWeekend(w=>({...w,loading:true,error:null}));
+    try{
+      let rates=cbRates;
+      if(!rates) rates=await loadCBRates();
+      if(!rates) throw new Error("CB rates unavailable — cannot ground a weekend brief without live policy rates");
+      let ev=calThis;
+      if(!ev) ev=await loadCalendar("this");
+      const snap=priceStore.get();
+      const px=(p)=>snap.prices&&snap.prices[p]?fmtP(p,snap.prices[p].mid):null;
+      const priceLines=["EUR/USD","GBP/USD","USD/JPY","AUD/USD","USD/CHF","EUR/GBP"].map(p=>`${p}: ${px(p)||"unavailable"}`).join(" · ");
+      const rateLines=G10.filter(c=>rates[c]).map(c=>`${c}: ${rates[c].rate.toFixed(2)}% (${rates[c].outlook||"Hold"}, as of ${rates[c].asOf})`).join("\n");
+      const highEv=(ev||[]).filter(e=>e.imp==="HIGH").slice(0,14).map(e=>`${localDT(e.utc)} — ${e.ccy} — ${e.ev}`).join("\n")||"(no high-impact events listed)";
+      const regimeLines=G10.map(c=>`${c}: ${(regimes[c]||{}).dir} ${(regimes[c]||{}).strength}`).join(" · ");
+      const allowed=AI_URL_WHITELIST.join("\n");
+      const prompt=`DATA (the ONLY facts you may use — nothing else exists):\n\n[LIVE CB POLICY RATES — FRED]\n${rateLines}\n\n[USER REGIMES]\n${regimeLines}\n\n[LIVE PRICES]\n${priceLines}\n\n[THIS WEEK'S HIGH-IMPACT CALENDAR]\n${highEv}\n\n[ALLOWED SOURCE URLS]\n${allowed}\n\nTASK: Write 3-5 weekly FX macro themes as a JSON array. Schema per theme: {"ccy":"USD","dir":"BULLISH|BEARISH|NEUTRAL","priority":"HIGH|MEDIUM","color":"#hex","title":"...","detail":"2-3 sentences","deepAnalysis":"2-3 sentences","support":"level","resistance":"level","pivot":"level","pairs":["EUR/USD"],"dirs":["BUY"],"watchFor":"must name events from the calendar above","evidence":[{"title":"...","source":"...","url":"EXACT string from ALLOWED SOURCE URLS"}]}.\nRULES: Every number must come from DATA (levels may be simple round levels near the listed prices). Reference only listed calendar events. Every evidence.url must be copied verbatim from ALLOWED SOURCE URLS. If DATA is insufficient respond {"error":"reason"}. Respond ONLY with JSON — no prose, no markdown fences.`;
+      const text=await callAI("You are a disciplined FX macro strategist. You never introduce facts beyond the DATA block. JSON only.",[{role:"user",content:prompt}],3000);
+      const clean=text.replace(/```json|```/g,"").trim();
+      const parsed=JSON.parse(clean);
+      if(parsed&&parsed.error) throw new Error("Model declined: "+parsed.error);
+      if(!Array.isArray(parsed)||!parsed.length) throw new Error("Malformed themes payload");
+      const themes=parsed.filter(t=>t&&G10.includes(t.ccy)).map(t=>({
+        ...t,
+        dir:["BULLISH","BEARISH","NEUTRAL"].includes(t.dir)?t.dir:"NEUTRAL",
+        evidence:(t.evidence||[]).filter(e=>e&&e.url&&AI_URL_WHITELIST.some(w=>e.url===w||e.url.startsWith(w))),
+      }));
+      if(!themes.length) throw new Error("No valid themes after validation");
+      setWeekend({themes,loading:false,error:null,generatedAt:Date.now()});
+    }catch(e){
+      setWeekend(w=>({...w,loading:false,error:e.message}));
+    }
+  },[weekend.loading,cbRates,calThis,regimes,loadCBRates,loadCalendar,callAI]);
+
+  // ── ANALYZER (grounded regime suggestions) ─────────────────────────────────
+  const loadRegimeAI=useCallback(async()=>{
+    if(regimeAI.loading) return;
+    setRegimeAI(r=>({...r,loading:true,error:null}));
+    try{
+      let rates=cbRates;
+      if(!rates) rates=await loadCBRates().catch(()=>{throw new Error("CB rates feed down — refusing to generate regimes without live policy rates");});
+      const snap=priceStore.get();
+      const px=(p)=>snap.prices&&snap.prices[p]?fmtP(p,snap.prices[p].mid):"unavailable";
+      const rateLines=G10.filter(c=>rates[c]).map(c=>`${c}: ${rates[c].rate.toFixed(2)}% (${rates[c].outlook||"Hold"}/${rates[c].bias||"Neutral"}, as of ${rates[c].asOf})`).join("\n");
+      const stratIds=STRATEGIES.map(s=>s.id).join(",");
+      const prompt=`DATA:\n[LIVE CB RATES — FRED]\n${rateLines}\n\n[LIVE PRICES] EUR/USD ${px("EUR/USD")} · USD/JPY ${px("USD/JPY")} · GBP/USD ${px("GBP/USD")}\n\n[CURRENT USER REGIMES] ${G10.map(c=>`${c}:${(regimes[c]||{}).dir}/${(regimes[c]||{}).strength}`).join(" ")}\n\n[VALID STRATEGY IDS] ${stratIds}\n\nTASK: Assess a policy regime per G10 currency FROM THE RATES DATA ONLY (trajectory = outlook field; conviction = clarity of the path). JSON array, one object per currency, schema: {"ccy":"USD","regime":"BULLISH|BEARISH|NEUTRAL","strength":"STRONG|MODERATE|WEAK","detail":"1-2 sentences citing the rate/outlook from DATA","best_strat":["ids from VALID STRATEGY IDS"],"avoid":["ids"],"evidence":"official page name","url":"one of: ${Object.values(CB_SOURCE_URLS).join(" | ")}","summary":"5-8 words"}.\nRULES: rates/outlooks only from DATA; url must match the listed official URLs verbatim; cover all 10 currencies. Respond ONLY with JSON.`;
+      const text=await callAI("You derive FX regimes strictly from provided central-bank rate data. JSON only.",[{role:"user",content:prompt}],2600);
+      const clean=text.replace(/```json|```/g,"").trim();
+      const parsed=JSON.parse(clean);
+      if(parsed&&parsed.error) throw new Error("Model declined: "+parsed.error);
+      if(!Array.isArray(parsed)) throw new Error("Malformed analyzer payload");
+      const order={}; G10.forEach((c,i)=>{order[c]=i;});
+      const cards=parsed.filter(c=>c&&G10.includes(c.ccy)).map(c=>({
+        ...c,
+        regime:["BULLISH","BEARISH","NEUTRAL"].includes(c.regime)?c.regime:"NEUTRAL",
+        strength:["STRONG","MODERATE","WEAK"].includes(c.strength)?c.strength:"MODERATE",
+        best_strat:(c.best_strat||[]).filter(id=>STRAT_BY_ID[id]).slice(0,4),
+        avoid:(c.avoid||[]).filter(id=>STRAT_BY_ID[id]).slice(0,3),
+        url:Object.values(CB_SOURCE_URLS).includes(c.url)?c.url:CB_SOURCE_URLS[c.ccy],
+      })).sort((a,b)=>order[a.ccy]-order[b.ccy]);
+      if(!cards.length) throw new Error("No valid cards after validation");
+      setRegimeAI({cards,loading:false,error:null,generatedAt:Date.now()});
+    }catch(e){
+      setRegimeAI(r=>({...r,loading:false,error:e.message}));
+    }
+  },[regimeAI.loading,cbRates,regimes,loadCBRates,callAI]);
+
+  const copyRegimeJSON=useCallback(()=>{
+    const cards=regimeAI.cards||[];
+    const out={...regimes};
+    cards.forEach(c=>{out[c.ccy]={dir:c.regime,strength:c.strength};});
+    try{navigator.clipboard.writeText(JSON.stringify(out)); toastMsg("Suggested AXIOM_REGIMES JSON copied",C.blue);}catch(_){toastMsg("Clipboard blocked — copy from Settings instead",C.amber);}
+  },[regimeAI.cards,regimes,toastMsg]);
+
+  const testAIProxy=useCallback(async()=>{
+    setAiTest({testing:true,ok:null,result:null});
+    const t0=Date.now();
+    try{
+      await callAI("Reply with exactly: OK",[{role:"user",content:"ping"}],16);
+      setAiTest({testing:false,ok:true,result:`✓ ${Date.now()-t0}ms · model pinned server-side`});
+    }catch(e){ setAiTest({testing:false,ok:false,result:"✗ "+e.message}); }
+  },[callAI]);
+
+  const saveRegimes=useCallback(()=>{
+    saveJSON("axiom_regimes_v2",regimes);
+    toastMsg("Regimes saved locally — paste the JSON into Netlify AXIOM_REGIMES for the engine",C.gold);
+  },[regimes,toastMsg]);
+
+  const doClear=useCallback((kind)=>{
+    if(kind==="signals"){ setSigs([]); toastMsg("Signals cleared",C.amber); }
+    else if(kind==="trades"){ setTrades([]); setHistory([]); toastMsg("Trades + history cleared",C.red); }
+    else if(kind==="all"){
+      ["axiom_settings_v72","axiom_regimes_v2","axiom_sigs_v72","axiom_trades_v72","axiom_history_v72","axiom_ai_v72","axiom_settings","axiom_regimes"].forEach(k=>{try{localStorage.removeItem(k);}catch(_){}});
+      window.location.reload();
+    }
+  },[toastMsg]);
+
+  // ── SYSTEM STATUS (non-price feeds; price rows are a subscriber in Settings) ─
+  const systemStatus=useMemo(()=>({
+    cb:cbSource,cbLoaded:cbRates?Object.keys(cbRates).length:0,
+    news:newsError?"error":(newsArts?"finnhub":null),
+    cal:calError?"error":(calThis?"ok":null),
+    scan:scanEngineErr?"error":(lastScanMeta?(scanPartial?"partial":"ok"):null),
+    scanInfo:lastScanMeta?`${lastScanMeta.count} sigs · ${timeAgo(lastScanMeta.ts)}`:null,
+    cot:lastScanMeta?!!(lastScanMeta.feeds&&lastScanMeta.feeds.cot):null,
+    cotAsOf:lastScanMeta&&lastScanMeta.feeds?lastScanMeta.feeds.cotAsOf:null,
+  }),[cbSource,cbRates,newsError,newsArts,calError,calThis,scanEngineErr,lastScanMeta,scanPartial]);
+
+  const openPnl=trades.reduce((a,t)=>a+(t.pnl||0),0);
+  const goPair=useCallback((p)=>{setChartPair(p);setTab("charts");},[]);
+
+  // ── RENDER ─────────────────────────────────────────────────────────────────
+  const renderTab=()=>{
     switch(tab){
-      case "dashboard": return <Dashboard/>;
-      case "signals":   return <SignalsTab/>;
-      case "chart":     return <ChartsTab/>;
-      case "trades":    return <ActiveTrades/>;
-      case "perf":      return <Performance/>;
-      case "analyzer":  return <Analyzer/>;
-      case "news":      return <NewsTab/>;
-      case "calendar":  return <CalendarTab/>;
-      case "cb":        return <CBRates/>;
-      case "weekend":   return <Weekend/>;
-      case "ai":        return <AITab/>;
-      case "strategies":return <StrategiesTab/>;
-      case "sources":   return <SourcesTab/>;
-      case "settings":  return <Settings/>;
-      case "deploy":    return <DeployTab/>;
-      default:          return <Dashboard/>;
+      case "dashboard": return <Dashboard regimes={regimes} cbRates={cbRates} cbAsOf={cbAsOf} sigs={sigs} news={newsArts} onGoTab={setTab} onOpenSig={setModalSig} onGoPair={goPair}/>;
+      case "signals": return <SignalsTab sigs={sigs} scanning={scanning} scanStatus={scanStatus} scanPartial={scanPartial} scanUnscanned={scanUnscanned} scanErrors={scanErrors} scanEngineErr={scanEngineErr} onScan={runSignalScan} onOpenSig={setModalSig} onTake={takeTrade} stratCount={STRATEGIES.length}/>;
+      case "strategies": return <StrategiesTab onOpenStrat={setStratModal} enabledMap={settings.strategies}/>;
+      case "charts": return <ChartsTab navigated={chartPair}/>;
+      case "analyzer": return <AnalyzerTab regimes={regimes} regimeAI={regimeAI} onGenerate={loadRegimeAI} onCopyJSON={copyRegimeJSON}/>;
+      case "weekend": return <WeekendTab weekend={weekend} onGenerate={loadWeekend}/>;
+      case "calendar": return <CalendarTab calThis={calThis} calNext={calNext} calError={calError} calLoading={calLoading} onReload={(w)=>loadCalendar(w).catch(()=>{})}/>;
+      case "news": return <NewsTab articles={newsArts} newsError={newsError} newsLoading={newsLoading} onRefresh={()=>loadNews(false)} onLoadMore={()=>loadNews(true)}/>;
+      case "cbrates": return <CBRatesTab cbRates={cbRates} cbSource={cbSource} cbErrors={cbErrors} cbLoading={cbLoading} onOpenCB={setCbModal} onReload={()=>loadCBRates().catch(()=>{})}/>;
+      case "ai": return <AITabView msgs={aiMsgs} sending={aiSending}/>;
+      case "trades": return <TradesTab trades={trades} history={history} onBE={moveBE} onCloseHalf={closeHalf} onClose={closeTrade} acct={Number(settings.acct)||0}/>;
+      case "performance": return <PerformanceTab history={history} onExport={exportCSV}/>;
+      case "settings": return <SettingsTab settings={settings} setSettings={setSettings} regimes={regimes} setRegimes={setRegimes} onSaveRegimes={saveRegimes} systemStatus={systemStatus} onTestAI={testAIProxy} aiTest={aiTest} onClear={doClear}/>;
+      case "deploy": return <DeployTab/>;
+      case "sources": return <SourcesTab/>;
+      default: return null;
     }
-  },[tab,signals,trades,history,analyzerTab,selCB,wkView,chartTf,chartPairNavigated,enabledStrats,nCcy,nImp,stratCatFilter,stratTierFilter,modal,modalTab,expandedTheme,expandedStrat,newsPage,calCcy,calImp,calType,calView,calEvents,calLoading,calLoaded,sigScanning,scanStatus,lastScanTime,aiMsgs,aiLoading,liveArts,newsLoaded,newsLoading,newsSource,newsError,prices,style,settings,apiStatus,srcCat,srcPage,deployTab,cbRates,cbRatesLoading,cbRatesSource,cbRatesUpdated,weekendThemes,weekendLoading,weekendLoaded,regimeData,regimeLoading,regimeLoaded]);
+  };
 
   return(
-    <div style={{fontFamily:"'IBM Plex Mono','Courier New',monospace",background:C.bg,color:C.text,height:"100dvh",display:"flex",flexDirection:"column",fontSize:"clamp(12px,1.1vw,15px)",overflow:"hidden",WebkitTextSizeAdjust:"100%"}}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap');
-        *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-        ::-webkit-scrollbar{width:3px;height:3px;}
-        ::-webkit-scrollbar-track{background:#05090f;}
-        ::-webkit-scrollbar-thumb{background:#172f50;border-radius:2px;}
-        button{-webkit-appearance:none;transition:opacity 0.15s;}
-        button:active:not(:disabled){opacity:0.7;}
-        input{-webkit-appearance:none;border-radius:3px;}
-        input:focus{border-color:#d4af37!important;outline:none!important;}
-        @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.25;}}
-        @keyframes slideIn{from{transform:translateX(24px);opacity:0;}to{transform:translateX(0);opacity:1;}}
-        tr:hover td{background:#091525!important;}
-        .tv-container iframe{border:none!important;}
-        /* Desktop responsive layout */
-        @media(min-width:1024px){
-          .axiom-content{padding:16px 24px!important;font-size:13.5px!important;}
-        }
-        @media(min-width:1280px){
-          .axiom-content{padding:18px 32px!important;font-size:14px!important;}
-        }
-      `}</style>
-
-      {toast&&<div style={{position:"fixed",top:"12px",right:"12px",background:C.bg2,border:`1px solid ${toast.color}`,borderLeft:`3px solid ${toast.color}`,borderRadius:"5px",padding:"9px 14px",color:C.text,fontSize:"11px",zIndex:9999,maxWidth:"380px",animation:"slideIn 0.3s ease",lineHeight:"1.5"}}>{toast.msg}</div>}
-
-      <SignalModal/>
-
-      {/* HEADER */}
-      <div style={{background:"linear-gradient(90deg,#08152a,#0d2240,#08152a)",borderBottom:`1px solid ${C.bdr}`,padding:"0 14px",display:"flex",alignItems:"center",gap:"10px",height:"50px",flexShrink:0,minWidth:0}}>
-        <div style={{flexShrink:0}}><div style={{fontSize:"16px",fontWeight:"700",letterSpacing:"4px",color:C.gold}}>AXIOM</div><div style={{fontSize:"7px",color:C.muted,letterSpacing:"2px"}}>G10 FX v6</div></div>
-        <div style={{display:"flex",alignItems:"center",gap:"4px"}}><div style={{width:"5px",height:"5px",borderRadius:"50%",background:apiStatus==="live_oanda"?C.green:apiStatus==="error"?C.red:C.muted,animation:apiStatus==="live_oanda"?"pulse 2s infinite":"none"}}/><span style={{color:apiStatus==="live_oanda"?C.green:apiStatus==="error"?C.red:C.muted,fontWeight:"700",fontSize:"8.5px"}}>{apiStatus==="live_oanda"?"OANDA LIVE":apiStatus==="error"?"✗ OANDA ERROR":"CONNECTING"}</span></div>
-        <div onClick={()=>{setSettingsSaved(false);setTab("settings");}} style={{background:C.bg1,border:`2px solid ${C.gold}55`,borderRadius:"4px",padding:"3px 9px",cursor:"pointer",flexShrink:0}} onMouseEnter={e=>e.currentTarget.style.borderColor=C.gold} onMouseLeave={e=>e.currentTarget.style.borderColor=C.gold+"55"}>
-          <div style={{fontSize:"7px",color:C.muted,marginBottom:"1px"}}>ACCOUNT</div>
-          <div style={{color:C.gold,fontWeight:"700",fontFamily:"monospace",fontSize:"12px"}}>${acctVal.toFixed(2)}</div>
-        </div>
-        <div style={{background:C.bg1,border:`1px solid ${openPnl>=0?C.green+"44":C.red+"44"}`,borderRadius:"4px",padding:"3px 9px",flexShrink:0}}>
-          <div style={{fontSize:"7px",color:C.muted,marginBottom:"1px"}}>OPEN P&L</div>
-          <div style={{color:openPnl>=0?C.green:C.red,fontWeight:"700",fontFamily:"monospace",fontSize:"12px"}}>{openPnl>=0?"+":""}${openPnl.toFixed(2)}</div>
-        </div>
-        <div style={{marginLeft:"auto",display:"flex",background:C.bg1,border:`1px solid ${C.bdr}`,borderRadius:"4px",overflow:"hidden",flexShrink:0}}>
-          {["scalp","day","swing"].map(id=>(
-            <button key={id} onClick={()=>setStyle(id)} style={{padding:"6px 11px",background:style===id?SC[id]:"transparent",color:style===id?C.bg:C.muted,border:"none",cursor:"pointer",fontSize:"9.5px",fontWeight:"700",letterSpacing:"0.8px",fontFamily:"inherit"}}>
-              {id.toUpperCase()}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* NAV */}
-      <div style={{background:C.bg1,borderBottom:`1px solid ${C.bdr}`,display:"flex",overflowX:"auto",flexShrink:0,scrollbarWidth:"none",WebkitOverflowScrolling:"touch"}}>
-        <style>{`.no-scroll-bar::-webkit-scrollbar{display:none;}`}</style>
-        {TABS.map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"9px 12px",background:"transparent",color:tab===t.id?C.gold:C.muted,border:"none",borderBottom:tab===t.id?`2px solid ${C.gold}`:"2px solid transparent",cursor:"pointer",fontSize:"9.5px",fontWeight:"700",letterSpacing:"0.8px",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:"4px",fontFamily:"inherit",flexShrink:0}}>
-            {t.icon}{t.label}
-            {t.id==="signals"&&signals.length>0&&<span style={{display:"inline-block",padding:"0 4px",background:C.amber+"22",color:C.amber,border:`1px solid ${C.amber}44`,borderRadius:"2px",fontSize:"7.5px",fontWeight:"700"}}>{signals.length}</span>}
-            {t.id==="trades"&&trades.length>0&&<span style={{display:"inline-block",padding:"0 4px",background:C.blue+"22",color:C.blue,border:`1px solid ${C.blue}44`,borderRadius:"2px",fontSize:"7.5px",fontWeight:"700"}}>{trades.length}</span>}
-            {t.id==="news"&&liveArts.filter(n=>n.imp==="HIGH").length>0&&<span style={{display:"inline-block",padding:"0 4px",background:C.red+"22",color:C.red,border:`1px solid ${C.red}44`,borderRadius:"2px",fontSize:"7.5px",fontWeight:"700"}}>{liveArts.filter(n=>n.imp==="HIGH").length}H</span>}
-          </button>
-        ))}
-      </div>
-
-      {/* CONTENT — proper overflow for mobile */}
-      <div style={{flex:1,overflowY:"auto",overflowX:"hidden",padding:"12px",WebkitOverflowScrolling:"touch",minHeight:0}}>
-        {errorBanners.length>0&&(
-        <div style={{position:"sticky",top:0,zIndex:500,display:"flex",flexDirection:"column",gap:"1px"}}>
-          {errorBanners.map(b=>(
-            <div key={b.id} style={{background:b.color+"22",borderBottom:`1px solid ${b.color}44`,padding:"6px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:"8px"}}>
-              <div>
-                <span style={{color:b.color,fontWeight:"700",fontSize:"9px",letterSpacing:"0.5px"}}>{b.msg}</span>
-                <span style={{color:C.muted,fontSize:"8px",marginLeft:"8px"}}>{b.action}</span>
-              </div>
-              <span style={{color:b.color,fontSize:"9px",fontWeight:"700",flexShrink:0}}>DATA BLOCKED</span>
-            </div>
-          ))}
-        </div>
-      )}
-      {tabContent}
-      </div>
-
-      {/* AI INPUT — rendered OUTSIDE useMemo/tabContent for stable focus — never remounts on state change */}
-      {tab==="ai"&&(
-        <div style={{padding:"0 12px 10px 12px",flexShrink:0,display:"flex",flexDirection:"column",gap:"6px"}}>
-          <div style={{background:C.bg2,border:`1px solid ${C.bdr}`,borderRadius:"5px",padding:"8px 10px",display:"flex",gap:"7px"}}>
-            <input
-              id="axiom-ai-input"
-              value={aiInput}
-              onChange={e=>setAiInput(e.target.value)}
-              inputMode="text"
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              placeholder="Ask AXIOM about strategies, setups, risk, macro..."
-              onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey&&aiInput.trim()){sendAI(aiInput);}}}
-              style={{flex:1,background:C.bg,border:`1px solid ${C.bdr}`,borderRadius:"3px",color:C.text,padding:"8px 10px",fontSize:"11px",fontFamily:"inherit",outline:"none",WebkitAppearance:"none",touchAction:"manipulation"}}/>
-            <Btn label="SEND" color={C.gold} onClick={()=>{if(aiInput.trim()){sendAI(aiInput);}}} disabled={aiLoading}/>
+    <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'SF Mono','Cascadia Code',Menlo,Consolas,monospace"}}>
+      <style>{`@keyframes axpulse{0%{opacity:1}50%{opacity:.25}100%{opacity:1}} *{box-sizing:border-box} ::selection{background:${C.gold}44} input:focus,textarea:focus{outline:1px solid ${C.gold}88} body{margin:0}`}</style>
+      <div style={{position:"sticky",top:0,zIndex:100,background:C.bg,borderBottom:`1px solid ${C.bdr}`}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 16px",flexWrap:"wrap",gap:"8px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:"12px"}}>
+            <span style={{fontSize:"15px",fontWeight:"900",letterSpacing:"5px",color:C.gold}}>A X I O M</span>
+            <span style={{fontSize:"8px",color:C.muted,letterSpacing:"2px"}}>G10 TERMINAL · v{VERSION}</span>
+            <ConnStatus/>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
+            {trades.length>0&&(
+              <span style={{fontSize:"10px",fontWeight:"800",color:openPnl>=0?C.green:C.red}}>{trades.length} open · {fmtUsd(openPnl)}</span>)}
+            <span style={{fontSize:"9px",color:C.muted}}>acct <span style={{color:C.text,fontWeight:"800"}}>{fmtUsd(Number(settings.acct)||0)}</span> · risk {settings.riskPct}%</span>
           </div>
         </div>
-      )}
-    </div>
-  );
+        <GlobalFeedBanner/>
+        <div style={{display:"flex",gap:"2px",overflowX:"auto",padding:"0 10px 8px"}}>
+          {TABS.map(([k,l])=>(
+            <button key={k} onClick={()=>setTab(k)} style={{padding:"6px 11px",background:tab===k?C.bg3:"transparent",color:tab===k?C.gold:C.muted,border:`1px solid ${tab===k?C.bdr:"transparent"}`,borderRadius:"3px",cursor:"pointer",fontSize:"9px",fontWeight:"800",letterSpacing:"0.8px",fontFamily:"inherit",whiteSpace:"nowrap"}}>{l}</button>))}
+        </div>
+      </div>
+      <div style={{maxWidth:"1180px",margin:"0 auto",padding:"14px 14px 60px"}}>
+        {renderTab()}
+      </div>
+      {tab==="ai"&&(
+        <div style={{position:"fixed",bottom:0,left:0,right:0,background:C.bg1,borderTop:`1px solid ${C.bdr}`,padding:"10px 14px",zIndex:150}}>
+          <div style={{maxWidth:"1180px",margin:"0 auto",display:"flex",gap:"8px"}}>
+            <input value={aiInput} onChange={e=>setAiInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")sendAI();}}
+              placeholder="Ask the desk — grounded in live terminal data only…"
+              style={{flex:1,background:C.bg2,border:`1px solid ${C.bdr}`,color:C.text,padding:"10px 12px",borderRadius:"3px",fontFamily:"inherit",fontSize:"11px"}}/>
+            <Btn label={aiSending?"…":"SEND"} color={C.gold} disabled={aiSending||!aiInput.trim()} onClick={sendAI}/>
+          </div>
+        </div>)}
+      {modalSig&&<SignalModal sig={modalSig} onTake={takeTrade} onClose={()=>setModalSig(null)} regimes={regimes} cbRates={cbRates}/>}
+      {stratModal&&<StratModal strat={stratModal} onClose={()=>setStratModal(null)} regimes={regimes} cbRates={cbRates}/>}
+      {cbModal&&<CBModal ccy={cbModal} cbRates={cbRates} onClose={()=>setCbModal(null)}/>}
+      {toast&&(
+        <div style={{position:"fixed",bottom:"18px",right:"18px",zIndex:300,background:C.bg1,border:`1px solid ${toast.color}66`,borderLeft:`3px solid ${toast.color}`,borderRadius:"4px",padding:"10px 14px",fontSize:"10px",color:C.text,maxWidth:"340px",boxShadow:"0 4px 18px rgba(0,0,0,0.5)"}}>
+          {toast.msg}
+        </div>)}
+    </div>);
 }
+
 window.AxiomFX = AxiomFX;
